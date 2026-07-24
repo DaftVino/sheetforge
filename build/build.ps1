@@ -14,6 +14,14 @@
     3. FAILS if two source files declare the same Sub/Function/Property name -
        a single module needs globally-unique Public AND Private names.
     4. Sanity-checks Sub/Function block balance in the output.
+    5. FAILS on a module-level declaration (Const/Dim/Type/Enum/Declare/module
+       var) that appears after the first procedure - VBA requires the whole
+       declarations section to precede all procedures, and such a stray
+       declaration is a compile error in Excel (this script does not compile VBA).
+
+  NOTE: these are structural checks, NOT a VBA compiler. They cannot catch every
+  compile error (undefined vars, type mismatches). The final gate is still a
+  manual import + Debug > Compile VBAProject in Excel.
 
   Packages are discovered by the Pkg*.bas naming convention; non-package modules
   in src/packages are excluded. Which packages are actually ACTIVE at run time
@@ -130,6 +138,26 @@ if ($attr -ne 1) { $problems.Add("expected 1 Attribute VB_Name, found $attr") }
 if ($opt -ne 1) { $problems.Add("expected 1 Option Explicit, found $opt") }
 if ($subO -ne $subC) { $problems.Add("Sub/End Sub imbalance: $subO / $subC") }
 if ($fnO -ne $fnC) { $problems.Add("Function/End Function imbalance: $fnO / $fnC") }
+
+# --- guard: no module-level declaration after the first procedure ---
+# VBA requires the declarations section (Const/Dim/Type/Enum/Declare/module vars)
+# to precede ALL procedures. A module-level declaration between or after procedures
+# is a compile error in Excel ("variable not defined" on first use). This build
+# does not compile VBA, so catch that structural error here.
+$declLines = [regex]::Split($text, "\r?\n")
+$inProc = $false; $sawProc = $false
+$procOpen = '^\s*(?:Public\s+|Private\s+|Friend\s+|Global\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s'
+$procClose = '^\s*End\s+(?:Sub|Function|Property)\b'
+$moduleDecl = '^\s*(?:Public\s+|Private\s+|Global\s+)?(?:Const|Dim|Type|Enum|Declare)\b|^\s*(?:Public|Private|Global)\s+(?:WithEvents\s+)?\w+\s+As\b'
+for ($i = 0; $i -lt $declLines.Count; $i++) {
+    $ln = $declLines[$i]
+    if ($ln -match $procOpen) { $inProc = $true; $sawProc = $true; continue }
+    if ($ln -match $procClose) { $inProc = $false; continue }
+    if ($sawProc -and -not $inProc -and $ln -match $moduleDecl) {
+        $problems.Add("module-level declaration after a procedure (VBA compile error) at line $($i + 1): $($ln.Trim())")
+    }
+}
+
 if ($problems.Count -gt 0) {
     Write-Host "BUILD FAILED - output validation:" -ForegroundColor Red
     $problems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
