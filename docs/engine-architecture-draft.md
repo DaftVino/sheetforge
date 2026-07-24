@@ -55,7 +55,7 @@ Three layers. The dependency arrow points one way: packages depend on Core; Core
         LAYER 1 — PACKAGES  (optional, many, thin)
 ```
 
-**Core is not new work — it's an extraction.** Your `SetupImportExportMacros.bas` already contains ~80% of Core: `CfgSheet`/`SheetSingle`/`SheetList1`/`SheetTable3` (config engine), `BuildMacroTab` (button builder), `CreateSetupTab`/`FinalizeSetupTab` (Setup renderer + validation), `FindSourceFile`/`CoerceVal`/`SheetExists` (helpers), and the speed/error pattern in every button. The job is to *lift those out* of the sample-dashboard specifics and make them manifest-driven.
+**Core is not new work — it's an extraction.** Your `SetupImportExportMacros.bas` already contains ~80% of Core: `CfgSheet`/`SheetSingle`/`SheetList1`/`SheetTable3` (config engine), `BuildMacroTab` (button builder), `CreateSetupTab`/`FinalizeSetupTab` (Setup renderer + validation), `FindSourceFile`/`CoerceVal`/`SheetExists` (helpers), and the speed/error pattern in every button. The job is to *lift those out* of the dashboard-specific parts and make them manifest-driven.
 
 **Packages become thin.** Your four buttons (Clear, Import, Update Ref_Master, Export) stop being the whole file and become one package — `ImportExport` — that declares a manifest and calls Core for all plumbing.
 
