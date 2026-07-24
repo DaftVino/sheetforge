@@ -411,7 +411,7 @@ Public Sub ExportDashboard()
                     sv = sp.Value
                     cel.ClearContents
                     sp.Value = sv
-                ElseIf cel.HasArray Then              ' legacy CTRL+SHIFT+ENTER array (e.g. Sample Rank)
+                ElseIf cel.HasArray Then              ' legacy CTRL+SHIFT+ENTER array (e.g. a TRANSPOSE array)
                     Set sp = cel.CurrentArray
                     sv = sp.Value
                     sp.ClearContents
