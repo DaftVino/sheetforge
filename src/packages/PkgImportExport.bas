@@ -25,9 +25,9 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- GENERAL ----
     Core_AddSection reg, "GENERAL"
-    Core_AddField reg, "k_settings_sheet", "Settings / CF sheet name (kept hidden inside the export)", "sheet", "README"
     Core_AddField reg, "k_export_base", "Export file BASE name (the date is added in front)", "text", "My Report"
-    Core_AddField reg, "k_export_offset", "Export date offset in days  (-1 = yesterday, 0 = today)", "int", "-1"
+    Core_AddField reg, "k_settings_sheet", "Settings / CF sheet name (kept hidden inside the export)", "sheet", "README", "advanced"
+    Core_AddField reg, "k_export_offset", "Export date offset in days  (-1 = yesterday, 0 = today)", "int", "-1", "advanced"
 
     ' ---- EXPORT TABS ----
     Core_AddSection reg, "EXPORT TABS  (copied into the export, in this order)"
@@ -49,8 +49,8 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     ' ---- REF_MASTER ----
     Core_AddSection reg, "REF_MASTER"
     Core_AddField reg, "k_master_prefix", "Master-list file name prefix", "file", "Master Store List"
-    Core_AddField reg, "k_master_sheet", "Source sheet name inside that file", "text", "Current Master"
     Core_AddField reg, "k_master_dest", "Destination tab in THIS workbook", "sheet", "Ref_Master"
+    Core_AddField reg, "k_master_sheet", "Source sheet name inside that file", "text", "Current Master", "advanced"
     Core_AddList reg, "k_master_cols", "Source column headers to copy, in order (1st = Store, kept as text):", "Header  v"
     Core_AddDefault reg, "k_master_cols", "Store #"
     Core_AddDefault reg, "k_master_cols", "Location Name"
