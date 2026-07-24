@@ -19,7 +19,7 @@ Option Explicit
 Public Sub PkgClean_Manifest(reg As Object)
     Core_DeclarePackage reg, "clean", "Clean & Standardize", "1.0.0"
 
-    Core_AddSection reg, "CLEAN & STANDARDIZE"
+    ' (No section header: the package banner already reads "CLEAN & STANDARDIZE".)
     Core_AddField reg, "clean_keycols", "Remove-duplicates key column(s)", "text", "1", _
         help:="Which column(s) decide whether two rows are duplicates, numbered 1,2,3... from the LEFT of the range you pick. One number, or several like 1,2,4."
 

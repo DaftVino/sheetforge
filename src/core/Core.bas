@@ -691,13 +691,15 @@ Public Sub Core_BuildSetup()
     r = r + 2
 
     firstFieldRow = r
+    Dim banner As String
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
-        r = SectionHeader(ws, r, UCase(CStr(reg("name"))))
-        r = RenderTier(ws, r, reg, "simple", True)         ' simple fields, with their sections
+        banner = UCase(CStr(reg("name")))
+        r = SectionHeader(ws, r, banner)
+        r = RenderTier(ws, r, reg, "simple", True, banner)   ' simple fields, with their sections
         If HasAdvanced(reg) Then
             r = SectionHeader(ws, r, "ADVANCED  -  most users can leave these as-is")
-            r = RenderTier(ws, r, reg, "advanced", False)  ' advanced fields, collected flat
+            r = RenderTier(ws, r, reg, "advanced", False, banner)  ' advanced, collected flat
         End If
         r = r + 1
     Next reg
@@ -741,12 +743,17 @@ End Sub
 ' pass), section headers are skipped and the fields render flat under the one
 ' ADVANCED band.
 Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
-                            ByVal tier As String, ByVal showSections As Boolean) As Long
+                            ByVal tier As String, ByVal showSections As Boolean, _
+                            ByVal bannerText As String) As Long
     Dim f As Object, pending As String, havePending As Boolean
     For Each f In reg("fields")
         If f("kind") = "section" Then
-            pending = CStr(f("label"))
-            havePending = True
+            ' Skip a section header that just repeats the package banner (a
+            ' description identical to the header above it reads as a mistake).
+            If UCase(Trim(CStr(f("label")))) <> bannerText Then
+                pending = CStr(f("label"))
+                havePending = True
+            End If
         ElseIf CStr(f("tier")) = tier Then
             If showSections And havePending Then
                 r = SectionHeader(ws, r, pending)
@@ -814,29 +821,40 @@ Private Sub LabelCell(rng As Range, ByVal txt As String)
     rng.VerticalAlignment = xlTop
 End Sub
 
+' A full-width tinted band row: columns B:E merged, text wrapped. Merged cells are
+' ignored by AutoFit, so the row height is set from a line estimate (erring tall
+' to avoid clipping). Column A and column C are inside the merge with no separate
+' value, so the row stays invisible to the config block readers. Returns r + 1.
+Private Function TintRow(ws As Worksheet, ByVal r As Long, ByVal txt As String, _
+                         ByVal sz As Single, ByVal bold As Boolean, _
+                         ByVal ital As Boolean, ByVal colr As Long) As Long
+    Dim lines As Long
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
+        .Merge
+        .Interior.Color = RGB(221, 217, 240)
+        .WrapText = True
+        .VerticalAlignment = xlTop
+    End With
+    With ws.Cells(r, 2)
+        .Value = txt
+        .Font.Size = sz
+        .Font.Bold = bold
+        .Font.Italic = ital
+        .Font.Color = colr
+    End With
+    lines = (Len(txt) \ 115) + 1                 ' ~115 chars/line across B:E; round up
+    ws.Rows(r).RowHeight = lines * (sz + 4)
+    TintRow = r + 1
+End Function
+
 ' For list/table fields: draw the label and the explanation in the section-tinted
 ' band ABOVE the column-header row, so the headers sit directly on top of the
-' input cells (no gap). These rows keep column A and column C blank, so they are
-' invisible to the config block readers. Returns the row for the header/key row.
+' input cells (no gap). The band rows are merged B:E; they are invisible to the
+' config block readers. Returns the row for the header/key row.
 Private Function BlockIntro(ws As Worksheet, ByVal r As Long, _
                             ByVal label As String, ByVal help As String) As Long
-    ws.Range(ws.Cells(r, 2), ws.Cells(r, 5)).Interior.Color = RGB(221, 217, 240)
-    ws.Cells(r, 2).Value = label
-    ws.Cells(r, 2).Font.Bold = True
-    ws.Cells(r, 2).Font.Color = RGB(54, 32, 100)
-    ws.Cells(r, 2).WrapText = True
-    ws.Cells(r, 2).VerticalAlignment = xlTop
-    r = r + 1
-    If Trim(help) <> "" Then
-        ws.Range(ws.Cells(r, 2), ws.Cells(r, 5)).Interior.Color = RGB(221, 217, 240)
-        ws.Cells(r, 2).Value = help
-        ws.Cells(r, 2).Font.Italic = True
-        ws.Cells(r, 2).Font.Size = 9
-        ws.Cells(r, 2).Font.Color = RGB(90, 70, 120)
-        ws.Cells(r, 2).WrapText = True
-        ws.Cells(r, 2).VerticalAlignment = xlTop
-        r = r + 1
-    End If
+    r = TintRow(ws, r, label, 11, True, False, RGB(54, 32, 100))
+    If Trim(help) <> "" Then r = TintRow(ws, r, help, 9, False, True, RGB(90, 70, 120))
     BlockIntro = r
 End Function
 
@@ -1056,11 +1074,7 @@ Private Sub Yellow(rng As Range)
 End Sub
 
 Private Function SectionHeader(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
-    ws.Range(ws.Cells(r, 2), ws.Cells(r, 5)).Interior.Color = RGB(221, 217, 240)
-    ws.Cells(r, 2).Value = txt
-    ws.Cells(r, 2).Font.Bold = True
-    ws.Cells(r, 2).Font.Color = RGB(54, 32, 100)
-    SectionHeader = r + 1
+    SectionHeader = TintRow(ws, r, txt, 11, True, False, RGB(54, 32, 100))
 End Function
 
 Private Sub PopulateReferenceLists(ws As Worksheet, ByVal startRow As Long)
