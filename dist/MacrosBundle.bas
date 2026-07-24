@@ -1507,17 +1507,23 @@ Public Sub PkgClean_TrimClean(ctx As Object)
     Set rng = AskRange("Trim & Clean Text")
     If rng Is Nothing Then Exit Sub
 
+    Dim cleaned As String
     Core_SpeedOn
     arr = rng.Value
     If IsArray(arr) Then
         For r = 1 To UBound(arr, 1)
             For c = 1 To UBound(arr, 2)
-                If VarType(arr(r, c)) = vbString Then arr(r, c) = CleanText(CStr(arr(r, c)))
+                If VarType(arr(r, c)) = vbString Then
+                    cleaned = CleanText(CStr(arr(r, c)))
+                    ' write only changed, non-formula cells - never flatten a formula
+                    If cleaned <> CStr(arr(r, c)) Then
+                        If Not rng.Cells(r, c).HasFormula Then rng.Cells(r, c).Value = cleaned
+                    End If
+                End If
             Next c
         Next r
-        rng.Value = arr
     ElseIf VarType(arr) = vbString Then              ' single-cell range
-        rng.Value = CleanText(CStr(arr))
+        If Not rng.HasFormula Then rng.Value = CleanText(CStr(arr))
     End If
     Core_SpeedOff
 
@@ -1542,10 +1548,13 @@ Public Sub PkgClean_FillDown(ctx As Object)
     If IsArray(arr) Then
         For c = 1 To UBound(arr, 2)
             For r = 2 To UBound(arr, 1)
-                If IsBlankVal(arr(r, c)) Then arr(r, c) = arr(r - 1, c)
+                If IsBlankVal(arr(r, c)) Then
+                    ' fill real blank cells only; leave formula cells untouched
+                    If Not rng.Cells(r, c).HasFormula Then rng.Cells(r, c).Value = arr(r - 1, c)
+                    arr(r, c) = arr(r - 1, c)          ' propagate so consecutive blanks cascade
+                End If
             Next r
         Next c
-        rng.Value = arr
     End If
     Core_SpeedOff
 
@@ -1569,6 +1578,13 @@ Private Function AskRange(ByVal title As String) As Range
         Prompt:="Select the range for '" & title & "' (include the header row):", _
         title:=title, Type:=8)
     On Error GoTo 0
+    If Not rng Is Nothing Then
+        If rng.Areas.Count > 1 Then
+            MsgBox "Please select a single, continuous block (not several separate areas).", _
+                   vbExclamation, title
+            Set rng = Nothing
+        End If
+    End If
     Set AskRange = rng
 End Function
 
