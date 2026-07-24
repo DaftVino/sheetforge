@@ -2,7 +2,7 @@ Attribute VB_Name = "PkgImportExport"
 Option Explicit
 
 '================================================================
-' PkgImportExport - the original Food Performance Dashboard's four
+' PkgImportExport - the original Sample Dashboard's four
 ' buttons (Clear, Import, Update Ref_Master, Export), re-expressed as
 ' a thin package on Core. No plumbing lives here: config, speed, error
 ' handling, file finding and type coercion all call Core_*.
@@ -10,7 +10,7 @@ Option Explicit
 ' Depends on: Core (required). Discovered zero-trust by Core probing
 ' PkgImportExport_Manifest via Application.Run.
 '
-' Behavior is identical to the legacy FoodDashMacros module, with ONE
+' Behavior is identical to the legacy SetupImportExportMacros module, with ONE
 ' intentional change: clicking "Import" no longer pops a separate
 ' "Cleared" dialog before "Import complete" - the clear is now a silent
 ' internal step (shared ClearTabs helper). The standalone "Clear Input
@@ -25,7 +25,7 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- GENERAL ----
     Core_AddSection reg, "GENERAL"
-    Core_AddField reg, "k_export_base", "Name for the exported file (a date is added in front)", "text", "Food Performance Dash", _
+    Core_AddField reg, "k_export_base", "Name for the exported file (a date is added in front)", "text", "My Report", _
         help:="The saved file will be named like:  2026-01-15 <this text>.xlsx"
     Core_AddField reg, "k_settings_sheet", "Settings / thresholds sheet name", "sheet", "README", "advanced", _
         "The hidden sheet whose cells drive the conditional-formatting thresholds; it is kept (hidden) inside the export so the colors still work."
@@ -36,36 +36,36 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     Core_AddSection reg, "EXPORT TABS"
     Core_AddList reg, "k_export_tabs", "Tabs to include in the export (one per row, in order)", "Tab name", _
         help:="Each finished tab to copy into the exported .xlsx, top to bottom in this order."
-    Core_AddDefault reg, "k_export_tabs", "Food Recap (Daily)"
-    Core_AddDefault reg, "k_export_tabs", "Category Var"
-    Core_AddDefault reg, "k_export_tabs", "Var Detail"
-    Core_AddDefault reg, "k_export_tabs", "Inv Value Outliers"
-    Core_AddDefault reg, "k_export_tabs", "Floater Finder"
+    Core_AddDefault reg, "k_export_tabs", "Summary"
+    Core_AddDefault reg, "k_export_tabs", "Details"
+    Core_AddDefault reg, "k_export_tabs", "Trends"
+    Core_AddDefault reg, "k_export_tabs", "Outliers"
+    Core_AddDefault reg, "k_export_tabs", "Breakdown"
 
     ' ---- IMPORT FILES ----
     Core_AddSection reg, "IMPORT FILES"
     Core_AddTable reg, "k_import", "Import files (one row per input tab)", "Input tab (in this workbook)|Source file (name starts with...)|Column types", _
-        help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, store numbers, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them."
-    Core_AddDefault reg, "k_import", "IN_Day|Target Inventory Data (day)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
-    Core_AddDefault reg, "k_import", "IN_PTD|Target Inventory Data (period to date)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
-    Core_AddDefault reg, "k_import", "IN_InvValue|Inventory Value Data|T,T,T,T,T,T,T,N,N,N,N"
-    Core_AddDefault reg, "k_import", "IN_Clock|Clock in and out Combine|T,T,T,T,T,T,T,T,T,N,N,N,N,N"
+        help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, codes, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them."
+    Core_AddDefault reg, "k_import", "IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
+    Core_AddDefault reg, "k_import", "IN_Data2|Source File B|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
+    Core_AddDefault reg, "k_import", "IN_Data3|Source File C|T,T,T,T,T,T,T,N,N,N,N"
+    Core_AddDefault reg, "k_import", "IN_Data4|Source File D|T,T,T,T,T,T,T,T,T,N,N,N,N,N"
 
     ' ---- REF_MASTER ----
     Core_AddSection reg, "REF_MASTER"
-    Core_AddField reg, "k_master_prefix", "Master-list file (name starts with...)", "file", "Master Store List", _
+    Core_AddField reg, "k_master_prefix", "Master-list file (name starts with...)", "file", "Master List Import", _
         help:="The newest file in THIS workbook's folder whose name starts with this text; used to refresh the destination tab below. A trailing (1) or (2) is ignored."
     Core_AddField reg, "k_master_dest", "Destination tab (in this workbook)", "sheet", "Ref_Master", _
         help:="The tab in THIS workbook that the master list is written into."
     Core_AddField reg, "k_master_sheet", "Sheet name inside the master file", "text", "Current Master", "advanced", _
         "The worksheet name to read from inside the master-list file."
     Core_AddList reg, "k_master_cols", "Columns to copy from the master file (in order)", "Column header", _
-        help:="The exact column headers to pull from the master file, in order. The FIRST one is the store key and is always kept as text."
-    Core_AddDefault reg, "k_master_cols", "Store #"
-    Core_AddDefault reg, "k_master_cols", "Location Name"
-    Core_AddDefault reg, "k_master_cols", "Entity"
-    Core_AddDefault reg, "k_master_cols", "DO Name"
-    Core_AddDefault reg, "k_master_cols", "GM Name"
+        help:="The exact column headers to pull from the master file, in order. The FIRST one is the key column and is always kept as text. Replace these with the exact headers from your own master file."
+    Core_AddDefault reg, "k_master_cols", "Store ID"
+    Core_AddDefault reg, "k_master_cols", "Location Name or Address"
+    Core_AddDefault reg, "k_master_cols", "Entity ID"
+    Core_AddDefault reg, "k_master_cols", "Mgr (DM) Group"
+    Core_AddDefault reg, "k_master_cols", "Mgr (Loc) Name"
 
     ' ---- ACTIONS (become buttons) ----
     Core_AddAction reg, "importexport.clear", "1.  Clear Input Tabs", "PkgImportExport_Clear", "Deletes data (row 2 down) on the input tabs. Keeps headers + formatting."
@@ -191,7 +191,7 @@ Fail:
 End Sub
 
 '================================================================
-' ACTION 3 - Update Ref_Master from the Master Store List
+' ACTION 3 - Update Ref_Master from the Master List Import
 '================================================================
 Public Sub PkgImportExport_UpdateMaster(ctx As Object)
     Dim srcPath As String, wbSrc As Workbook, wsSrc As Worksheet, wsDst As Worksheet
@@ -262,8 +262,8 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
     dLast = Core_LastRow(wsDst, 1)
     If dLast >= 2 Then wsDst.Range(wsDst.Cells(2, 1), wsDst.Cells(dLast, nCols)).ClearContents
 
-    ' Force the Store column to Text so store numbers stay text and keep
-    ' matching the dashboard's text-based store keys.
+    ' Force the first (key) column to Text so codes/IDs keep leading zeros
+    ' and keep matching the workbook's text-based keys.
     wsDst.Columns(1).NumberFormat = "@"
 
     outR = 2
@@ -474,7 +474,7 @@ Public Sub PkgImportExport_SuggestTypes(ctx As Object)
     Core_SpeedOff
 
     MsgBox "Suggested type maps filled for " & found & " import row(s)." & vbCrLf & vbCrLf & _
-           "PLEASE REVIEW on the Setup tab: a column of ID / code numbers (e.g. store #) must " & _
+           "PLEASE REVIEW on the Setup tab: a column of ID / code numbers (e.g. an ID or code) must " & _
            "be T (text) even though it looks numeric, or the dashboard's lookups break. " & _
            "Adjust any cell, then run 'Finalize Setup Tab'." & _
            IIf(missed = "", "", vbCrLf & vbCrLf & "No source file found for:" & missed), _

@@ -4,7 +4,7 @@ Option Explicit
 '================================================================
 ' Core - the required engine every package depends on.
 '
-' Extracted from FoodDashMacros (src/legacy/SetupImportExportMacros.bas):
+' Extracted from SetupImportExportMacros (src/legacy/SetupImportExportMacros.bas):
 ' the config engine, Setup renderer, control-panel/button builder and
 ' shared helpers are lifted here and generalized so a package no longer
 ' hardcodes any of them. A package is now a thin module that:
