@@ -15,12 +15,12 @@ A reusable, config-driven Excel/VBA macro toolkit: one required Core module (con
 ## Commands
 
 ```
-verify:  n/a yet — becomes the build (concatenate src/core + enabled src/packages → dist/MacrosBundle.bas) once build/build.* exists (handoff.md step 6)
-test:    n/a — VBA has no headless runner; verify by importing the bundle and running the workbook, recorded in the PR
+verify:  pwsh build/build.ps1  → concatenates src/core/Core.bas + src/packages/Pkg*.bas into dist/MacrosBundle.bas; FAILS on a duplicate proc name across modules (single-module bundle) or a Sub/Function block imbalance. `-Packages Pkg…` builds a subset.
+test:    n/a — VBA has no headless runner; verify by importing dist/MacrosBundle.bas and running the workbook, recorded in the PR
 deploy:  n/a — delivered as one imported .bas, not deployed
 ```
 
-Run verify before every push once it exists. Never deploy without being asked.
+Run verify (the build) before every push; it is the closest thing to CI here. Never deploy without being asked.
 
 ## Workflow rules
 
