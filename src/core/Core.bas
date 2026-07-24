@@ -1028,7 +1028,8 @@ Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
                 10, False, True, RGB(90, 90, 90))
     r = r + 1
     r = RenderChainsBlock(ws, r)
-    ' Task 6 inserts the Placement block here.
+    r = r + 1
+    r = RenderPlacementBlock(ws, r)
     RenderComposeSection = r
 End Function
 
@@ -1163,6 +1164,57 @@ Private Function ReadChains(ws As Worksheet) As Collection
             out.Add ch
         End If
     Next i
+End Function
+
+' One row per registry action: hidden id in RID_COL, "caption [id]" (grey) in C,
+' a yellow Page-code cell in D. Prior codes are preserved from CfgSheet() by id.
+Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
+    Dim prior As Object, reg As Object, a As Object, id As String
+    r = BlockIntro(ws, r, "Actions on pages  -  where each action button goes", _
+                   "Page code: number = page, letters = column (e.g. 1A). Blank = page 1. " & _
+                   "Type  hide  to leave a button off entirely.")
+    ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
+    ws.Cells(r, VAL_COL).Value = "Action"
+    ws.Cells(r, VAL_COL + 1).Value = "Page code"
+    ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 1)).Font.Bold = True
+    r = r + 1
+
+    Set prior = ReadCodeMap(CfgSheet())            ' preserve prior codes by id
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            id = CStr(a("id"))
+            ws.Cells(r, VAL_COL).Value = CStr(a("caption")) & " [" & id & "]"
+            ws.Cells(r, VAL_COL).Font.Color = RGB(90, 90, 90)
+            ws.Cells(r, RID_COL).Value = id
+            If prior.Exists(LCase(id)) Then ws.Cells(r, VAL_COL + 1).Value = prior(LCase(id))
+            Yellow ws.Cells(r, VAL_COL + 1)
+            r = r + 1
+        Next a
+    Next reg
+    RenderPlacementBlock = r
+End Function
+
+' id(lower) -> code, merging the placement (actions) block and the chains block.
+Private Function ReadCodeMap(ws As Worksheet) As Object
+    Dim map As Object, kr As Long, nk As Long, i As Long, id As String
+    Dim chains As Collection, ch As Object
+    Set map = CreateObject("Scripting.Dictionary")
+    Set ReadCodeMap = map
+    If ws Is Nothing Then Exit Function
+    ' actions
+    kr = FindKeyRow(ws, LAYOUT_KEY)
+    If kr > 0 Then
+        nk = NextKeyRow(ws, kr)
+        For i = kr + 1 To nk - 1
+            id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+            If Len(id) > 0 Then map(LCase(id)) = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
+        Next i
+    End If
+    ' chains
+    Set chains = ReadChains(ws)
+    For Each ch In chains
+        If Len(CStr(ch("id"))) > 0 Then map(LCase(CStr(ch("id")))) = CStr(ch("code"))
+    Next ch
 End Function
 
 '================================================================
