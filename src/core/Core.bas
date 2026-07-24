@@ -1742,10 +1742,12 @@ End Function
 Private Sub DeletePanels()
     Dim i As Long, nm As String
     Application.DisplayAlerts = False
+    On Error Resume Next
     For i = ThisWorkbook.Worksheets.Count To 1 Step -1
         nm = ThisWorkbook.Worksheets(i).Name
         If IsPanelName(nm) Then ThisWorkbook.Worksheets(i).Delete
     Next i
+    On Error GoTo 0
     Application.DisplayAlerts = True
 End Sub
 
