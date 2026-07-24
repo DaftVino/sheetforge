@@ -11,3 +11,6 @@ scratch/
 ~$*.xlsx
 ~$*.xls
 *.xlk
+
+# Build output - regenerate with `pwsh build/build.ps1` (source of truth is src/)
+dist/
