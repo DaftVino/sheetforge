@@ -49,7 +49,7 @@ A helper that, for an import row (input tab + source prefix already given), open
 the matched source file, samples the data, and writes **suggested** type codes
 into the type-map cell for the user to review.
 
-**Hard constraint — suggest, never auto-apply.** A store number like `3176`
+**Hard constraint — suggest, never auto-apply.** A store number like `12345`
 samples as a *number* but must stay *text* or the dashboard's MATCH lookups break
 (the exact failure the type maps exist to prevent). Detection cannot see this, so
 the helper must fill a suggestion the user confirms/edits, never silently commit.
