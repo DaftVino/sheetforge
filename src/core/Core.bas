@@ -51,6 +51,9 @@ Private Const KEY_COL   As Long = 1       ' column A: machine keys (hidden)
 Private Const VAL_COL   As Long = 3       ' column C: scalar value / list value / 1st table col
 Private Const MAX_LIST  As Long = 20      ' input rows drawn per list / table block
 Private Const END_KEY   As String = "_core_end"   ' sentinel key row: bounds the last list/table block
+Private Const CHAINS_KEY As String = "k_core_chains"   ' Compose section: chains block sentinel (col A)
+Private Const LAYOUT_KEY As String = "k_core_layout"   ' Compose section: placement block sentinel (col A)
+Private Const RID_COL    As Long = 10                  ' Compose section: col J, hidden per-row id
 
 ' ---- speed wrapper saved state (module-level, depth-counted) ----
 Private mSpeedDepth  As Long
@@ -1081,11 +1084,10 @@ End Function
 '================================================================
 ' 5b. CORE-OWNED SETUP SCHEMA  (chains + placement; NOT a package)
 '   Rendered by Core_BuildSetup outside the package-discovery loop.
+'   Constants CHAINS_KEY / LAYOUT_KEY / RID_COL are declared in the module
+'   declarations section at the top (VBA requires module-level Const there;
+'   a Const between procedures is a compile error).
 '================================================================
-Private Const CHAINS_KEY As String = "k_core_chains"   ' block sentinel (col A)
-Private Const LAYOUT_KEY As String = "k_core_layout"   ' block sentinel (col A)
-Private Const RID_COL    As Long = 10                  ' col J: hidden per-row id
-
 Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     r = SectionHeader(ws, r, "COMPOSE YOUR BUTTONS")
     r = TintRow(ws, r, "Build multi-step buttons (Chains) and arrange buttons " & _
