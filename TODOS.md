@@ -20,7 +20,31 @@ build script + full Setup UX). Remote configured: `origin` =
       contains the old jargon — the remote is private, so this was accepted;
       revisit (squash/filter history) before any public release.
 
-## Next
+## Next — active
+
+- [ ] **"Compose your buttons" feature** — spec (`brainstorming` → `writing-plans`),
+      then build. ONE spec covering two linked Setup-page capabilities the user
+      asked for (2026-07-24):
+      - **(1) Grouping / layout** — a Setup section to assign actions to
+        pages/sections. This *finishes the long-pending handoff **step 7***: wire
+        the `src/packages/MacroLayout.bas` prototype — today a standalone,
+        **un-built** test module (excluded from the build; buttons call a
+        placeholder `ML_RunById`) — onto the real `Core_Run` + the Setup page.
+        Grouping was always intended (`docs/handoff.md`); only its integration is
+        unfinished, and its blocker (`Core_Run`) now exists.
+      - **(2) Chaining** — a separate Setup section to compose several actions
+        into ONE button that runs them **sequentially** (generalizes the
+        hardcoded clear→import inside `PkgImportExport_Import`). NEW scope:
+        user-defined chains are deployment-specific **config**, not manifest data
+        — a new config entity Core hasn't modeled before.
+      Touches Core (`Core_Run` dispatcher, button builder, Setup renderer) + the
+      contract → additive **contract v1.1.0** (composite/chained-action +
+      button-group concepts). Open design Qs: where chains live (config vs
+      manifest), mid-chain error handling (stop vs continue), whether chained
+      steps suppress their individual dialogs, adopt-vs-rewrite MacroLayout.
+      **Catalog build-out (Roadmap, below) is a SEPARATE track — not this spec.**
+
+## Done (recent)
 
 - [x] **Freeze `spec/contract.md`** — DONE (2026-07-24, contract **v1.0.0**).
       Language-neutral SoT: manifest object, field model, canonical kind
@@ -35,15 +59,18 @@ build script + full Setup UX). Remote configured: `origin` =
 - [ ] **Apps Script port** — implement the frozen spec on Google Sheets (Apps
       Script), same Setup layout + action ids, different engine. Only after the
       spec is frozen.
-- [ ] **More packages** as needed from `docs/macro-catalog-plug-and-play.md`
+- [ ] **Catalog build-out** (separate track from "Compose your buttons" above) —
+      grow toward the ~60 selectable macros in `docs/macro-catalog-plug-and-play.md`
       (Reconcile / Validate, Format & Present, Summarize, Workbook housekeeping,
-      Backup). Each is a thin `Pkg<Name>.bas` + one line in Core's candidate list.
+      Backup). Only 2 of ~60 are built (PkgImportExport, PkgClean); the rest were
+      always intended as user setup options, deferred by the §10 build order (now
+      complete). Each is a thin `Pkg<Name>.bas` + one line in Core's candidate list.
 - [ ] Refresh `docs/code-map.md` (`/code-map`) once `src/` grows further.
 
 ## Housekeeping / minor
 
-- [ ] Delete merged local branches: `feat/core-import-export`,
-      `feat/setup-two-tier`, `feat/setup-band-polish`.
+- [x] Delete merged local branches (`feat/*`, `chore/sanitize-defaults`,
+      `docs/freeze-contract`) — DONE 2026-07-24; only `main` remains.
 - [ ] Setup merged-band row heights are an estimate (AutoFit ignores merged
       cells). If a tinted explanation ever clips its last line, lower the
       chars-per-line constant in `Core.TintRow` (currently 115).
