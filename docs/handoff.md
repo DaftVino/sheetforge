@@ -1,6 +1,41 @@
 # Project Handoff — Plug & Play Spreadsheet Macros
 
-Use this to continue the project in VS Code (Claude Code). Move the files listed below into the repo, then paste the **Kickoff prompt** at the bottom into a new Claude Code session.
+Use this to continue the project in VS Code (Claude Code). Read **Current status** (next) for where things stand, then paste the **Next-session prompt** at the bottom into a new session. The *Project context*, *Repo layout*, and VBA-gotchas sections below are the durable onboarding reference; *Current status*, *Build order*, and the prompt are refreshed as phases complete.
+
+---
+
+## Current status (2026-07-24)
+
+**The engine + portable contract are done and published.** `main` is on a
+**private** remote `github.com/DaftVino/sheetforge`.
+
+- **Shipped (v0.1.0–v0.2.1):** `src/core/Core.bas` (config engine, Setup renderer,
+  button builder, `Core_Run` dispatcher, `_Packages` registry, shared helpers) +
+  `PkgImportExport` + `PkgClean`; `build/build.ps1` (Core + `Pkg*.bas` →
+  single-module `dist/MacrosBundle.bas`; fails on duplicate proc names / block
+  imbalance). Two-tier Setup UX (Simple/Advanced, help notes, suggest-import-types).
+  Verify = `pwsh build/build.ps1` (green: Sub 32/32, Function 55/55, 87 procs) +
+  a manual Excel import (owner-confirmed each release).
+- **Contract frozen:** `spec/contract.md` **v1.0.0** — language-neutral SoT
+  (manifest object, field model, kind vocabulary, tiers, config storage/read,
+  action contract, frozen registry for both packages, portability appendix,
+  SemVer change control). `/review`-audited against the code.
+- **Sanitized + first publish:** all client jargon + the real store number
+  scrubbed; pushed **tree-only** (pre-`d29b0d7` *history* still holds jargon —
+  private repo; revisit before any public release).
+
+**Two things intended but NOT done (not lost — deferred):**
+
+- **Grouping/layout integration = step 7 below.** `MacroLayout.bas` is a working
+  standalone prototype, still **un-built** (excluded from the bundle) and
+  **un-wired** (`ML_RunById` placeholder, never connected to `Core_Run`).
+- **Catalog build-out.** Only 2 of ~60 `macro-catalog-plug-and-play.md` macros
+  are packages.
+
+**Next phase = the "Compose your buttons" spec** — grouping integration + a new
+chaining capability (compose actions into one sequential button), as one
+Setup-page feature; additive **contract v1.1.0**. See `TODOS.md` "Next — active"
+and the Next-session prompt at the bottom.
 
 ---
 
@@ -11,7 +46,7 @@ spreadsheet-macros/
 ├─ CLAUDE.md                 # paste the "Project context" section below here
 ├─ README.md
 ├─ spec/
-│   └─ contract.md           # (to create) language-neutral config schema + action ids — source of truth
+│   └─ contract.md           # language-neutral config schema + action ids — v1.0.0, FROZEN
 ├─ src/
 │   ├─ core/                 # Core module(s) — extracted from SetupImportExportMacros
 │   ├─ packages/             # one .bas per package (PkgImportExport, PkgClean, ...)
@@ -62,32 +97,52 @@ spreadsheet-macros/
 ## Current files (move these into the repo)
 
 - **`SetupImportExportMacros.bas`** (module `SetupImportExportMacros`) → `src/legacy/`. The working dashboard automation for the Sample Dashboard workbook. Four buttons: Clear Input Tabs, Import Source Data (folder match + type coercion), Update Ref_Master (column-mapped refresh from a master file), Export Dashboard (values-only snapshot: flattens spills/legacy arrays/formulas, keeps formatting + conditional formatting, breaks external links, dated filename), plus a Setup/Finalize/BuildMacroTab config driver writing a hidden `_Config`. **~80% of Core already lives here** — this file is the extraction source, and its 4 buttons become the `PkgImportExport` package.
-- **`MacroLayout.bas`** (module `MacroLayout`) → `src/packages/`. The grouping/layout feature. A Master sheet holds an Enabled flag per macro (stand-in for the future package-toggle layer); "Build Grouping Page" lists only enabled macros with a yellow **Code** cell; codes like `1A` mean tab 1 / column A (number = tab, letters = column, multi-digit tabs and `AA`+ columns supported); "Apply Layout" builds `Macros 1`, `Macros 2`... tabs placing buttons by code, stacked in list order. Buttons call a **placeholder `ML_RunById`** — the single seam to swap for `Core_Run` once the dispatcher exists. Re-running Build Grouping Page preserves already-entered codes.
+- **`MacroLayout.bas`** (module `MacroLayout`) → `src/packages/`. The grouping/layout feature. A Master sheet holds an Enabled flag per macro (stand-in for the future package-toggle layer); "Build Grouping Page" lists only enabled macros with a yellow **Code** cell; codes like `1A` mean tab 1 / column A (number = tab, letters = column, multi-digit tabs and `AA`+ columns supported); "Apply Layout" builds `Macros 1`, `Macros 2`... tabs placing buttons by code, stacked in list order. Buttons call a **placeholder `ML_RunById`** — the single seam to swap for `Core_Run`; **the dispatcher now exists, so wiring this is the next phase (step 7).** Re-running Build Grouping Page preserves already-entered codes.
 - **`macro_catalog_plug_and_play.md`** → `docs/`. ~60 candidate macros grouped by user-facing job, each rated (⭐ project importance + A–F real-world popularity), with the ones already implemented in the dashboard marked done.
 - **`engine_architecture_draft.md`** → `docs/`. The full architecture rationale, including the stress-test of the multi-file concept and the cross-platform table.
 - **`excel_macro_examples_2026.md`** → `docs/`. Reference VBA snippets for common patterns.
 
 ---
 
-## Next steps (build order)
+## Build order (status)
 
-1. `git init`; drop in the files per the layout; paste Project context into `CLAUDE.md`.
-2. **Extract Core** from `SetupImportExportMacros`: config engine (`CfgSheet`/`SheetSingle`/`SheetList1`/`SheetTable3`), Setup renderer (`CreateSetupTab`/`FinalizeSetupTab`), button builder (`BuildMacroTab`), helpers (`FindSourceFile`/`CoerceVal`/`SheetExists`), plus new `Core_Run` dispatcher, `Core_DeclarePackage`/`Core_AddField`/`Core_AddAction`, and the `_Packages` registry.
-3. **Refactor the 4 dashboard buttons** into `PkgImportExport` with a manifest — proving the contract on code that already works, no behavior change for dashboard users.
-4. **Add a second tiny package** (`PkgClean`: RemoveDuplicates + TrimClean) to prove buttons appear with zero new wiring.
-5. **Freeze `spec/contract.md`** — config field keys, action ids, action semantics — as the portable source of truth.
-6. **Write `build/build.*`** to concatenate Core + selected packages into `dist/MacrosBundle.bas`.
-7. Wire `MacroLayout`'s `ML_RunById` to `Core_Run`.
-8. **Only then** start the Apps Script port against the spec.
+Engine + contract (1–6) are **done**; 7–9 are the open scope.
 
-Do 2–4 before touching Sheets: if the manifest → dispatcher → registry loop works for two packages in Excel, the platform is proven and porting becomes mechanical.
+1. ✓ `git init`, repo layout, `CLAUDE.md`.
+2. ✓ **Extract Core** from `SetupImportExportMacros` (config engine, Setup renderer, button builder, helpers, `Core_Run` dispatcher, manifest API, `_Packages` registry).
+3. ✓ **Refactor the 4 dashboard buttons** into `PkgImportExport` — no behavior change.
+4. ✓ **Second package `PkgClean`** — proved the contract generalizes with zero new wiring.
+5. ✓ **Freeze `spec/contract.md`** (v1.0.0) — `/review`-audited.
+6. ✓ **`build/build.ps1`** — concatenate Core + `Pkg*.bas` → `dist/MacrosBundle.bas`.
+7. **→ NEXT — "Compose your buttons":** one spec + build for **(a) grouping
+   integration** (wire `MacroLayout`'s `ML_RunById` → `Core_Run` and surface
+   grouping on the Setup page; adopt or rewrite the prototype) and **(b)
+   chaining** (compose actions into one sequential button; generalizes the
+   hardcoded clear→import). Additive **contract v1.1.0**. `brainstorming` →
+   `writing-plans` first.
+8. **Catalog build-out** (separate track): more `Pkg<Name>.bas` toward the ~60 in
+   `macro-catalog-plug-and-play.md`.
+9. **Apps Script port:** implement the frozen contract on Google Sheets, once the
+   Excel feature set settles.
 
 ---
 
-## Kickoff prompt (paste into Claude Code)
+## Next-session prompt (paste into a new Claude Code session)
 
-> I'm continuing a VBA project — a reusable, config-driven Excel macro toolkit (details in `CLAUDE.md` and `docs/engine_architecture_draft.md`). Please read `CLAUDE.md`, `docs/engine_architecture_draft.md`, `src/legacy/SetupImportExportMacros.bas`, and `src/packages/MacroLayout.bas` first.
+> Continuing **SheetForge** (config-driven Excel/VBA macro toolkit). Run `/orient` first.
 >
-> Then start **step 2 of the build order: extract Core** from `SetupImportExportMacros.bas` into `src/core/`. Create a `Core` module that exposes: the config engine (generalized from the `Cfg*`/`Sheet*` readers), shared helpers (speed wrapper, robust last-row/col finder, structured error+log handler, `SheetExists`, file finder, type coercion), a `_Packages` registry with `Application.Run`-based manifest probing (no "Trust access to VBA project" dependency), the manifest-building API (`Core_DeclarePackage`, `Core_AddField`, `Core_AddAction`), a Setup-sheet renderer that builds fields from installed packages' manifests, a button/menu builder, and the `Core_Run "<actionId>"` dispatcher.
+> **Read manifest:**
+> - `CLAUDE.md` (~5KB) — workflow gates
+> - `docs/handoff.md` (this file, ~14KB) — Current status + Project context
+> - `TODOS.md` (~8KB) — the **"Next — active"** item IS this task
+> - `spec/contract.md` (~20KB) — frozen **contract v1.0.0**; you'll extend it to v1.1.0
+> - `src/core/Core.bas` (44KB, 1127 lines — read in slices via Grep / `docs/code-map.md`): dispatcher `Core_Run` (~L601), button builder `Core_BuildControlPanel` (~L979), Setup renderer `Core_BuildSetup` (~L695)
+> - `src/packages/MacroLayout.bas` (28KB) — standalone grouping prototype; `ML_RunById` (~L350) is the seam to `Core_Run`
+> - `src/packages/PkgImportExport.bas` (28KB) — `PkgImportExport_Import` (~L106) is the hardcoded clear→import that chaining generalizes
+> - `docs/engine-architecture-draft.md` §9 (Setup page) — design principles
 >
-> Keep the existing dashboard behavior working — the goal is that the four current buttons can be re-expressed as a `PkgImportExport` package (step 3) with no functional change. Follow the naming conventions (`Core_*`, `Pkg<Name>_*`, everything else `Private`), respect the VBA 25-continuation limit, and preserve the graceful fallback-to-defaults behavior. Propose the Core module's public API as a short list before writing the full implementation so I can approve it.
+> **Task — spec then build the "Compose your buttons" feature.** ONE feature, two linked Setup-page sections:
+> 1. **Grouping/layout** — assign actions to pages/sections. Finish the pending **step 7**: wire `MacroLayout`'s `ML_RunById` onto `Core_Run` and surface grouping on the Setup page (adopt or rewrite the prototype — today it's standalone, un-built, un-integrated).
+> 2. **Chaining** — compose several actions into ONE button that runs them sequentially (generalizes the hardcoded clear→import). User-defined chains are deployment-specific **config**, not manifest data — a new config entity.
+>
+> This touches Core (`Core_Run`, button builder, Setup renderer) + the contract → additive **contract v1.1.0**. So: **`brainstorming` first** to settle the open design questions — where chains live (config vs manifest), mid-chain error handling (stop vs continue on failure), whether chained steps suppress their individual confirmation dialogs, adopt-vs-rewrite MacroLayout, and how grouping + chaining share the Setup surface — then `writing-plans`, build in `src/`, `pwsh build/build.ps1`, `/review`, land to `main`. **Catalog build-out is a separate track — not part of this.**
