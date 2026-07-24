@@ -22,10 +22,13 @@ build script + full Setup UX). Remote configured: `origin` =
 
 ## Next
 
-- [ ] **Freeze `spec/contract.md`** — the language-neutral config schema + action
-      ids (field keys, kinds, tiers; action ids and semantics) so the Apps Script
-      port is mechanical. Last item of the engine-architecture-draft build order
-      before porting.
+- [x] **Freeze `spec/contract.md`** — DONE (2026-07-24, contract **v1.0.0**).
+      Language-neutral SoT: manifest object, field model, canonical kind
+      vocabulary (`range` excluded as never-implemented, `bool` reserved), tier
+      rules, config storage/read + graceful-fallback, action contract, the frozen
+      registry for both packages, portability appendix, SemVer change-control.
+      Reviewed via `/review` (accuracy-audited against the code; 4 fixes applied).
+      Next roadmap item is the Apps Script port.
 
 ## Roadmap
 
