@@ -36,15 +36,15 @@ column counts change.**
 
 | Real (sensitive) | → Generic placeholder |
 |---|---|
-| `Sample Dashboard` (proper name, narrative + Control-Panel title) | **Sample Dashboard** |
-| `My Report` (export base name default) | **My Report** |
-| `SetupImportExportMacros` / `SetupImportExportMacros.bas` (legacy module identifier) | **`SetupImportExportMacros`** / **`SetupImportExportMacros.bas`** (module name now matches its filename) |
-| Export tabs: `Sample Recap (Daily)`, `Sample Category`, `Sample Detail`, `Inv Value Outliers`, `Floater Finder` | **Summary, Details, Trends, Outliers, Breakdown** |
-| Import tab keys: `IN_Day`, `IN_PTD`, `IN_InvValue`, `IN_Clock` | **IN_Data1, IN_Data2, IN_Data3, IN_Data4** |
-| Source-file prefixes: `Target Inventory Data (day)`, `Target Inventory Data (period to date)`, `Inventory Value Data`, `Clock in and out Combine` | **Source File A, Source File B, Source File C, Source File D** |
-| `Master Store List` (master-list file prefix) | **Master List Import** |
-| Master columns: `Store #`, `Location Name`, `Entity`, `DO Name`, `GM Name` | **Store ID, Location Name or Address, Entity ID, Mgr (DM) Group, Mgr (Loc) Name** |
-| Comment jargon (legacy only): `TabName`, `Calc_Hours`, `Net Sales`, `clock-in/out`, "store key/number" | reworded to domain-neutral equivalents that keep the technical point |
+| `‹client dashboard name›` (proper name, narrative + Control-Panel title) | **Sample Dashboard** |
+| `‹client export-base name›` (export base name default) | **My Report** |
+| `‹legacy module id›` / `‹legacy module id›.bas` (legacy module identifier) | **`SetupImportExportMacros`** / **`SetupImportExportMacros.bas`** (module name now matches its filename) |
+| Export tabs: `‹retired export-tab name›`, `‹retired export-tab name›`, `‹retired export-tab name›`, `‹retired export-tab name›`, `‹retired export-tab name›` | **Summary, Details, Trends, Outliers, Breakdown** |
+| Import tab keys: `‹retired input-tab key›`, `‹retired input-tab key›`, `‹retired input-tab key›`, `‹retired input-tab key›` | **IN_Data1, IN_Data2, IN_Data3, IN_Data4** |
+| Source-file prefixes: `‹retired source-file prefix›`, `‹retired source-file prefix›`, `‹retired source-file prefix›`, `‹retired source-file prefix›` | **Source File A, Source File B, Source File C, Source File D** |
+| `‹retired master-list prefix›` (master-list file prefix) | **Master List Import** |
+| Master columns: `‹retired master column›`, `‹retired master column›`, `‹retired master column›`, `‹retired master column›`, `‹retired master column›` | **Store ID, Location Name or Address, Entity ID, Mgr (DM) Group, Mgr (Loc) Name** |
+| Comment jargon (legacy only): `‹retired comment term›`, `‹retired comment term›`, `‹retired comment term›`, `‹retired comment term›`, `‹retired comment term›` | reworded to domain-neutral equivalents that keep the technical point |
 
 **Kept as-is (already generic):** `README` (settings sheet), `Ref_Master`
 (destination tab), `Current Master` (inner sheet name), the `IN_` prefix
@@ -60,52 +60,52 @@ to say so explicitly, so the generic seed is obviously replaceable.
 Line numbers are pre-edit anchors; verify at edit time.
 
 ### `src/packages/PkgImportExport.bas`
-- L5 comment "the original Sample Dashboard's four buttons" → "Sample Dashboard".
-- L13 comment "the legacy SetupImportExportMacros module" → "SetupImportExportMacros".
-- L28 `k_export_base` default `My Report` → `My Report`.
+- L5 comment "the original ‹client dashboard name›'s four buttons" → "Sample Dashboard".
+- L13 comment "the legacy ‹legacy module id› module" → "SetupImportExportMacros".
+- L28 `k_export_base` default `‹client export-base name›` → `My Report`.
 - L39–43 export-tab defaults → Summary / Details / Trends / Outliers / Breakdown.
-- L48 help: "keeps IDs, store numbers, leading zeros" → "keeps IDs, codes, leading zeros".
+- L48 help: "keeps IDs, ‹retired comment term›, leading zeros" → "keeps IDs, codes, leading zeros".
 - L49–52 import defaults → `IN_Data1|Source File A|…` … `IN_Data4|Source File D|…` (type maps unchanged).
-- L56 `k_master_prefix` default `Master Store List` → `Master List Import`.
+- L56 `k_master_prefix` default `‹retired master-list prefix›` → `Master List Import`.
 - L63 help → "The FIRST one is the key column and is always kept as text. Replace these with the exact headers from your own master file."
 - L64–68 master-col defaults → Store ID / Location Name or Address / Entity ID / Mgr (DM) Group / Mgr (Loc) Name.
-- L194 comment "Update Ref_Master from the Master Store List" → "Master List Import".
-- L265–266 comment "Force the Store column … dashboard's text-based store keys" → generic ("first (key) column … the workbook's text-based keys").
-- L477 user message "(e.g. store #)" → "(e.g. an ID or code)".
+- L194 comment "Update Ref_Master from the ‹retired master-list prefix›" → "Master List Import".
+- L265–266 comment "Force the ‹retired master column› column … dashboard's text-based ‹retired comment term›" → generic ("first (key) column … the workbook's text-based keys").
+- L477 user message "(e.g. ‹retired comment term›)" → "(e.g. an ID or code)".
 
 ### `src/legacy/SetupImportExportMacros.bas`
-- L1 `Attribute VB_Name = "SetupImportExportMacros"` → `"SetupImportExportMacros"`.
-- L5 header "Sample Dashboard - Automation Macros" → "Sample Dashboard - Automation Macros".
+- L1 `Attribute VB_Name = "‹legacy module id›"` → `"SetupImportExportMacros"`.
+- L5 header "‹client dashboard name› - Automation Macros" → "Sample Dashboard - Automation Macros".
 - L73–90 import-default block: tab keys → `IN_Data1..4`; prefixes → `Source File A..D`; type maps unchanged.
-- L85–87 comment reworded: drop `Calc_Hours`, `store key`, `TabName`; keep the "this input stays all-text so its id/date columns survive; only numeric columns are N" point.
-- L188 comment "(Net Sales, category %s, TabName)" → "(e.g. totals, percentages, key metrics)".
-- L210 comment "(TabName, Sample Recap, Sample Category, etc.)" → "(the summary tabs, etc.)".
-- L243 comment "Update Ref_Master from the Master Store List" → "Master List Import".
-- L307–308 comment "Force the first (Store) column … text-based store keys" → generic.
-- L409 comment "Floater Finder FILTER" → "a FILTER spill".
-- L749 Control-Panel title string `Sample Dashboard  -  Control Panel` → `Sample Dashboard  -  Control Panel`.
-- L889 fallback `My Report` → `My Report`.
-- L897 fallback `Master Store List` → `Master List Import`.
+- L85–87 comment reworded: drop ‹retired comment term›, ‹retired comment term›, ‹retired comment term›; keep the "this input stays all-text so its id/date columns survive; only numeric columns are N" point.
+- L188 comment "(‹retired comment term›, category %s, ‹retired comment term›)" → "(e.g. totals, percentages, key metrics)".
+- L210 comment "(‹retired comment term›, ‹retired export-tab name›, ‹retired export-tab name›, etc.)" → "(the summary tabs, etc.)".
+- L243 comment "Update Ref_Master from the ‹retired master-list prefix›" → "Master List Import".
+- L307–308 comment "Force the first (‹retired master column›) column … text-based ‹retired comment term›" → generic.
+- L409 comment "‹retired export-tab name› FILTER" → "a FILTER spill".
+- L749 Control-Panel title string `‹client dashboard name›  -  Control Panel` → `Sample Dashboard  -  Control Panel`.
+- L889 fallback `‹client export-base name›` → `My Report`.
+- L897 fallback `‹retired master-list prefix›` → `Master List Import`.
 - L909–910 fallback export-tab array → Summary / Details / Trends / Outliers / Breakdown.
 - L924–925 fallback master-col adds → Store ID / Location Name or Address / Entity ID / Mgr (DM) Group / Mgr (Loc) Name.
 
 ### `src/core/Core.bas`
-- L7 provenance comment "Extracted from SetupImportExportMacros" → "SetupImportExportMacros".
+- L7 provenance comment "Extracted from ‹legacy module id›" → "SetupImportExportMacros".
 
 ### `docs/handoff.md`
-- L16, L64, L75 module references `SetupImportExportMacros` → `SetupImportExportMacros`.
-- L64 "for the Sample Dashboard" → "the Sample Dashboard workbook".
+- L16, L64, L75 module references `‹legacy module id›` → `SetupImportExportMacros`.
+- L64 "for the ‹client dashboard name›" → "the Sample Dashboard workbook".
 
 ### `docs/engine-architecture-draft.md`
-- L13, L58, L220 `SetupImportExportMacros.bas` → `SetupImportExportMacros.bas`.
-- L58 "the sample-dashboard specifics" → "the dashboard-specific parts".
-- L221 "Nothing about the sample dashboard changes" → "the sample dashboard".
+- L13, L58, L220 `‹legacy module id›.bas` → `SetupImportExportMacros.bas`.
+- L58 "the ‹client dashboard name›-specifics" → "the dashboard-specific parts".
+- L221 "Nothing about the ‹client dashboard name› changes" → "the sample dashboard".
 
 ### `docs/macro-catalog-plug-and-play.md`
-- L9 `SetupImportExportMacros.bas` → `SetupImportExportMacros.bas`.
+- L9 `‹legacy module id›.bas` → `SetupImportExportMacros.bas`.
 
 ### `CHANGELOG.md`
-- L33 "the Sample Dashboard's four buttons" → "the Sample Dashboard's four buttons".
+- L33 "the ‹client dashboard name›'s four buttons" → "the Sample Dashboard's four buttons".
 
 ## Verification
 
@@ -114,7 +114,7 @@ Line numbers are pre-edit anchors; verify at edit time.
    and the Core comment only; legacy is not built).
 2. Token sweep must return **zero** hits across tracked files (excluding
    `dist/`, `docs/designs/setup-simplicity.md`, and this spec):
-   `git grep -i -E "food|target inventory|floater|sampleDash|TabName\b|Calc_Hours|master store|category var|var detail|inv value|clock in and out|store key|store number"`
+   `git grep -i -n -E "<case-insensitive alternation over the retired client tokens>" -- <tracked paths>`
 3. No Excel re-verify needed — behavior is unchanged (demo seed defaults only;
    `_Config` overrides at runtime; legacy fallbacks are illustrative).
 4. Only after all three pass: `git remote add origin …` and push.

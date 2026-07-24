@@ -20,8 +20,8 @@
 ### The token-sweep command (reused by every task)
 
 ```bash
-# $SWEEP = the jargon regex, case-insensitive, word-boundary on TabName
-SWEEP='food|sampleDash|target inventory|inventory value|floater|\bMIC\b|Calc_Hours|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Sample Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+# $SWEEP = the jargon regex, case-insensitive, word-boundary on one retired comment term
+SWEEP='<case-insensitive alternation over the retired client tokens>'
 ```
 
 ---
@@ -40,7 +40,7 @@ SWEEP='food|sampleDash|target inventory|inventory value|floater|\bMIC\b|Calc_Hou
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|sampleDash|target inventory|inventory value|floater|\bMIC\b|Calc_Hours|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Sample Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='<case-insensitive alternation over the retired client tokens>'
 git grep -i -n -E "$SWEEP" -- src/packages/PkgImportExport.bas src/core/Core.bas
 ```
 Expected: multiple hits (L5, L13, L28, L39–43, L48, L49–52, L56, L63, L64–68, L194, L265–266, L477 in the package; L7 in Core).
@@ -49,34 +49,34 @@ Expected: multiple hits (L5, L13, L28, L39–43, L48, L49–52, L56, L63, L64–
 
 In `src/packages/PkgImportExport.bas`, make these exact replacements:
 
-- L5 `' PkgImportExport - the original Sample Dashboard's four` → `' PkgImportExport - the original Sample Dashboard's four`
-- L13 `' Behavior is identical to the legacy SetupImportExportMacros module, with ONE` → `' Behavior is identical to the legacy SetupImportExportMacros module, with ONE`
-- L28 default `"My Report"` → `"My Report"`
-- L39 `"Sample Recap (Daily)"` → `"Summary"`
-- L40 `"Sample Category"` → `"Details"`
-- L41 `"Sample Detail"` → `"Trends"`
-- L42 `"Inv Value Outliers"` → `"Outliers"`
-- L43 `"Floater Finder"` → `"Breakdown"`
-- L48 help, substring `T=Text (keeps IDs, store numbers, leading zeros)` → `T=Text (keeps IDs, codes, leading zeros)`
-- L49 `"IN_Day|Target Inventory Data (day)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"` → `"IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"`
-- L50 `"IN_PTD|Target Inventory Data (period to date)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"` → `"IN_Data2|Source File B|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"`
-- L51 `"IN_InvValue|Inventory Value Data|T,T,T,T,T,T,T,N,N,N,N"` → `"IN_Data3|Source File C|T,T,T,T,T,T,T,N,N,N,N"`
-- L52 `"IN_Clock|Clock in and out Combine|T,T,T,T,T,T,T,T,T,N,N,N,N,N"` → `"IN_Data4|Source File D|T,T,T,T,T,T,T,T,T,N,N,N,N,N"`
-- L56 default `"Master Store List"` → `"Master List Import"`
-- L63 help `The exact column headers to pull from the master file, in order. The FIRST one is the store key and is always kept as text.` → `The exact column headers to pull from the master file, in order. The FIRST one is the key column and is always kept as text. Replace these with the exact headers from your own master file.`
-- L64 `"Store #"` → `"Store ID"`
-- L65 `"Location Name"` → `"Location Name or Address"`
-- L66 `"Entity"` → `"Entity ID"`
-- L67 `"DO Name"` → `"Mgr (DM) Group"`
-- L68 `"GM Name"` → `"Mgr (Loc) Name"`
-- L194 comment `' ACTION 3 - Update Ref_Master from the Master Store List` → `' ACTION 3 - Update Ref_Master from the Master List Import`
-- L265–266 comment `' Force the Store column to Text so store numbers stay text and keep` / `' matching the dashboard's text-based store keys.` → `' Force the first (key) column to Text so codes/IDs keep leading zeros` / `' and keep matching the workbook's text-based keys.`
-- L477 message substring `a column of ID / code numbers (e.g. store #) must` → `a column of ID / code numbers (e.g. an ID or code) must`
+- L5 `' PkgImportExport - the original ‹client dashboard name›'s four` → `' PkgImportExport - the original Sample Dashboard's four`
+- L13 `' Behavior is identical to the legacy ‹legacy module id› module, with ONE` → `' Behavior is identical to the legacy SetupImportExportMacros module, with ONE`
+- L28 default `"‹client export-base name›"` → `"My Report"`
+- L39 `"‹retired export-tab name›"` → `"Summary"`
+- L40 `"‹retired export-tab name›"` → `"Details"`
+- L41 `"‹retired export-tab name›"` → `"Trends"`
+- L42 `"‹retired export-tab name›"` → `"Outliers"`
+- L43 `"‹retired export-tab name›"` → `"Breakdown"`
+- L48 help, substring `T=Text (keeps IDs, ‹retired comment term›, leading zeros)` → `T=Text (keeps IDs, codes, leading zeros)`
+- L49 `"‹retired input-tab key›|‹retired source-file prefix›|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"` → `"IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"`
+- L50 `"‹retired input-tab key›|‹retired source-file prefix›|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"` → `"IN_Data2|Source File B|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"`
+- L51 `"‹retired input-tab key›|‹retired source-file prefix›|T,T,T,T,T,T,T,N,N,N,N"` → `"IN_Data3|Source File C|T,T,T,T,T,T,T,N,N,N,N"`
+- L52 `"‹retired input-tab key›|‹retired source-file prefix›|T,T,T,T,T,T,T,T,T,N,N,N,N,N"` → `"IN_Data4|Source File D|T,T,T,T,T,T,T,T,T,N,N,N,N,N"`
+- L56 default `"‹retired master-list prefix›"` → `"Master List Import"`
+- L63 help `The exact column headers to pull from the master file, in order. The FIRST one is the ‹retired comment term› and is always kept as text.` → `The exact column headers to pull from the master file, in order. The FIRST one is the key column and is always kept as text. Replace these with the exact headers from your own master file.`
+- L64 `"‹retired master column›"` → `"Store ID"`
+- L65 `"‹retired master column›"` → `"Location Name or Address"`
+- L66 `"‹retired master column›"` → `"Entity ID"`
+- L67 `"‹retired master column›"` → `"Mgr (DM) Group"`
+- L68 `"‹retired master column›"` → `"Mgr (Loc) Name"`
+- L194 comment `' ACTION 3 - Update Ref_Master from the ‹retired master-list prefix›` → `' ACTION 3 - Update Ref_Master from the Master List Import`
+- L265–266 comment `' Force the ‹retired master column› column to Text so ‹retired comment term› stay text and keep` / `' matching the dashboard's text-based ‹retired comment term›.` → `' Force the first (key) column to Text so codes/IDs keep leading zeros` / `' and keep matching the workbook's text-based keys.`
+- L477 message substring `a column of ID / code numbers (e.g. ‹retired comment term›) must` → `a column of ID / code numbers (e.g. an ID or code) must`
 
 - [ ] **Step 3: Apply the Core rename**
 
 In `src/core/Core.bas`:
-- L7 `' Extracted from SetupImportExportMacros (src/legacy/SetupImportExportMacros.bas):` → `' Extracted from SetupImportExportMacros (src/legacy/SetupImportExportMacros.bas):`
+- L7 `' Extracted from ‹legacy module id› (src/legacy/SetupImportExportMacros.bas):` → `' Extracted from SetupImportExportMacros (src/legacy/SetupImportExportMacros.bas):`
 
 - [ ] **Step 4: Run the sweep again (green)**
 
@@ -114,27 +114,27 @@ git commit -m "chore(sanitize): generic demo defaults in PkgImportExport + Core 
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|sampleDash|target inventory|inventory value|floater|\bMIC\b|Calc_Hours|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Sample Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='<case-insensitive alternation over the retired client tokens>'
 git grep -i -n -E "$SWEEP" -- src/legacy/SetupImportExportMacros.bas
 ```
 Expected: hits at L1, L5, L73–90, L188, L210, L243, L307–308, L409, L749, L889, L897, L909–910, L924–925.
 
 - [ ] **Step 2: Module identity + header**
 
-- L1 `Attribute VB_Name = "SetupImportExportMacros"` → `Attribute VB_Name = "SetupImportExportMacros"`
-- L5 `' Sample Dashboard - Automation Macros` → `' Sample Dashboard - Automation Macros`
+- L1 `Attribute VB_Name = "‹legacy module id›"` → `Attribute VB_Name = "SetupImportExportMacros"`
+- L5 `' ‹client dashboard name› - Automation Macros` → `' Sample Dashboard - Automation Macros`
 
 - [ ] **Step 3: Import-default block (L73–90) — keys + prefixes, type maps unchanged**
 
-- L73 `tabNames(1) = "IN_Day"` → `tabNames(1) = "IN_Data1"`
-- L74 `prefixes(1) = "Target Inventory Data (day)"` → `prefixes(1) = "Source File A"`
-- L77 `tabNames(2) = "IN_PTD"` → `tabNames(2) = "IN_Data2"`
-- L78 `prefixes(2) = "Target Inventory Data (period to date)"` → `prefixes(2) = "Source File B"`
-- L81 `tabNames(3) = "IN_InvValue"` → `tabNames(3) = "IN_Data3"`
-- L82 `prefixes(3) = "Inventory Value Data"` → `prefixes(3) = "Source File C"`
-- L88 `tabNames(4) = "IN_Clock"` → `tabNames(4) = "IN_Data4"`
-- L89 `prefixes(4) = "Clock in and out Combine"` → `prefixes(4) = "Source File D"`
-- L85–87 comment block → reword, dropping `Calc_Hours`/`store key`/`TabName`, keeping the technical point:
+- L73 `tabNames(1) = "‹retired input-tab key›"` → `tabNames(1) = "IN_Data1"`
+- L74 `prefixes(1) = "‹retired source-file prefix›"` → `prefixes(1) = "Source File A"`
+- L77 `tabNames(2) = "‹retired input-tab key›"` → `tabNames(2) = "IN_Data2"`
+- L78 `prefixes(2) = "‹retired source-file prefix›"` → `prefixes(2) = "Source File B"`
+- L81 `tabNames(3) = "‹retired input-tab key›"` → `tabNames(3) = "IN_Data3"`
+- L82 `prefixes(3) = "‹retired source-file prefix›"` → `prefixes(3) = "Source File C"`
+- L88 `tabNames(4) = "‹retired input-tab key›"` → `tabNames(4) = "IN_Data4"`
+- L89 `prefixes(4) = "‹retired source-file prefix›"` → `prefixes(4) = "Source File D"`
+- L85–87 comment block → reword, dropping ‹retired comment term›/‹retired comment term›/‹retired comment term›, keeping the technical point:
   ```vba
       ' IN_Data4 is kept ALL TEXT for its identifier/date columns: a downstream
       ' step parses the time text with DATEVALUE/TIMEVALUE, and the key column
@@ -143,17 +143,17 @@ Expected: hits at L1, L5, L73–90, L188, L210, L243, L307–308, L409, L749, L8
 
 - [ ] **Step 4: Comment jargon elsewhere**
 
-- L188 comment `' (Net Sales, category %s, TabName).` → `' (e.g. totals, percentages, key metrics).`
-- L210 comment `' (TabName, Sample Recap, Sample Category, etc.) update from the new data.` → `' (the summary tabs, etc.) update from the new data.`
-- L243 comment `' BUTTON 3 - Update Ref_Master from the Master Store List` → `' BUTTON 3 - Update Ref_Master from the Master List Import`
-- L307–308 comment `' Force the first (Store) column to Text so the store numbers stay text` / `' and keep matching the dashboard's text-based store keys.` → `' Force the first (key) column to Text so codes/IDs keep leading zeros` / `' and keep matching the workbook's text-based keys.`
-- L409 comment substring `dynamic-array spill (e.g. Floater Finder FILTER)` → `dynamic-array spill (e.g. a FILTER formula)`
+- L188 comment `' (‹retired comment term›, category %s, ‹retired comment term›).` → `' (e.g. totals, percentages, key metrics).`
+- L210 comment `' (‹retired comment term›, ‹retired export-tab name›, ‹retired export-tab name›, etc.) update from the new data.` → `' (the summary tabs, etc.) update from the new data.`
+- L243 comment `' BUTTON 3 - Update Ref_Master from the ‹retired master-list prefix›` → `' BUTTON 3 - Update Ref_Master from the Master List Import`
+- L307–308 comment `' Force the first (‹retired master column›) column to Text so the ‹retired comment term› stay text` / `' and keep matching the dashboard's text-based ‹retired comment term›.` → `' Force the first (key) column to Text so codes/IDs keep leading zeros` / `' and keep matching the workbook's text-based keys.`
+- L409 comment substring `dynamic-array spill (e.g. ‹retired export-tab name› FILTER)` → `dynamic-array spill (e.g. a FILTER formula)`
 
 - [ ] **Step 5: Control-Panel title + fallback getters**
 
-- L749 `.Value = "Sample Dashboard  -  Control Panel"` → `.Value = "Sample Dashboard  -  Control Panel"`
-- L889 `ExportBaseName = SheetSingle(CfgSheet(), K_EXPBASE, "My Report")` → replace `"My Report"` with `"My Report"`
-- L897 `MasterPrefix = SheetSingle(CfgSheet(), K_MPREFIX, "Master Store List")` → replace `"Master Store List"` with `"Master List Import"`
+- L749 `.Value = "‹client dashboard name›  -  Control Panel"` → `.Value = "Sample Dashboard  -  Control Panel"`
+- L889 `ExportBaseName = SheetSingle(CfgSheet(), K_EXPBASE, "‹client export-base name›")` → replace `"‹client export-base name›"` with `"My Report"`
+- L897 `MasterPrefix = SheetSingle(CfgSheet(), K_MPREFIX, "‹retired master-list prefix›")` → replace `"‹retired master-list prefix›"` with `"Master List Import"`
 - L909–910 fallback array:
   ```vba
           GetExportTabs = Array("Summary", "Details", "Trends", _
@@ -198,34 +198,34 @@ git commit -m "chore(sanitize): generic names in legacy reference module + renam
 - Modify: `CHANGELOG.md` (L33)
 
 **Interfaces:**
-- Consumes: the module rename `SetupImportExportMacros` → `SetupImportExportMacros` and proper-name `Sample Dashboard` → `Sample Dashboard`.
+- Consumes: the module rename `‹legacy module id›` → `SetupImportExportMacros` and proper-name `‹client dashboard name›` → `Sample Dashboard`.
 - Produces: nothing downstream.
 
 - [ ] **Step 1: Run the sweep to confirm jargon is present (red)**
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|sampleDash|target inventory|inventory value|floater|\bMIC\b|Calc_Hours|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Sample Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='<case-insensitive alternation over the retired client tokens>'
 git grep -i -n -E "$SWEEP" -- docs/handoff.md docs/engine-architecture-draft.md docs/macro-catalog-plug-and-play.md CHANGELOG.md
 ```
 Expected: hits at handoff L16/L64/L75, draft L13/L58/L220/L221, macro-catalog L9, CHANGELOG L33.
 
-- [ ] **Step 2: Replace `SetupImportExportMacros` → `SetupImportExportMacros` everywhere it appears in these four docs**
+- [ ] **Step 2: Replace `‹legacy module id›` → `SetupImportExportMacros` everywhere it appears in these four docs**
 
-- `docs/handoff.md` L16 `# Core module(s) — extracted from SetupImportExportMacros` → `… extracted from SetupImportExportMacros`
-- `docs/handoff.md` L64 `(module `SetupImportExportMacros`)` → `(module `SetupImportExportMacros`)`
-- `docs/handoff.md` L75 `**Extract Core** from `SetupImportExportMacros`:` → `… from `SetupImportExportMacros`:`
-- `docs/engine-architecture-draft.md` L13 `Your current `SetupImportExportMacros.bas`` → `Your current `SetupImportExportMacros.bas``
-- `docs/engine-architecture-draft.md` L58 `Your `SetupImportExportMacros.bas` already contains` → `Your `SetupImportExportMacros.bas` already contains`
-- `docs/engine-architecture-draft.md` L220 `**Extract Core** from `SetupImportExportMacros.bas`:` → `… from `SetupImportExportMacros.bas`:`
-- `docs/macro-catalog-plug-and-play.md` L9 `already implemented in `SetupImportExportMacros.bas`.` → `… in `SetupImportExportMacros.bas`.`
+- `docs/handoff.md` L16 `# Core module(s) — extracted from ‹legacy module id›` → `… extracted from SetupImportExportMacros`
+- `docs/handoff.md` L64 `(module `‹legacy module id›`)` → `(module `SetupImportExportMacros`)`
+- `docs/handoff.md` L75 `**Extract Core** from `‹legacy module id›`:` → `… from `SetupImportExportMacros`:`
+- `docs/engine-architecture-draft.md` L13 `Your current `‹legacy module id›.bas`` → `Your current `SetupImportExportMacros.bas``
+- `docs/engine-architecture-draft.md` L58 `Your `‹legacy module id›.bas` already contains` → `Your `SetupImportExportMacros.bas` already contains`
+- `docs/engine-architecture-draft.md` L220 `**Extract Core** from `‹legacy module id›.bas`:` → `… from `SetupImportExportMacros.bas`:`
+- `docs/macro-catalog-plug-and-play.md` L9 `already implemented in `‹legacy module id›.bas`.` → `… in `SetupImportExportMacros.bas`.`
 
 - [ ] **Step 3: Replace the proper-name / lowercase narrative mentions**
 
-- `docs/handoff.md` L64 `The working dashboard automation for the Sample Dashboard.` → `The working dashboard automation for the Sample Dashboard workbook.`
-- `docs/engine-architecture-draft.md` L58 `lift those out* of the sample-dashboard specifics` → `lift those out* of the dashboard-specific parts`
-- `docs/engine-architecture-draft.md` L221 `Nothing about the sample dashboard changes for the user` → `Nothing about the sample dashboard changes for the user`
-- `CHANGELOG.md` L33 `the Sample Dashboard's four buttons` → `the Sample Dashboard's four buttons`
+- `docs/handoff.md` L64 `The working dashboard automation for the ‹client dashboard name›.` → `The working dashboard automation for the Sample Dashboard workbook.`
+- `docs/engine-architecture-draft.md` L58 `lift those out* of the ‹client dashboard name›-specifics` → `lift those out* of the dashboard-specific parts`
+- `docs/engine-architecture-draft.md` L221 `Nothing about the ‹client dashboard name› changes for the user` → `Nothing about the sample dashboard changes for the user`
+- `CHANGELOG.md` L33 `the ‹client dashboard name›'s four buttons` → `the Sample Dashboard's four buttons`
 
 - [ ] **Step 4: Run the sweep again (green)**
 
@@ -255,7 +255,7 @@ git commit -m "docs(sanitize): generic module + dashboard names across docs and 
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|sampleDash|target inventory|inventory value|floater|\bMIC\b|Calc_Hours|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Sample Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='<case-insensitive alternation over the retired client tokens>'
 git grep -i -n -E "$SWEEP" -- . ':(exclude)dist/' ':(exclude)docs/designs/setup-simplicity.md' ':(exclude)docs/designs/sanitization-pass.md' ':(exclude)docs/designs/sanitization-pass-plan.md'
 ```
 Expected: **no output** (exit 1). If any straggler appears, fix it inline, re-run, then commit with `chore(sanitize): straggler`.
@@ -276,9 +276,9 @@ Report: branch `chore/sanitize-defaults` is scrubbed and verified; the repo is r
 ## Self-Review
 
 **Spec coverage:** every row of the substitution map and every file in the spec's file-by-file list maps to a task —
-built `.bas` + Core comment → Task 1; legacy module (incl. TabName/Calc_Hours/Net Sales comment rewrites) → Task 2;
+built `.bas` + Core comment → Task 1; legacy module (incl. ‹retired comment term›/‹retired comment term›/‹retired comment term› comment rewrites) → Task 2;
 handoff/draft/macro-catalog/CHANGELOG → Task 3; verification (`build` + zero-token sweep) → Tasks 1/2/3 locally and Task 4 globally. No gaps.
 
 **Placeholder scan:** no TBD/TODO/"handle edge cases"; every step shows the exact old→new text or the exact command + expected output.
 
-**Type/name consistency:** the same targets are used everywhere — `SetupImportExportMacros`→`SetupImportExportMacros`, tabs `Summary/Details/Trends/Outliers/Breakdown`, keys `IN_Data1..4`, prefixes `Source File A..D`, master cols `Store ID / Location Name or Address / Entity ID / Mgr (DM) Group / Mgr (Loc) Name`, `Master List Import`, `My Report`. Type-map letters and counts are copied verbatim and never altered.
+**Type/name consistency:** the same targets are used everywhere — `‹legacy module id›`→`SetupImportExportMacros`, tabs `Summary/Details/Trends/Outliers/Breakdown`, keys `IN_Data1..4`, prefixes `Source File A..D`, master cols `Store ID / Location Name or Address / Entity ID / Mgr (DM) Group / Mgr (Loc) Name`, `Master List Import`, `My Report`. Type-map letters and counts are copied verbatim and never altered.
