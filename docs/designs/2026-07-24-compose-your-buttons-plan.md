@@ -1391,3 +1391,41 @@ git commit -m "chore: remove MacroLayout prototype; docs for compose-your-button
 **Placeholder scan:** the two intentional forward-ports (`ParseCode`/`IndexToCol`/`SortedKeys` in Task 7, geometry consts in Task 9) show the code to copy and its source lines — no "TBD". `EnsurePanelSheet`/`AddAdminButtons`/`AddToPage`/`RenderPage` are defined by extraction from named existing code with exact behavior stated.
 
 **Type consistency:** result dictionary keys (`id/label/ok/found/message/errNumber/errText`) are identical in Task 2 (producer) and Task 8 (consumer). `ReadCodeMap` returns lowercased-id→code in Task 6 and is read lowercased in Tasks 7,9. `ReadChains` item shape `{id,label,steps,code}` identical across Tasks 5,7,8,9. Block sentinels `CHAINS_KEY`/`LAYOUT_KEY` and `RID_COL` shared across Tasks 4–9.
+
+---
+
+## Handoff log
+
+### 2026-07-24 — feature implemented, PR open, manual Excel verification pending
+
+**Branch / PR.** `feat/compose-your-buttons` → **PR #1** (https://github.com/DaftVino/sheetforge/pull/1), base `main`, **NOT merged** (open, gated on the owner's manual Excel run). Branch base = `84c0383`. 18 commits; feature commits: `8ea35ff` `f00cbb1` (contract) · `030a0b7` `e53c491` (dispatch core) · `4bdb0d7` (Core_Done migration) · `bfb6c30` `f0478bf` `0271bdc` (Setup section: scaffold, chains, placement) · `576afd6` (Finalize gate) · `7960561` (chain runner) · `0761ab8` (grouping builder) · `942d9ab` (delete MacroLayout + docs) · `7055ebe` (DisplayAlerts fix). Not squash-merged.
+
+**What shipped.** `src/core/Core.bas` (heavily extended: shared `RunAction` dispatch, `Core_Done`/`Core_Fail` quiet sink + swallowed-failure detection, chains+placement Setup blocks + readers, Finalize validation/BLOCK gate, `Core_RunChain`, grouped `Core_BuildControlPanel`); `src/packages/PkgImportExport.bas` + `PkgClean.bas` (8 completion dialogs → `Core_Done`); `spec/contract.md` (**v1.1.0**); `build/build.ps1` (comment only); `CHANGELOG.md`/`TODOS.md`/`docs/handoff.md` (docs); **deleted** `src/packages/MacroLayout.bas`. No automated tests (repo policy). Build proc count: **before** Sub 32/Function 55 (v0.2.1) → **after Sub 40/40, Function 85/85, 125 procs**, `pwsh build/build.ps1` green.
+
+**What the plan got wrong — corrected during execution, DO NOT REVERT:**
+- **Key on stable action ids, never captions** (chain steps + placement). *Reason: a caption edit would silently rewire an automation.* Steps authored as `Label [action.id]`; only the bracketed id is authoritative.
+- **Immutable minted `chain.<slug>` id, label editable separately.** *Reason: a label-derived live id is a §10 major-break-in-disguise.*
+- **`RunAction` must detect swallowed failures via `ctx("failed")`** (handlers call `Core_Fail` and return normally — `PkgImportExport.bas:100` etc. — so `Application.Run` raises nothing). *Reason: without it a failed chain step reports `ok=True`.*
+- **`reported` flag on the result → exactly one error dialog per failure path.** *Reason: fixed a Critical double-dialog regression on the standalone path.*
+- **Chain runner holds NO outer speed wrapper** (each step self-manages; `RunnerFail` bare `RestoreSpeed`). *Reason: an outer `Core_SpeedOn` is corrupted by `RunAction`'s hard `RestoreSpeed` on a failing step.*
+- **`ChrW$(&H2713)` not `Chr`** for the ✓; **`FirstLine` uses `If/Then` not `IIf`** (eager `IIf` evaluates `Left$(s,-1)`); **`ParseCode` rejects page 0 and guards `CLng` overflow** (`Len(digits)>7`). *Reason: all three are runtime crashes/overflows the panel caught.*
+- **Engine-owned config via a Core render/validate hook, NOT a fake `core` package in `BuildRegistry()`.** *Reason: preserves the `Application.Run` package-discovery invariant (no VBIDE trust).*
+- **Finalize BLOCKS on structural errors and mints ids only AFTER confirm.** *Reason: contract says "validate at activate"; a cancelled Finalize must not mutate the draft.*
+- **Admin (Setup/Finalize) buttons are injected as page-1 reserved column 9998**, page 1 force-created. *Reason: admin must never be stranded (all-hidden / page-2-only).*
+- **`MintChainId` strips trailing `_`; `DeletePanels` guards `DisplayAlerts` with `On Error Resume Next`.** *Reason: `chain.foo_` slug; a leaked `DisplayAlerts=False` suppresses destructive-action confirms session-wide.*
+- **Rejected panel claim (do not "fix"): `Dim` after executable statements is LEGAL in VBA** — it is not a compile error; declarations were moved to procedure tops only for cleanliness.
+
+**What was discovered (empirical, next session needs):**
+- **No VBA compiler in CI.** `build/build.ps1` checks only Sub/Function block-balance + duplicate proc names across modules — it does NOT compile VBA. `ChrW`/type errors survive it. The real compile+run gate is the owner importing `dist/MacrosBundle.bas` and running the workbook.
+- **Finalize persists config by `ws.Copy` of the WHOLE Setup sheet → hidden `_Config`** — so hidden columns (e.g. `RID_COL`=J, the per-row chain id) auto-persist; readers read `_Config` via `CfgSheet()`.
+- **Build globs `src/packages/Pkg*.bas`** — non-`Pkg*` modules are excluded (so MacroLayout was never bundled; deleting it changed nothing).
+- **Module-scope `Const` must live in the declarations section** (top of module), not between procedures — VBA compile error otherwise.
+- **`/deliberate` on this machine:** codex can't read files; prompts go via stdin; `gpt-5.6-terra`/`-sol` medium; the panel found the swallowed-failure bug + ChrW/ParseCode/speed defects.
+
+**Still open (needs the human):**
+- **Manual Excel verification — the hard gate before merge.** The 6-step checklist is in PR #1's body (and plan Task 10 Step 5). Only the owner can run it (no headless runner). Record the result in the PR, then `/ship`.
+- Deferred non-blocking Minors (in `.superpowers/sdd/progress.md`): T2 rare-exception mislabel; T7 benign double-count + MsgBox truncation; T5 cosmetics.
+- Design §8 built-page polish (page titles/legend/nav, live preview, distinct admin area) — separate future pass.
+
+**Next phase.** After the manual run passes → **`/ship`** to land PR #1 to `main`. Then pick up a SEPARATE track: **catalog build-out** (`docs/macro-catalog-plug-and-play.md`, ~58 of ~60 macros unbuilt) or the **Apps Script port** of the now-v1.1.0 contract.
+Read manifest: `spec/contract.md` (~22KB, v1.1.0) · `docs/designs/2026-07-24-compose-your-buttons-design.md` (~17KB) · this plan (~60KB) · `.superpowers/sdd/progress.md` (SDD ledger + deferred Minors) · `src/core/Core.bas` (~90KB, read in slices via Grep — dispatch `Core_Run`/`RunAction`/`Core_RunChain`, gate `Core_FinalizeSetup`/`ComposeReport`, builder `Core_BuildControlPanel`/`BuildGroupedPanels`).
