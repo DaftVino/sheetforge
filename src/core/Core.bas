@@ -176,6 +176,41 @@ Public Function Core_CfgTable(ctx As Object, ByVal key As String, _
     Core_CfgTable = TableValues(ctx("reg"), key, a, b, c)
 End Function
 
+' ---- setup-helper API: read/write the LIVE Setup sheet before Finalize ----
+' For "setup helper" actions (e.g. suggest column types) that operate on what
+' the user is editing on the Setup tab, not the activated _Config. These encode
+' the Setup layout so a package never hardcodes column positions.
+
+' Read a 3-column table block (tab/prefix/type map style) from the Setup sheet.
+Public Function Core_SetupTable(ByVal key As String, _
+                                ByRef a() As String, ByRef b() As String, ByRef c() As String) As Boolean
+    Core_SetupTable = ReadTable3(SetupSheet(), key, a, b, c)
+End Function
+
+' Write one column of a block on the Setup sheet: colOffset 0=C, 1=D, 2=E.
+' Values are applied, in order, to the block's populated rows (those with a
+' non-blank first column) - the same rows Core_SetupTable returns.
+Public Sub Core_SetupSetColumn(ByVal key As String, ByVal colOffset As Long, values As Collection)
+    Dim ws As Worksheet, r As Long, nextK As Long, i As Long, n As Long
+    Set ws = SetupSheet()
+    If ws Is Nothing Then Exit Sub
+    r = FindKeyRow(ws, key)
+    If r = 0 Then Exit Sub
+    nextK = NextKeyRow(ws, r)
+    For i = r + 1 To nextK - 1
+        If Trim(CStr(ws.Cells(i, VAL_COL).Value)) <> "" Then
+            n = n + 1
+            If n <= values.Count Then ws.Cells(i, VAL_COL + colOffset).Value = values(n)
+        End If
+    Next i
+End Sub
+
+Private Function SetupSheet() As Worksheet
+    On Error Resume Next
+    Set SetupSheet = ThisWorkbook.Worksheets(SETUP_SHEET)
+    On Error GoTo 0
+End Function
+
 ' ---- value resolution: sheet read, else manifest default ----
 Private Function ScalarValue(reg As Object, ByVal key As String) As String
     Dim v As String
