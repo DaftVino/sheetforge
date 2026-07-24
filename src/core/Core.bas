@@ -1102,6 +1102,9 @@ Private Function MintChainId(ByVal label As String, used As Object) As String
         End If
     Next i
     base = Trim(Replace(base, "__", "_"))
+    Do While Len(base) > 0 And Right$(base, 1) = "_"
+        base = Left$(base, Len(base) - 1)
+    Loop
     If Len(base) = 0 Then base = "chain"
     cand = "chain." & base
     Do While used.Exists(LCase(cand))
@@ -1217,6 +1220,131 @@ Private Function ReadCodeMap(ws As Worksheet) As Object
     Next ch
 End Function
 
+' Mint chain.<slug> into any chains-block row that has a Button name but no id.
+' Runs on the LIVE Setup sheet AFTER the user confirms, so Finalize's copy persists them.
+Private Sub AssignChainIds(ws As Worksheet)
+    Dim kr As Long, nk As Long, i As Long, used As Object, label As String, id As String
+    Set used = CreateObject("Scripting.Dictionary")
+    kr = FindKeyRow(ws, CHAINS_KEY)
+    If kr = 0 Then Exit Sub
+    nk = NextKeyRow(ws, kr)
+    For i = kr + 1 To nk - 1                 ' register existing ids
+        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+        If Len(id) > 0 Then used(LCase(id)) = True
+    Next i
+    For i = kr + 1 To nk - 1                 ' mint for named rows lacking an id
+        label = Trim(CStr(ws.Cells(i, VAL_COL).Value))
+        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+        If Len(label) > 0 And Len(id) = 0 Then
+            id = MintChainId(label, used)
+            ws.Cells(i, RID_COL).Value = id
+            used(LCase(id)) = True
+        End If
+    Next i
+End Sub
+
+' Build the review text + count STRUCTURAL problems (things that must be fixed
+' before activating). Validates chain steps against the registry, action + chain
+' ids against the reserved chain.* namespace, and every code against ParseCode.
+' Unassigned/hidden button lists and the layout note are SOFT (informational).
+Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As String
+    Dim s As String, chains As Collection, ch As Object, ids As Object, stepId As Variant
+    Dim tabNum As Long, colIx As Long, colL As String, code As String
+    Dim map As Object, k As Variant, unassigned As String, hidden As String
+    Dim regX As Object, aX As Object
+    Dim ch2 As Object, actIds As Object, seenIds As Object, cid As String
+    Set ids = ActionIdSet()                        ' lowercased set of valid action ids
+    Set chains = ReadChains(ws)
+
+    s = "CHAINS:" & vbCrLf
+    If chains.Count = 0 Then s = s & "  (none)" & vbCrLf
+    For Each ch In chains
+        s = s & "  - " & ch("label") & "  ->  "
+        If ch("steps").Count = 0 Then
+            s = s & "(no steps!)": structural = structural + 1
+        Else
+            For Each stepId In ch("steps")
+                s = s & CStr(stepId)
+                If Not ids.Exists(LCase(CStr(stepId))) Then
+                    s = s & "[UNKNOWN]": structural = structural + 1
+                End If
+                s = s & "  "
+            Next stepId
+        End If
+        code = CStr(ch("code"))
+        If Len(code) > 0 And LCase(code) <> "hide" Then
+            If Not ParseCode(code, tabNum, colIx, colL) Then _
+                s = s & "  {bad code '" & code & "'}": structural = structural + 1
+        End If
+        s = s & vbCrLf
+    Next ch
+
+    ' Placement codes: validity + collect unassigned/hidden.
+    Set map = ReadCodeMap(ws)
+    For Each k In map.Keys
+        code = CStr(map(k))
+        If LCase(code) = "hide" Then
+            hidden = hidden & "  - " & k & vbCrLf
+        ElseIf Len(code) = 0 Then
+            unassigned = unassigned & "  - " & k & vbCrLf
+        ElseIf Not ParseCode(code, tabNum, colIx, colL) Then
+            s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf: structural = structural + 1
+        End If
+    Next k
+
+    ' (a) no package action id may live in the reserved chain.* namespace
+    For Each regX In BuildRegistry()
+        For Each aX In regX("actions")
+            If IsChainId(CStr(aX("id"))) Then
+                s = s & "RESERVED: action id '" & aX("id") & "' uses chain.*" & vbCrLf
+                structural = structural + 1
+            End If
+        Next aX
+    Next regX
+    ' (b) each existing chain id must start chain., not collide with an action id, and be unique
+    Set actIds = ActionIdSet()
+    Set seenIds = CreateObject("Scripting.Dictionary")
+    For Each ch2 In ReadChains(ws)
+        cid = CStr(ch2("id"))
+        If Len(cid) > 0 Then
+            If Not IsChainId(cid) Then _
+                s = s & "BAD chain id '" & cid & "' (must start chain.)" & vbCrLf: structural = structural + 1
+            If actIds.Exists(LCase(cid)) Then _
+                s = s & "COLLISION: chain id '" & cid & "' matches an action id" & vbCrLf: structural = structural + 1
+            If seenIds.Exists(LCase(cid)) Then _
+                s = s & "DUPLICATE chain id '" & cid & "'" & vbCrLf: structural = structural + 1
+            seenIds(LCase(cid)) = True
+        End If
+    Next ch2
+
+    If AnyCode(map) Then
+        s = s & vbCrLf & "A layout is ACTIVE (numbered pages will be built)." & vbCrLf
+        If Len(unassigned) > 0 Then s = s & "Unassigned -> page 1:" & vbCrLf & unassigned
+        If Len(hidden) > 0 Then s = s & "Hidden (not placed):" & vbCrLf & hidden
+    Else
+        s = s & vbCrLf & "No page codes -> a single 'Macros' tab (current behavior)." & vbCrLf
+    End If
+    ComposeReport = s
+End Function
+
+Private Function ActionIdSet() As Object
+    Dim d As Object, reg As Object, a As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            d(LCase(CStr(a("id")))) = True
+        Next a
+    Next reg
+    Set ActionIdSet = d
+End Function
+
+Private Function AnyCode(map As Object) As Boolean
+    Dim k As Variant
+    For Each k In map.Keys
+        If Len(Trim(CStr(map(k)))) > 0 Then AnyCode = True: Exit Function
+    Next k
+End Function
+
 '================================================================
 ' 6. FINALIZE  (validate the Setup sheet, then activate -> _Config)
 '================================================================
@@ -1260,8 +1388,21 @@ Public Sub Core_FinalizeSetup()
     Else
         msg = warn & " item(s) to note:" & vbCrLf & vbCrLf & rpt
     End If
+
+    ' --- Compose Your Buttons: validate chains + placement ---
+    Dim composeRep As String, structural As Long
+    composeRep = ComposeReport(ws, structural)
+    msg = msg & vbCrLf & vbCrLf & String(40, "-") & vbCrLf & composeRep
+    If structural > 0 Then
+        MsgBox msg & vbCrLf & structural & " problem(s) above must be fixed before activating.", _
+               vbExclamation, "Finalize Setup Tab"
+        Exit Sub
+    End If
+
     If MsgBox(msg & vbCrLf & "Activate this configuration now?", _
               vbQuestion + vbYesNo, "Finalize Setup Tab") = vbNo Then Exit Sub
+
+    AssignChainIds ws          ' mint ids now, after confirm, before the copy persists them
 
     ' --- activate: copy Setup -> hidden _Config ---
     Application.ScreenUpdating = False
@@ -1437,4 +1578,67 @@ Private Function IsTrue(ByVal v As Variant) As Boolean
     Else
         IsTrue = (UCase(Trim(CStr(v))) = "TRUE" Or Trim(CStr(v)) = "1")
     End If
+End Function
+
+' ---- page-code parsing / column math (ported from MacroLayout; Task 9 reuses) ----
+
+' "12AB" -> tabNum 12, colIndex for "AB". Returns False on malformed input.
+' HARDENED: rejects page 0, guards CLng overflow on the digit run.
+Private Function ParseCode(ByVal code As String, ByRef tabNum As Long, _
+                           ByRef colIndex As Long, ByRef colLetter As String) As Boolean
+    Dim s As String, i As Long, ch As String, digits As String, letters As String
+    tabNum = 0: colIndex = 0: colLetter = ""
+    s = UCase(Trim(code))
+    If Len(s) = 0 Then Exit Function
+    i = 1
+    Do While i <= Len(s)
+        ch = Mid(s, i, 1)
+        If ch >= "0" And ch <= "9" Then digits = digits & ch Else Exit Do
+        i = i + 1
+    Loop
+    Do While i <= Len(s)
+        ch = Mid(s, i, 1)
+        If ch >= "A" And ch <= "Z" Then letters = letters & ch Else Exit Do
+        i = i + 1
+    Loop
+    If i <= Len(s) Then Exit Function
+    If Len(digits) = 0 Or Len(letters) = 0 Then Exit Function
+    If Len(digits) > 7 Then Exit Function        ' overflow guard (CLng-safe page range)
+    tabNum = CLng(digits)
+    If tabNum < 1 Then Exit Function             ' pages are 1-based; "0A" is invalid
+    colLetter = letters
+    For i = 1 To Len(letters)
+        colIndex = colIndex * 26 + (Asc(Mid(letters, i, 1)) - Asc("A") + 1)
+    Next i
+    ParseCode = True
+End Function
+
+Private Function IndexToCol(ByVal idx As Long) As String
+    Dim n As Long, r As Long, s As String
+    n = idx
+    Do While n > 0
+        r = (n - 1) Mod 26
+        s = Chr(Asc("A") + r) & s
+        n = (n - 1) \ 26
+    Loop
+    IndexToCol = s
+End Function
+
+Private Function SortedKeys(d As Object) As Variant
+    Dim k As Variant, arr() As Long, n As Long, i As Long, j As Long, t As Long
+    n = d.Count
+    If n = 0 Then SortedKeys = Array(): Exit Function
+    ReDim arr(0 To n - 1)
+    i = 0
+    For Each k In d.Keys
+        arr(i) = CLng(k): i = i + 1
+    Next k
+    For i = 0 To n - 2
+        For j = 0 To n - 2 - i
+            If arr(j) > arr(j + 1) Then
+                t = arr(j): arr(j) = arr(j + 1): arr(j + 1) = t
+            End If
+        Next j
+    Next i
+    SortedKeys = arr
 End Function
