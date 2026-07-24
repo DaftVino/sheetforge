@@ -25,13 +25,17 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- GENERAL ----
     Core_AddSection reg, "GENERAL"
-    Core_AddField reg, "k_export_base", "Export file BASE name (the date is added in front)", "text", "Food Performance Dash"
-    Core_AddField reg, "k_settings_sheet", "Settings / CF sheet name (kept hidden inside the export)", "sheet", "README", "advanced"
-    Core_AddField reg, "k_export_offset", "Export date offset in days  (-1 = yesterday, 0 = today)", "int", "-1", "advanced"
+    Core_AddField reg, "k_export_base", "Name for the exported file (a date is added in front)", "text", "Food Performance Dash", _
+        help:="The saved file will be named like:  2026-01-15 <this text>.xlsx"
+    Core_AddField reg, "k_settings_sheet", "Settings / thresholds sheet name", "sheet", "README", "advanced", _
+        "The hidden sheet whose cells drive the conditional-formatting thresholds; it is kept (hidden) inside the export so the colors still work."
+    Core_AddField reg, "k_export_offset", "Date shift for the export file name (days)", "int", "-1", "advanced", _
+        "How many days to shift the date put in front of the file name.  -1 = yesterday, 0 = today, 1 = tomorrow."
 
     ' ---- EXPORT TABS ----
-    Core_AddSection reg, "EXPORT TABS  (copied into the export, in this order)"
-    Core_AddList reg, "k_export_tabs", "List each tab name to export, one per row:", "Tab name  v"
+    Core_AddSection reg, "EXPORT TABS"
+    Core_AddList reg, "k_export_tabs", "Tabs to include in the export (one per row, in order)", "Tab name", _
+        help:="Each finished tab to copy into the exported .xlsx, top to bottom in this order."
     Core_AddDefault reg, "k_export_tabs", "Food Recap (Daily)"
     Core_AddDefault reg, "k_export_tabs", "Category Var"
     Core_AddDefault reg, "k_export_tabs", "Var Detail"
@@ -40,7 +44,8 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- IMPORT FILES ----
     Core_AddSection reg, "IMPORT FILES"
-    Core_AddTable reg, "k_import", "For each input tab: its name, the source-file name prefix, and the column type map.", "Input tab  v|Source file name prefix|Type map (T,N,D,DT,B,G)"
+    Core_AddTable reg, "k_import", "Import files (one row per input tab)", "Input tab (in this workbook)|Source file (name starts with...)|Column types", _
+        help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, store numbers, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them."
     Core_AddDefault reg, "k_import", "IN_Day|Target Inventory Data (day)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_PTD|Target Inventory Data (period to date)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_InvValue|Inventory Value Data|T,T,T,T,T,T,T,N,N,N,N"
@@ -48,10 +53,14 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- REF_MASTER ----
     Core_AddSection reg, "REF_MASTER"
-    Core_AddField reg, "k_master_prefix", "Master-list file name prefix", "file", "Master Store List"
-    Core_AddField reg, "k_master_dest", "Destination tab in THIS workbook", "sheet", "Ref_Master"
-    Core_AddField reg, "k_master_sheet", "Source sheet name inside that file", "text", "Current Master", "advanced"
-    Core_AddList reg, "k_master_cols", "Source column headers to copy, in order (1st = Store, kept as text):", "Header  v"
+    Core_AddField reg, "k_master_prefix", "Master-list file (name starts with...)", "file", "Master Store List", _
+        help:="The newest file in THIS workbook's folder whose name starts with this text; used to refresh the destination tab below. A trailing (1) or (2) is ignored."
+    Core_AddField reg, "k_master_dest", "Destination tab (in this workbook)", "sheet", "Ref_Master", _
+        help:="The tab in THIS workbook that the master list is written into."
+    Core_AddField reg, "k_master_sheet", "Sheet name inside the master file", "text", "Current Master", "advanced", _
+        "The worksheet name to read from inside the master-list file."
+    Core_AddList reg, "k_master_cols", "Columns to copy from the master file (in order)", "Column header", _
+        help:="The exact column headers to pull from the master file, in order. The FIRST one is the store key and is always kept as text."
     Core_AddDefault reg, "k_master_cols", "Store #"
     Core_AddDefault reg, "k_master_cols", "Location Name"
     Core_AddDefault reg, "k_master_cols", "Entity"

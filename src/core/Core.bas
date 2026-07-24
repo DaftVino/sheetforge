@@ -66,23 +66,26 @@ Public Sub Core_DeclarePackage(reg As Object, ByVal id As String, _
 End Sub
 
 Public Sub Core_AddSection(reg As Object, ByVal title As String)
-    reg("fields").Add NewField("", title, "section", "", "simple")
+    reg("fields").Add NewField("", title, "section", "", "simple", "")
 End Sub
 
 ' tier is "simple" (default) or "advanced". Advanced fields are grouped under an
 ' "ADVANCED - most users can leave these as-is" band so regular users can stop
-' after the simple fields.
+' after the simple fields. help is an optional plain-language note shown in grey
+' under the field (pass via help:= to skip tier).
 Public Sub Core_AddField(reg As Object, ByVal key As String, ByVal label As String, _
                          ByVal kind As String, ByVal dflt As String, _
-                         Optional ByVal tier As String = "simple")
-    reg("fields").Add NewField(key, label, kind, dflt, tier)
+                         Optional ByVal tier As String = "simple", _
+                         Optional ByVal help As String = "")
+    reg("fields").Add NewField(key, label, kind, dflt, tier, help)
 End Sub
 
 Public Sub Core_AddList(reg As Object, ByVal key As String, _
                         ByVal label As String, ByVal colHeader As String, _
-                        Optional ByVal tier As String = "simple")
+                        Optional ByVal tier As String = "simple", _
+                        Optional ByVal help As String = "")
     Dim f As Object
-    Set f = NewField(key, label, "list", "", tier)
+    Set f = NewField(key, label, "list", "", tier, help)
     f("headers") = colHeader
     reg("fields").Add f
 End Sub
@@ -91,9 +94,10 @@ End Sub
 ' commas, e.g. "Type map (T,N,D,...)"). Up to 3 columns are read (C, D, E).
 Public Sub Core_AddTable(reg As Object, ByVal key As String, _
                          ByVal label As String, ByVal colHeaders As String, _
-                         Optional ByVal tier As String = "simple")
+                         Optional ByVal tier As String = "simple", _
+                         Optional ByVal help As String = "")
     Dim f As Object
-    Set f = NewField(key, label, "table", "", tier)
+    Set f = NewField(key, label, "table", "", tier, help)
     f("headers") = colHeaders
     reg("fields").Add f
 End Sub
@@ -119,7 +123,7 @@ End Sub
 
 Private Function NewField(ByVal key As String, ByVal label As String, _
                           ByVal kind As String, ByVal dflt As String, _
-                          ByVal tier As String) As Object
+                          ByVal tier As String, ByVal help As String) As Object
     Dim f As Object
     Set f = CreateObject("Scripting.Dictionary")
     f.Add "key", key
@@ -128,6 +132,7 @@ Private Function NewField(ByVal key As String, ByVal label As String, _
     f.Add "default", dflt
     f.Add "headers", ""
     f.Add "defaults", New Collection
+    f.Add "help", help
     ' Normalize the tier so an unknown or mis-cased value degrades to "simple"
     ' (still shown) rather than matching neither render pass and vanishing.
     Dim t As String
@@ -781,7 +786,24 @@ Private Function RenderScalar(ws As Worksheet, ByVal r As Long, reg As Object, f
     LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, VAL_COL).Value = ScalarValue(reg, CStr(f("key")))
     Yellow ws.Cells(r, VAL_COL)
-    RenderScalar = r + 1
+    r = r + 1
+    r = RenderHelp(ws, r, CStr(f("help")))
+    RenderScalar = r
+End Function
+
+' A plain-language note under a field, grey + italic + wrapped. Its column A and
+' column C stay blank, so it is invisible to the config block readers (which key
+' off column A) and the list/table readers (which key off column C). Returns the
+' next row (unchanged when there is no help text).
+Private Function RenderHelp(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
+    If Trim(txt) = "" Then RenderHelp = r: Exit Function
+    ws.Cells(r, 2).Value = txt
+    ws.Cells(r, 2).Font.Italic = True
+    ws.Cells(r, 2).Font.Size = 9
+    ws.Cells(r, 2).Font.Color = RGB(120, 120, 120)
+    ws.Cells(r, 2).WrapText = True
+    ws.Cells(r, 2).VerticalAlignment = xlTop
+    RenderHelp = r + 1
 End Function
 
 ' Write a field label into column B, wrapped + top-aligned, so a long label
@@ -800,6 +822,7 @@ Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f A
     ws.Cells(r, VAL_COL).Value = f("headers")
     ws.Cells(r, VAL_COL).Font.Bold = True
     r = r + 1
+    r = RenderHelp(ws, r, CStr(f("help")))
     Set vals = ListValues(reg, CStr(f("key")))
     For i = 1 To MAX_LIST
         If i <= vals.Count Then ws.Cells(r, VAL_COL).Value = vals(i)
@@ -823,6 +846,7 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
         ws.Cells(r, VAL_COL + j).Font.Bold = True
     Next j
     r = r + 1
+    r = RenderHelp(ws, r, CStr(f("help")))
     hasData = TableValues(reg, CStr(f("key")), a, b, c)
     For i = 1 To MAX_LIST
         If hasData Then
@@ -925,6 +949,7 @@ Public Sub Core_BuildControlPanel()
         ws.Buttons.Delete
         On Error GoTo Fail
         ws.Cells.Clear
+        ws.Cells.UnMerge                       ' Clear does not unmerge; drop old merges
     Else
         Set ws = ThisWorkbook.Worksheets.Add(Before:=ThisWorkbook.Worksheets(1))
         ws.name = MACRO_SHEET
@@ -961,10 +986,15 @@ Public Sub Core_BuildControlPanel()
     For Each e In entries
         i = i + 1
         AddBtn ws, "btn" & i, CStr(e(0)), CStr(e(1)), leftPos, topPos, btnW, btnH
-        ws.Cells(helpRow, 3).Value = CStr(e(2))
-        ws.Cells(helpRow, 3).Font.Size = 10
-        ws.Cells(helpRow, 3).VerticalAlignment = xlTop
-        ws.Cells(helpRow, 3).WrapText = True
+        ' Description spans 2 rows (~button height) so a long, wrapped description
+        ' shows in full instead of being clipped to one 15pt row.
+        With ws.Range(ws.Cells(helpRow, 3), ws.Cells(helpRow + 1, 3))
+            .Merge
+            .Value = CStr(e(2))
+            .Font.Size = 10
+            .WrapText = True
+            .VerticalAlignment = xlCenter
+        End With
         topPos = topPos + btnH + gap
         helpRow = helpRow + 3
     Next e
