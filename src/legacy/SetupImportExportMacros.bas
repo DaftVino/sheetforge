@@ -183,7 +183,7 @@ Public Sub ImportSourceData()
                 For c = 1 To sLastCol
                     If (c - 1) <= UBound(codes) Then code = Trim(codes(c - 1)) Else code = "G"
                     ' Text columns must be formatted as Text BEFORE writing, otherwise
-                    ' Excel converts numeric-looking strings (e.g. store "3176") back to
+                    ' Excel converts numeric-looking strings (e.g. store "12345") back to
                     ' numbers, which breaks the dashboard's type-strict MATCH lookups
                     ' (e.g. totals, percentages, key metrics).
                     If code = "T" Then _
@@ -411,7 +411,7 @@ Public Sub ExportDashboard()
                     sv = sp.Value
                     cel.ClearContents
                     sp.Value = sv
-                ElseIf cel.HasArray Then              ' legacy CTRL+SHIFT+ENTER array (e.g. Read Rank)
+                ElseIf cel.HasArray Then              ' legacy CTRL+SHIFT+ENTER array (e.g. a TRANSPOSE array)
                     Set sp = cel.CurrentArray
                     sv = sp.Value
                     sp.ClearContents

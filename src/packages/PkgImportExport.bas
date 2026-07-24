@@ -146,7 +146,7 @@ Public Sub PkgImportExport_Import(ctx As Object)
                 For cc = 1 To sLastCol
                     If (cc - 1) <= UBound(codes) Then code = Trim(codes(cc - 1)) Else code = "G"
                     ' Text columns must be formatted as Text BEFORE writing, else Excel
-                    ' turns numeric-looking strings (store "3176") back into numbers and
+                    ' turns numeric-looking strings (store "12345") back into numbers and
                     ' breaks the dashboard's type-strict MATCH lookups.
                     If code = "T" Then _
                         ws.Range(ws.Cells(2, cc), ws.Cells(sLastRow, cc)).NumberFormat = "@"
