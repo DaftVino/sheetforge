@@ -21,6 +21,271 @@
 
 ---
 
+## Panel hardening — MANDATORY amendments (2026-07-24)
+
+A `/deliberate` panel reviewed this plan and found real execution defects. These
+amendments OVERRIDE the task bodies below; each executing subagent MUST read the
+amendment for its task. Inline bug-fixes already applied above: `ChrW$(&H2713)`
+(not `Chr`), `FirstLine` uses `If/Then` (not eager `IIf`), `ParseCode` rejects
+page 0 and guards `CLng` overflow. Not a defect (rejected panel claim): VBA allows
+`Dim` anywhere in a procedure — but move new `Dim`s to each procedure's top anyway
+for cleanliness.
+
+### A. Compile gate per Core task (verification)
+
+The build does NOT compile VBA (only duplicate-name + block-balance). So after
+**each** of Tasks 2, 5, 6, 7, 8, 9 (any dispatcher/Core-API change), the manual
+gate is: import `dist/MacrosBundle.bas` into the workbook → **VBE ▸ Debug ▸
+Compile VBAProject** (must be clean) → run the task's touched entry point once.
+Do NOT defer all manual checks to Task 10. Record each compile-clean in the task's
+commit body.
+
+### B. Task 2 — detect swallowed failures + own `ctx` failure flag
+
+Package handlers catch their own error, call `Core_Fail`, and return *normally*
+(e.g. `PkgImportExport.bas:100`). So `Application.Run` raises nothing and a failed
+step would report `ok=True`. Fix, in Task 2:
+
+1. Amend `Core_Fail` (existing Core sub) to record the failure on `ctx` and go
+   quiet under a chain:
+
+```vba
+Public Sub Core_Fail(ctx As Object, ByVal actionId As String, e As ErrObject)
+    On Error Resume Next
+    ctx("failed") = True
+    ctx("failNumber") = e.Number
+    ctx("failMsg") = e.Description
+    On Error GoTo 0
+    Core_Log ctx, "FAILED " & actionId & ": #" & e.Number & " " & e.Description
+    If Not IsQuiet(ctx) Then _
+        MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
+               "#" & e.Number & "  " & e.Description, vbExclamation, "Macro Error"
+End Sub
+```
+
+   (Keep whatever `Core_Fail` did before — speed restore, logging — but gate the
+   MsgBox on `Not IsQuiet(ctx)` and set the three `ctx` keys.)
+
+2. In `RunAction`, after `Application.Run entry, ctx` returns without a raised
+   error, check the flag before declaring success:
+
+```vba
+    On Error GoTo StepFail
+    Application.Run entry, ctx
+    On Error GoTo 0
+    If CtxFlag(ctx, "failed") Then         ' handler swallowed its own error
+        res("ok") = False
+        res("errNumber") = CtxNum(ctx, "failNumber")
+        res("errText") = CtxStr(ctx, "failMsg")
+    Else
+        res("ok") = True
+        res("message") = CtxStr(ctx, "doneMsg")
+    End If
+    Set RunAction = res
+    Exit Function
+```
+
+   Add tiny safe accessors (avoid `Dictionary` missing-key errors):
+
+```vba
+Private Function CtxFlag(ctx As Object, ByVal k As String) As Boolean
+    On Error Resume Next
+    If ctx.Exists(k) Then CtxFlag = (ctx(k) = True)
+End Function
+Private Function CtxStr(ctx As Object, ByVal k As String) As String
+    On Error Resume Next
+    If ctx.Exists(k) Then CtxStr = CStr(ctx(k))
+End Function
+Private Function CtxNum(ctx As Object, ByVal k As String) As Long
+    On Error Resume Next
+    If ctx.Exists(k) Then CtxNum = CLng(ctx(k))
+End Function
+```
+
+### C. Task 8 — speed ownership + honest error handling
+
+The chain runner must NOT hold an outer `Core_SpeedOn`: `RunAction`'s hard
+`RestoreSpeed` on a failing step would corrupt the outer depth. Correct model:
+**each step self-manages speed (as today); the runner holds none.** This also
+makes "Excel responsive at the Continue/Stop prompt" automatic. Replace the
+Task-8 `Core_RunChain` body's speed handling:
+
+- **Remove** the outer `Core_SpeedOn` / `Done: Core_SpeedOff` and the
+  `Core_SpeedOn` re-open after Continue.
+- Replace `On Error GoTo Done` (which faked a "done" summary on any fault) with a
+  real handler that reports a runner fault distinctly:
+
+```vba
+Private Sub Core_RunChain(ByVal chainId As String)
+    Dim chains As Collection, ch As Object, target As Object
+    Dim stepId As Variant, res As Object, n As Long, ok As Long, summary As String
+    Dim stopped As Boolean, total As Long
+    On Error GoTo RunnerFail
+
+    Set chains = ReadChains(CfgSheet())
+    For Each ch In chains
+        If LCase(CStr(ch("id"))) = LCase(chainId) Then Set target = ch: Exit For
+    Next ch
+    If target Is Nothing Then
+        MsgBox "Chain not found: " & chainId, vbExclamation, "Core": Exit Sub
+    End If
+    total = target("steps").Count
+
+    For Each stepId In target("steps")
+        n = n + 1
+        Set res = RunAction(CStr(stepId), True)      ' quiet; each step owns its speed
+        If Not res("found") Then
+            summary = summary & n & ". " & stepId & "  X not installed" & vbCrLf
+            If Not AskContinue(n, CStr(stepId), "action not installed") Then stopped = True: Exit For
+        ElseIf res("ok") Then
+            ok = ok + 1
+            summary = summary & n & ". " & res("label") & "  " & ChrW$(&H2713) & _
+                      IIf(Len(res("message")) > 0, "  (" & FirstLine(CStr(res("message"))) & ")", "") & vbCrLf
+        Else
+            summary = summary & n & ". " & res("label") & "  X  #" & res("errNumber") & _
+                      " " & res("errText") & vbCrLf
+            If Not AskContinue(n, CStr(res("label")), CStr(res("errText"))) Then stopped = True: Exit For
+        End If
+    Next stepId
+
+    Dim head As String
+    head = target("label") & IIf(stopped, "  - stopped at step " & n, "  - done") & _
+           "  (" & ok & "/" & total & " ok)"
+    MsgBox head & vbCrLf & vbCrLf & summary, _
+           IIf(stopped, vbExclamation, vbInformation), "Chain"
+    Exit Sub
+RunnerFail:
+    RestoreSpeed
+    MsgBox "Chain '" & chainId & "' error at step " & n & ":" & vbCrLf & vbCrLf & _
+           "#" & Err.Number & "  " & Err.Description, vbExclamation, "Chain"
+End Sub
+```
+
+   `RunAction` still calls `RestoreSpeed` in its own `StepFail` — that is now safe
+   (no outer wrapper to corrupt). Keep `AskContinue` and `FirstLine` as written.
+
+### D. Task 7 — real validation gate + mint-after-confirm + namespace checks
+
+1. **Mint ids AFTER the user confirms**, not before the review (a cancelled
+   Finalize must not mutate the draft). Order in `Core_FinalizeSetup`: build the
+   report (validating by label, previewing minted ids without writing) → show the
+   confirm → on **Yes**, call `AssignChainIds ws` → then the existing `ws.Copy`.
+
+2. **Structural problems BLOCK activation.** Split problems into *structural*
+   (unknown step id, empty chain, malformed/overflow code, reserved-namespace
+   violation, id collision) and *soft notes* (unassigned buttons, missing
+   files/tabs — the existing warn-and-continue set). If `structural > 0`, show the
+   report with "Fix these before activating." and **Exit Sub without copying**.
+   Soft notes keep the existing "N items to note… Activate now?" behavior. This
+   satisfies the contract's "resolve + validate at activate time."
+
+3. **Enforce the reserved namespace** in the validation pass (add to
+   `ComposeReport`, counting into a `structural` counter):
+
+```vba
+    ' (a) no package action id may live in the reserved chain.* namespace
+    Dim reg As Object, a As Object
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            If IsChainId(CStr(a("id"))) Then
+                s = s & "RESERVED: action id '" & a("id") & "' uses chain.*" & vbCrLf
+                structural = structural + 1
+            End If
+        Next a
+    Next reg
+    ' (b) every chain id must start chain. and not collide with an action id
+    Dim ch2 As Object, actIds As Object
+    Set actIds = ActionIdSet()
+    For Each ch2 In ReadChains(ws)
+        If Len(CStr(ch2("id"))) > 0 Then
+            If Not IsChainId(CStr(ch2("id"))) Then _
+                s = s & "BAD chain id '" & ch2("id") & "' (must start chain.)" & vbCrLf: structural = structural + 1
+            If actIds.Exists(LCase(CStr(ch2("id")))) Then _
+                s = s & "COLLISION: chain id '" & ch2("id") & "' matches an action id" & vbCrLf: structural = structural + 1
+        End If
+    Next ch2
+```
+
+   Unknown-step and bad-code detections already in `ComposeReport` increment the
+   same `structural` counter (change `problems` → `structural` for those, and
+   include the `AssignChainIds` duplicate-id report in it too).
+
+### E. Task 9 — always-present admin page + concrete helpers
+
+1. **Force page 1 + admin, always.** Before rendering, ensure page 1 exists even
+   when no button maps to it (all `hide`, or codes start at page 2), and always
+   place the admin strip there. Guard `SortedKeys(pages)` against an empty dict.
+
+```vba
+    ' after the placement loop, before rendering:
+    If Not pages.Exists(1) Then pages.Add 1, CreateObject("Scripting.Dictionary")
+    ' ...render each tab in SortedKeys(pages); AddAdminButtonsGrouped on the page-1 sheet.
+```
+
+2. **Concrete `AddToPage`** (nested dicts: `Set` for object values, Collections
+   1-based):
+
+```vba
+Private Sub AddToPage(pages As Object, ByVal tabNum As Long, ByVal colIx As Long, ByVal btn As Variant)
+    Dim cols As Object, items As Collection
+    If Not pages.Exists(tabNum) Then pages.Add tabNum, CreateObject("Scripting.Dictionary")
+    Set cols = pages(tabNum)
+    If Not cols.Exists(colIx) Then cols.Add colIx, New Collection
+    Set items = cols(colIx)
+    items.Add btn                       ' btn = Array(id, caption, onAction, help)
+End Sub
+```
+
+3. **Concrete `RenderPage`** (mirror `ML_ApplyLayout`'s per-tab loop, but Core-owned;
+   col `9999` renders as an "Unassigned" header instead of `IndexToCol`):
+
+```vba
+Private Function RenderPage(pages As Object, ByVal tabNum As Long) As Worksheet
+    Dim panel As Worksheet, cols As Object, colKeys As Variant, ci As Long
+    Dim colIx As Long, items As Collection, ii As Long, it As Variant
+    Dim leftBase As Double, topBase As Double, colLeft As Double, topPos As Double, hdr As String
+    Set panel = EnsurePanelSheet(PANEL_BASE & tabNum, False)
+    panel.Tab.Color = RGB(68, 114, 196)
+    leftBase = panel.Range("B4").Left: topBase = panel.Range("B4").Top
+    AddText panel, leftBase, panel.Range("B2").Top, 400, 24, "Macros - Page " & tabNum, 15, True
+    Set cols = pages(tabNum)
+    colKeys = SortedKeys(cols)
+    For ci = LBound(colKeys) To UBound(colKeys)
+        colIx = colKeys(ci)
+        colLeft = leftBase + ci * (BTN_W + COL_GAP)          ' ci is 0-based across sorted columns
+        Set items = cols(colIx)
+        If colIx = 9999 Then hdr = "Unassigned" Else hdr = "Column " & IndexToCol(colIx)
+        AddText panel, colLeft, topBase, BTN_W, HDR_H, hdr, 11, True
+        topPos = topBase + HDR_H + ROW_GAP
+        For ii = 1 To items.Count
+            it = items(ii)
+            AddBtn panel, "b" & tabNum & "_" & colIx & "_" & ii, CStr(it(1)), CStr(it(2)), colLeft, topPos, BTN_W, BTN_H
+            topPos = topPos + BTN_H + ROW_GAP
+        Next ii
+    Next ci
+    panel.Range("A1").Select
+    Set RenderPage = panel
+End Function
+```
+
+   Port the geometry consts `BTN_W=210, BTN_H=30, ROW_GAP=8, COL_GAP=24, HDR_H=22`
+   and `PANEL_BASE="Macros "` into Core (from MacroLayout). Add `AddText` (a thin
+   wrapper over a label textbox — port `ML_AddText`). `EnsurePanelSheet(name,
+   isMain)` = ensure/clear/format the sheet: get-or-add, `Buttons.Delete`,
+   `Cells.Clear`, `Cells.UnMerge`, set tab color + column widths (extract from the
+   current `Core_BuildControlPanel` sheet-setup block). `AddAdminButtons ws,
+   topPos` / `AddAdminButtonsGrouped ws` place the two admin buttons
+   (`Core_BuildSetup`, `Core_FinalizeSetup`) exactly as today's `PanelEntries`
+   appends them.
+
+4. **`DeletePanels` safety:** because codes are now validated as structural at
+   Finalize (amendment D), `BuildGroupedPanels` receives only parseable codes, so
+   render cannot fault on a bad code. Keep `DeletePanels` before render; if a
+   later hardening pass wants render-to-temp-then-swap, note it but it is not
+   required now.
+
+---
+
 ## Task 1: Contract v1.1.0 (spec/contract.md)
 
 **Files:**
@@ -660,7 +925,9 @@ Private Function ParseCode(ByVal code As String, ByRef tabNum As Long, _
     Loop
     If i <= Len(s) Then Exit Function
     If Len(digits) = 0 Or Len(letters) = 0 Then Exit Function
+    If Len(digits) > 7 Then Exit Function        ' overflow guard (CLng-safe page range)
     tabNum = CLng(digits)
+    If tabNum < 1 Then Exit Function             ' pages are 1-based; "0A" is invalid
     colLetter = letters
     For i = 1 To Len(letters)
         colIndex = colIndex * 26 + (Asc(Mid(letters, i, 1)) - Asc("A") + 1)
@@ -859,7 +1126,7 @@ Private Sub Core_RunChain(ByVal chainId As String)
             If Not AskContinue(n, CStr(stepId), "action not installed") Then stopped = True: Exit For
         ElseIf res("ok") Then
             ok = ok + 1
-            summary = summary & n & ". " & res("label") & "  " & Chr(&H2713) & _
+            summary = summary & n & ". " & res("label") & "  " & ChrW$(&H2713) & _
                       IIf(Len(res("message")) > 0, "  (" & FirstLine(CStr(res("message"))) & ")", "") & vbCrLf
         Else
             summary = summary & n & ". " & res("label") & "  X  #" & res("errNumber") & _
@@ -891,7 +1158,7 @@ End Function
 Private Function FirstLine(ByVal s As String) As String
     Dim p As Long
     p = InStr(s, vbCr): If p = 0 Then p = InStr(s, vbLf)
-    FirstLine = IIf(p > 0, Left$(s, p - 1), s)
+    If p > 0 Then FirstLine = Left$(s, p - 1) Else FirstLine = s   ' NOT IIf: eager Left$(s,-1) would raise
 End Function
 ```
 
