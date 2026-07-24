@@ -38,6 +38,14 @@ Private Const CONFIG_SHEET   As String = "_Config"     ' hidden, written by Fina
 Private Const MACRO_SHEET    As String = "Macros"
 Private Const PACKAGES_SHEET As String = "_Packages"   ' optional enable/disable layer
 
+' ---- grouped control-panel geometry (ported from MacroLayout; Task 9) ----
+Private Const PANEL_BASE As String = "Macros "   ' grouped output tabs: "Macros 1", "Macros 2"...
+Private Const BTN_W   As Double = 210
+Private Const BTN_H   As Double = 30
+Private Const ROW_GAP As Double = 8
+Private Const COL_GAP As Double = 24
+Private Const HDR_H   As Double = 22
+
 ' ---- Setup / _Config layout ----
 Private Const KEY_COL   As Long = 1       ' column A: machine keys (hidden)
 Private Const VAL_COL   As Long = 3       ' column C: scalar value / list value / 1st table col
@@ -1487,30 +1495,75 @@ End Sub
 '================================================================
 ' 7. CONTROL PANEL  (builds the Macros tab + wires every button)
 '================================================================
+' Legacy single "Macros" tab when no page codes exist; grouped "Macros N" pages
+' when a layout is active. Prior panels are cleared before either mode draws.
 Public Sub Core_BuildControlPanel()
-    Dim ws As Worksheet, entries As New Collection, e As Variant
+    Dim buttons As Collection, codeMap As Object
+    On Error GoTo Fail
+    Application.ScreenUpdating = False
+    Set buttons = GatherButtons()
+    Set codeMap = ReadCodeMap(CfgSheet())
+    DeletePanels                         ' remove any prior "Macros N" pages
+    If AnyCode(codeMap) Then
+        DeleteLegacyPanel                ' grouped mode: drop the stale single "Macros" tab
+        BuildGroupedPanels buttons, codeMap
+    Else
+        BuildSinglePanel buttons         ' legacy single "Macros" tab (reused/cleared)
+    End If
+    Application.ScreenUpdating = True
+    Exit Sub
+Fail:
+    Application.ScreenUpdating = True
+    MsgBox "Core_BuildControlPanel error: " & Err.Description, vbExclamation, "Setup"
+End Sub
+
+' Drop the single legacy "Macros" tab when switching into grouped mode.
+Private Sub DeleteLegacyPanel()
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    ThisWorkbook.Worksheets(MACRO_SHEET).Delete
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+End Sub
+
+' Each item: Array(id, caption, onAction, help). Actions from the registry,
+' chains from activated config. Admin buttons are added by the callers.
+Private Function GatherButtons() As Collection
+    Dim out As New Collection, reg As Object, a As Object, chains As Collection, ch As Object
+    Dim onAct As String
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            onAct = "'Core_Run " & Chr(34) & CStr(a("id")) & Chr(34) & "'"
+            out.Add Array(CStr(a("id")), CStr(a("caption")), onAct, CStr(a("help")))
+        Next a
+    Next reg
+    Set chains = ReadChains(CfgSheet())
+    For Each ch In chains
+        If Len(CStr(ch("id"))) > 0 Then
+            onAct = "'Core_Run " & Chr(34) & CStr(ch("id")) & Chr(34) & "'"
+            out.Add Array(CStr(ch("id")), CStr(ch("label")), onAct, _
+                          "Chain: " & StepsInline(ch("steps")))
+        End If
+    Next ch
+    Set GatherButtons = out
+End Function
+
+Private Function StepsInline(steps As Collection) As String
+    Dim s As String, v As Variant
+    For Each v In steps
+        s = s & IIf(Len(s) > 0, " > ", "") & CStr(v)
+    Next v
+    StepsInline = s
+End Function
+
+' Legacy layout: one "Macros" tab, action + chain buttons, then Core's two admin
+' buttons appended with the same cadence. Matches the pre-grouping look.
+Private Sub BuildSinglePanel(buttons As Collection)
+    Dim ws As Worksheet, drawList As New Collection, e As Variant
     Dim i As Long, leftPos As Double, topPos As Double
     Dim btnW As Double, btnH As Double, gap As Double, helpRow As Long
-    On Error GoTo Fail
 
-    Application.ScreenUpdating = False
-    If Core_SheetExists(MACRO_SHEET) Then
-        Set ws = ThisWorkbook.Worksheets(MACRO_SHEET)
-        On Error Resume Next
-        ws.Buttons.Delete
-        On Error GoTo Fail
-        ws.Cells.Clear
-        ws.Cells.UnMerge                       ' Clear does not unmerge; drop old merges
-    Else
-        Set ws = ThisWorkbook.Worksheets.Add(Before:=ThisWorkbook.Worksheets(1))
-        ws.name = MACRO_SHEET
-    End If
-
-    ws.Tab.Color = RGB(31, 78, 121)
-    ws.Cells.Interior.Color = RGB(255, 255, 255)
-    ws.Columns("A").ColumnWidth = 2
-    ws.Columns("B").ColumnWidth = 47      ' wide enough to hold the btnW-point button
-    ws.Columns("C").ColumnWidth = 85      ' description column, sits clear of the button
+    Set ws = EnsurePanelSheet(MACRO_SHEET, True)
 
     With ws.Range("B2")
         .Value = "Macro Toolkit  -  Control Panel"
@@ -1523,7 +1576,14 @@ Public Sub Core_BuildControlPanel()
         .Font.Italic = True
     End With
 
-    PanelEntries entries          ' each item = Array(caption, onAction, help)
+    ' Daily action + chain buttons first, then Core's own setup buttons last.
+    For Each e In buttons
+        drawList.Add Array(CStr(e(1)), CStr(e(2)), CStr(e(3)))
+    Next e
+    drawList.Add Array("Create Setup Tab", "Core_BuildSetup", _
+                       "Builds a pre-filled 'Setup' tab from the installed packages. Use it to reuse these macros in another workbook.")
+    drawList.Add Array("Finalize Setup Tab", "Core_FinalizeSetup", _
+                       "Validates your Setup answers and activates them. The action buttons then use your settings instead of the built-in defaults.")
 
     ' Cadence: btnH + gap = 45pt = 3 rows at 15pt, so each description row lines
     ' up with its button. Force the row heights so the alignment holds regardless
@@ -1531,10 +1591,10 @@ Public Sub Core_BuildControlPanel()
     btnW = 220: btnH = 32: gap = 13
     leftPos = ws.Range("B5").Left
     topPos = ws.Range("B5").Top
-    ws.Rows("5:" & (5 + entries.Count * 3 + 2)).RowHeight = 15
+    ws.Rows("5:" & (5 + drawList.Count * 3 + 2)).RowHeight = 15
     helpRow = 5
     i = 0
-    For Each e In entries
+    For Each e In drawList
         i = i + 1
         AddBtn ws, "btn" & i, CStr(e(0)), CStr(e(1)), leftPos, topPos, btnW, btnH
         ' Description spans 2 rows (~button height) so a long, wrapped description
@@ -1552,28 +1612,150 @@ Public Sub Core_BuildControlPanel()
 
     ws.Activate
     ws.Range("A1").Select
-    Application.ScreenUpdating = True
-    MsgBox "Macros tab built with " & entries.Count & " button(s).", vbInformation, "Setup Complete"
-    Exit Sub
-Fail:
-    Application.ScreenUpdating = True
-    MsgBox "Core_BuildControlPanel error: " & Err.Description, vbExclamation, "Setup"
+    MsgBox "Macros tab built with " & buttons.Count & " button(s).", vbInformation, "Setup Complete"
 End Sub
 
-' Daily action buttons first (from the manifests), Core's own setup buttons last.
-Private Sub PanelEntries(entries As Collection)
-    Dim reg As Object, a As Object, onAct As String
-    For Each reg In BuildRegistry()
-        For Each a In reg("actions")
-            onAct = "'Core_Run " & Chr(34) & CStr(a("id")) & Chr(34) & "'"
-            entries.Add Array(CStr(a("caption")), onAct, CStr(a("help")))
-        Next a
-    Next reg
-    entries.Add Array("Create Setup Tab", "Core_BuildSetup", _
-                      "Builds a pre-filled 'Setup' tab from the installed packages. Use it to reuse these macros in another workbook.")
-    entries.Add Array("Finalize Setup Tab", "Core_FinalizeSetup", _
-                      "Validates your Setup answers and activates them. The action buttons then use your settings instead of the built-in defaults.")
+' Grouped layout: place each button onto a "Macros N" page by its code. Blank code
+' -> page 1 Unassigned column (9999); "hide" -> omitted; unparseable -> Unassigned.
+' Admin buttons always land in a reserved "Setup" column (9998) on page 1.
+Private Sub BuildGroupedPanels(buttons As Collection, codeMap As Object)
+    Dim pages As Object, e As Variant, id As String, code As String
+    Dim tabNum As Long, colIx As Long, colL As String, unassigned As New Collection
+    Set pages = CreateObject("Scripting.Dictionary")
+    For Each e In buttons
+        id = LCase(CStr(e(0)))
+        code = ""
+        If codeMap.Exists(id) Then code = Trim(CStr(codeMap(id)))
+        If LCase(code) = "hide" Then GoTo NextBtn
+        If Len(code) = 0 Then
+            unassigned.Add e
+        ElseIf ParseCode(code, tabNum, colIx, colL) Then
+            AddToPage pages, tabNum, colIx, e
+        Else
+            unassigned.Add e            ' unparseable degrades to Unassigned (already blocked at Finalize)
+        End If
+NextBtn:
+    Next e
+    If Not pages.Exists(1) Then pages.Add 1, CreateObject("Scripting.Dictionary")   ' force page 1
+    For Each e In unassigned
+        AddToPage pages, 1, 9999, e
+    Next e
+    ' admin controls always on page 1, in a reserved "Setup" column
+    AddToPage pages, 1, 9998, Array("", "Create Setup Tab", "Core_BuildSetup", "")
+    AddToPage pages, 1, 9998, Array("", "Finalize Setup Tab", "Core_FinalizeSetup", "")
+    Dim tabKeys As Variant, ti As Long, firstPanel As Worksheet, panel As Worksheet
+    tabKeys = SortedKeys(pages)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        Set panel = RenderPage(pages, CLng(tabKeys(ti)))
+        If firstPanel Is Nothing Then Set firstPanel = panel
+    Next ti
+    If Not firstPanel Is Nothing Then firstPanel.Activate
+    MsgBox "Built " & pages.Count & " page(s).", vbInformation, "Setup Complete"
 End Sub
+
+' Get-or-add a panel sheet, clear its shapes (backward loop) + cells, and format.
+Private Function EnsurePanelSheet(ByVal nm As String, ByVal atFront As Boolean) As Worksheet
+    Dim ws As Worksheet, si As Long
+    If Core_SheetExists(nm) Then
+        Set ws = ThisWorkbook.Worksheets(nm)
+    ElseIf atFront Then
+        Set ws = ThisWorkbook.Worksheets.Add(Before:=ThisWorkbook.Worksheets(1))
+        ws.name = nm
+    Else
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.name = nm
+    End If
+    For si = ws.Shapes.Count To 1 Step -1     ' remove old buttons + textboxes safely
+        ws.Shapes(si).Delete
+    Next si
+    ws.Cells.Clear
+    ws.Cells.UnMerge
+    ws.Tab.Color = RGB(31, 78, 121)
+    ws.Cells.Interior.Color = RGB(255, 255, 255)
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = 47
+    ws.Columns("C").ColumnWidth = 85
+    Set EnsurePanelSheet = ws
+End Function
+
+' Insert one button-array into the nested pages dictionary: tabNum -> (colIx -> Collection).
+Private Sub AddToPage(pages As Object, ByVal tabNum As Long, ByVal colIx As Long, ByVal btn As Variant)
+    Dim cols As Object, items As Collection
+    If Not pages.Exists(tabNum) Then pages.Add tabNum, CreateObject("Scripting.Dictionary")
+    Set cols = pages(tabNum)
+    If Not cols.Exists(colIx) Then cols.Add colIx, New Collection
+    Set items = cols(colIx)
+    items.Add btn                 ' btn = Array(id, caption, onAction, help)
+End Sub
+
+' Draw one "Macros N" page: title, per-column headers (Setup/Unassigned/Column X),
+' and the stacked buttons. Columns 9998 = "Setup", 9999 = "Unassigned".
+Private Function RenderPage(pages As Object, ByVal tabNum As Long) As Worksheet
+    Dim panel As Worksheet, cols As Object, colKeys As Variant, ci As Long
+    Dim colIx As Long, items As Collection, ii As Long, it As Variant
+    Dim leftBase As Double, topBase As Double, colLeft As Double, topPos As Double, hdr As String
+    Set panel = EnsurePanelSheet(PANEL_BASE & tabNum, False)
+    leftBase = panel.Range("B4").Left: topBase = panel.Range("B4").Top
+    AddText panel, leftBase, panel.Range("B2").Top, 400, 24, "Macros - Page " & tabNum, 15, True, RGB(31, 78, 121)
+    Set cols = pages(tabNum)
+    colKeys = SortedKeys(cols)
+    For ci = LBound(colKeys) To UBound(colKeys)
+        colIx = colKeys(ci)
+        colLeft = leftBase + ci * (BTN_W + COL_GAP)          ' ci is 0-based across sorted columns
+        Set items = cols(colIx)
+        If colIx = 9998 Then
+            hdr = "Setup"
+        ElseIf colIx = 9999 Then
+            hdr = "Unassigned"
+        Else
+            hdr = "Column " & IndexToCol(colIx)
+        End If
+        AddText panel, colLeft, topBase, BTN_W, HDR_H, hdr, 11, True, RGB(90, 90, 90)
+        topPos = topBase + HDR_H + ROW_GAP
+        For ii = 1 To items.Count
+            it = items(ii)
+            AddBtn panel, "b" & tabNum & "_" & colIx & "_" & ii, CStr(it(1)), CStr(it(2)), colLeft, topPos, BTN_W, BTN_H
+            topPos = topPos + BTN_H + ROW_GAP
+        Next ii
+    Next ci
+    panel.Range("A1").Select
+    Set RenderPage = panel
+End Function
+
+' Frameless textbox label (ported from MacroLayout ML_AddText).
+Private Function AddText(ws As Worksheet, ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
+                         ByVal txt As String, ByVal sz As Single, ByVal bold As Boolean, ByVal colr As Long) As Shape
+    Dim sh As Shape
+    Set sh = ws.Shapes.AddTextbox(1, l, t, w, h)
+    sh.Fill.Visible = msoFalse
+    sh.Line.Visible = msoFalse
+    With sh.TextFrame2.TextRange
+        .Text = txt
+        .Font.Size = sz
+        .Font.Bold = bold
+        .Font.Fill.ForeColor.RGB = colr
+    End With
+    Set AddText = sh
+End Function
+
+' Remove every "Macros N" grouped page (numeric tail; the legacy "Macros" is left).
+Private Sub DeletePanels()
+    Dim i As Long, nm As String
+    Application.DisplayAlerts = False
+    For i = ThisWorkbook.Worksheets.Count To 1 Step -1
+        nm = ThisWorkbook.Worksheets(i).Name
+        If IsPanelName(nm) Then ThisWorkbook.Worksheets(i).Delete
+    Next i
+    Application.DisplayAlerts = True
+End Sub
+
+Private Function IsPanelName(ByVal nm As String) As Boolean
+    Dim tail As String
+    If LCase(Left(nm, Len(PANEL_BASE))) <> LCase(PANEL_BASE) Then Exit Function
+    tail = Mid(nm, Len(PANEL_BASE) + 1)
+    If Len(tail) = 0 Then Exit Function
+    IsPanelName = IsNumeric(tail)
+End Function
 
 '================================================================
 ' Setup-tab drawing helpers
