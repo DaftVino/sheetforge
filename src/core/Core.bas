@@ -36,6 +36,7 @@ Option Explicit
 Private Const SETUP_SHEET    As String = "Setup"
 Private Const CONFIG_SHEET   As String = "_Config"     ' hidden, written by Finalize
 Private Const MACRO_SHEET    As String = "Macros"
+Private Const ADMIN_SHEET    As String = "Setup Menu"   ' Create/Finalize controls; hideable
 Private Const PACKAGES_SHEET As String = "_Packages"   ' optional enable/disable layer
 
 ' ---- grouped control-panel geometry (ported from MacroLayout; Task 9) ----
@@ -51,6 +52,9 @@ Private Const KEY_COL   As Long = 1       ' column A: machine keys (hidden)
 Private Const VAL_COL   As Long = 3       ' column C: scalar value / list value / 1st table col
 Private Const MAX_LIST  As Long = 20      ' input rows drawn per list / table block
 Private Const END_KEY   As String = "_core_end"   ' sentinel key row: bounds the last list/table block
+Private Const CHAINS_KEY As String = "k_core_chains"   ' Compose section: chains block sentinel (col A)
+Private Const LAYOUT_KEY As String = "k_core_layout"   ' Compose section: placement block sentinel (col A)
+Private Const RID_COL    As Long = 10                  ' Compose section: col J, hidden per-row id
 
 ' ---- speed wrapper saved state (module-level, depth-counted) ----
 Private mSpeedDepth  As Long
@@ -847,7 +851,7 @@ Public Sub Core_BuildSetup()
     ws.Cells(r, 2).Font.Bold = True
     ws.Cells(r, 2).Font.Color = RGB(112, 48, 160)
     r = r + 1
-    ws.Cells(r, 2).Value = "Fill in the YELLOW cells, then click  'Finalize Setup Tab'  on the Macros tab."
+    ws.Cells(r, 2).Value = "Fill in the YELLOW cells, then click  'Finalize Setup Tab'  on the Setup Menu tab."
     ws.Cells(r, 2).Font.Italic = True
     r = r + 1
     ws.Cells(r, 2).Value = "Do not edit column A (machine keys). Blank rows in a list are ignored."
@@ -1081,11 +1085,10 @@ End Function
 '================================================================
 ' 5b. CORE-OWNED SETUP SCHEMA  (chains + placement; NOT a package)
 '   Rendered by Core_BuildSetup outside the package-discovery loop.
+'   Constants CHAINS_KEY / LAYOUT_KEY / RID_COL are declared in the module
+'   declarations section at the top (VBA requires module-level Const there;
+'   a Const between procedures is a compile error).
 '================================================================
-Private Const CHAINS_KEY As String = "k_core_chains"   ' block sentinel (col A)
-Private Const LAYOUT_KEY As String = "k_core_layout"   ' block sentinel (col A)
-Private Const RID_COL    As Long = 10                  ' col J: hidden per-row id
-
 Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     r = SectionHeader(ws, r, "COMPOSE YOUR BUTTONS")
     r = TintRow(ws, r, "Build multi-step buttons (Chains) and arrange buttons " & _
@@ -1472,9 +1475,20 @@ Public Sub Core_FinalizeSetup()
     ' --- activate: copy Setup -> hidden _Config ---
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
+    ' Remove any prior _Config. It is stored xlSheetVeryHidden, and a very-hidden
+    ' sheet can resist .Delete (the delete then silently fails under On Error
+    ' Resume Next, _Config survives, and the rename below collides -> "That name is
+    ' already taken", orphaning a "Setup (2)" copy on every retry). Unhiding it
+    ' first makes the delete reliable.
+    Dim old As Worksheet
+    Set old = Nothing
     On Error Resume Next
-    ThisWorkbook.Worksheets(CONFIG_SHEET).Delete
+    Set old = ThisWorkbook.Worksheets(CONFIG_SHEET)
     On Error GoTo Fail
+    If Not old Is Nothing Then
+        old.Visible = xlSheetVisible
+        old.Delete
+    End If
     ws.Copy After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
     Set cfg = ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
     cfg.name = CONFIG_SHEET
@@ -1482,8 +1496,9 @@ Public Sub Core_FinalizeSetup()
     cfg.Visible = xlSheetVeryHidden
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
+    Core_BuildControlPanel True        ' rebuild the Macros tab so chains/grouping appear now
     MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
-           "The buttons now use your Setup answers instead of the built-in defaults.", _
+           "The Macros tab has been rebuilt to match your Setup answers.", _
            vbInformation, "Finalize Setup Tab"
     Exit Sub
 Fail:
@@ -1497,7 +1512,9 @@ End Sub
 '================================================================
 ' Legacy single "Macros" tab when no page codes exist; grouped "Macros N" pages
 ' when a layout is active. Prior panels are cleared before either mode draws.
-Public Sub Core_BuildControlPanel()
+' silent:=True suppresses the "built N ..." confirmation (used when Finalize
+' rebuilds the panel itself and shows its own combined message).
+Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object
     On Error GoTo Fail
     Application.ScreenUpdating = False
@@ -1506,10 +1523,11 @@ Public Sub Core_BuildControlPanel()
     DeletePanels                         ' remove any prior "Macros N" pages
     If AnyCode(codeMap) Then
         DeleteLegacyPanel                ' grouped mode: drop the stale single "Macros" tab
-        BuildGroupedPanels buttons, codeMap
+        BuildGroupedPanels buttons, codeMap, silent
     Else
-        BuildSinglePanel buttons         ' legacy single "Macros" tab (reused/cleared)
+        BuildSinglePanel buttons, silent ' legacy single "Macros" tab (reused/cleared)
     End If
+    BuildAdminPanel                      ' Create/Finalize controls on their own hideable tab
     Application.ScreenUpdating = True
     Exit Sub
 Fail:
@@ -1558,7 +1576,7 @@ End Function
 
 ' Legacy layout: one "Macros" tab, action + chain buttons, then Core's two admin
 ' buttons appended with the same cadence. Matches the pre-grouping look.
-Private Sub BuildSinglePanel(buttons As Collection)
+Private Sub BuildSinglePanel(buttons As Collection, Optional ByVal silent As Boolean = False)
     Dim ws As Worksheet, drawList As New Collection, e As Variant
     Dim i As Long, leftPos As Double, topPos As Double
     Dim btnW As Double, btnH As Double, gap As Double, helpRow As Long
@@ -1572,18 +1590,14 @@ Private Sub BuildSinglePanel(buttons As Collection)
         .Font.Color = RGB(31, 78, 121)
     End With
     With ws.Range("B3")
-        .Value = "Run the action buttons for daily work. First-time setup: Create Setup Tab -> Finalize Setup Tab."
+        .Value = "Run the action buttons for daily work. First-time / re-config setup lives on the 'Setup Menu' tab."
         .Font.Italic = True
     End With
 
-    ' Daily action + chain buttons first, then Core's own setup buttons last.
+    ' Daily action + chain buttons only (admin controls live on the Setup Menu tab).
     For Each e In buttons
         drawList.Add Array(CStr(e(1)), CStr(e(2)), CStr(e(3)))
     Next e
-    drawList.Add Array("Create Setup Tab", "Core_BuildSetup", _
-                       "Builds a pre-filled 'Setup' tab from the installed packages. Use it to reuse these macros in another workbook.")
-    drawList.Add Array("Finalize Setup Tab", "Core_FinalizeSetup", _
-                       "Validates your Setup answers and activates them. The action buttons then use your settings instead of the built-in defaults.")
 
     ' Cadence: btnH + gap = 45pt = 3 rows at 15pt, so each description row lines
     ' up with its button. Force the row heights so the alignment holds regardless
@@ -1612,13 +1626,14 @@ Private Sub BuildSinglePanel(buttons As Collection)
 
     ws.Activate
     ws.Range("A1").Select
-    MsgBox "Macros tab built with " & buttons.Count & " button(s).", vbInformation, "Setup Complete"
+    If Not silent Then MsgBox "Macros tab built with " & buttons.Count & " button(s).", vbInformation, "Setup Complete"
 End Sub
 
 ' Grouped layout: place each button onto a "Macros N" page by its code. Blank code
 ' -> page 1 Unassigned column (9999); "hide" -> omitted; unparseable -> Unassigned.
-' Admin buttons always land in a reserved "Setup" column (9998) on page 1.
-Private Sub BuildGroupedPanels(buttons As Collection, codeMap As Object)
+' Blank-coded buttons go to page 1's Unassigned column; "hide" omits; admin
+' controls live on their own Setup Menu tab (built separately).
+Private Sub BuildGroupedPanels(buttons As Collection, codeMap As Object, Optional ByVal silent As Boolean = False)
     Dim pages As Object, e As Variant, id As String, code As String
     Dim tabNum As Long, colIx As Long, colL As String, unassigned As New Collection
     Set pages = CreateObject("Scripting.Dictionary")
@@ -1636,13 +1651,9 @@ Private Sub BuildGroupedPanels(buttons As Collection, codeMap As Object)
         End If
 NextBtn:
     Next e
-    If Not pages.Exists(1) Then pages.Add 1, CreateObject("Scripting.Dictionary")   ' force page 1
     For Each e In unassigned
-        AddToPage pages, 1, 9999, e
+        AddToPage pages, 1, 9999, e     ' blank-coded buttons go to page 1's Unassigned column
     Next e
-    ' admin controls always on page 1, in a reserved "Setup" column
-    AddToPage pages, 1, 9998, Array("", "Create Setup Tab", "Core_BuildSetup", "")
-    AddToPage pages, 1, 9998, Array("", "Finalize Setup Tab", "Core_FinalizeSetup", "")
     Dim tabKeys As Variant, ti As Long, firstPanel As Worksheet, panel As Worksheet
     tabKeys = SortedKeys(pages)
     For ti = LBound(tabKeys) To UBound(tabKeys)
@@ -1650,7 +1661,37 @@ NextBtn:
         If firstPanel Is Nothing Then Set firstPanel = panel
     Next ti
     If Not firstPanel Is Nothing Then firstPanel.Activate
-    MsgBox "Built " & pages.Count & " page(s).", vbInformation, "Setup Complete"
+    If Not silent Then MsgBox "Built " & pages.Count & " page(s).", vbInformation, "Setup Complete"
+End Sub
+
+' Create/Finalize controls on their own tab, so they can be hidden when not in
+' use and never clutter the action pages. Reused (not re-created) on rebuild, so
+' a user who hides this tab keeps it hidden. Does not activate the sheet.
+Private Sub BuildAdminPanel()
+    Dim ws As Worksheet, leftPos As Double, topPos As Double
+    Set ws = EnsurePanelSheet(ADMIN_SHEET, False)
+    With ws.Range("B2")
+        .Value = "Setup Menu"
+        .Font.Size = 16: .Font.Bold = True: .Font.Color = RGB(31, 78, 121)
+    End With
+    With ws.Range("B3")
+        .Value = "First-time and re-configuration controls. Right-click this tab -> Hide when you're done."
+        .Font.Italic = True
+    End With
+    ws.Rows("5:12").RowHeight = 15
+    leftPos = ws.Range("B5").Left
+    topPos = ws.Range("B5").Top
+    AddBtn ws, "btnCreateSetup", "Create Setup Tab", "Core_BuildSetup", leftPos, topPos, 220, 32
+    With ws.Range(ws.Cells(5, 3), ws.Cells(6, 3))
+        .Merge: .Value = "Builds a pre-filled 'Setup' tab from the installed packages."
+        .Font.Size = 10: .WrapText = True: .VerticalAlignment = xlCenter
+    End With
+    topPos = topPos + 45
+    AddBtn ws, "btnFinalizeSetup", "Finalize Setup Tab", "Core_FinalizeSetup", leftPos, topPos, 220, 32
+    With ws.Range(ws.Cells(8, 3), ws.Cells(9, 3))
+        .Merge: .Value = "Validates your Setup answers, activates them, and rebuilds the Macros tab."
+        .Font.Size = 10: .WrapText = True: .VerticalAlignment = xlCenter
+    End With
 End Sub
 
 ' Get-or-add a panel sheet, clear its shapes (backward loop) + cells, and format.
