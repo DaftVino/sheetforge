@@ -1495,8 +1495,9 @@ Public Sub Core_FinalizeSetup()
     cfg.Visible = xlSheetVeryHidden
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
+    Core_BuildControlPanel True        ' rebuild the Macros tab so chains/grouping appear now
     MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
-           "The buttons now use your Setup answers instead of the built-in defaults.", _
+           "The Macros tab has been rebuilt to match your Setup answers.", _
            vbInformation, "Finalize Setup Tab"
     Exit Sub
 Fail:
@@ -1510,7 +1511,9 @@ End Sub
 '================================================================
 ' Legacy single "Macros" tab when no page codes exist; grouped "Macros N" pages
 ' when a layout is active. Prior panels are cleared before either mode draws.
-Public Sub Core_BuildControlPanel()
+' silent:=True suppresses the "built N ..." confirmation (used when Finalize
+' rebuilds the panel itself and shows its own combined message).
+Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object
     On Error GoTo Fail
     Application.ScreenUpdating = False
@@ -1519,9 +1522,9 @@ Public Sub Core_BuildControlPanel()
     DeletePanels                         ' remove any prior "Macros N" pages
     If AnyCode(codeMap) Then
         DeleteLegacyPanel                ' grouped mode: drop the stale single "Macros" tab
-        BuildGroupedPanels buttons, codeMap
+        BuildGroupedPanels buttons, codeMap, silent
     Else
-        BuildSinglePanel buttons         ' legacy single "Macros" tab (reused/cleared)
+        BuildSinglePanel buttons, silent ' legacy single "Macros" tab (reused/cleared)
     End If
     Application.ScreenUpdating = True
     Exit Sub
@@ -1571,7 +1574,7 @@ End Function
 
 ' Legacy layout: one "Macros" tab, action + chain buttons, then Core's two admin
 ' buttons appended with the same cadence. Matches the pre-grouping look.
-Private Sub BuildSinglePanel(buttons As Collection)
+Private Sub BuildSinglePanel(buttons As Collection, Optional ByVal silent As Boolean = False)
     Dim ws As Worksheet, drawList As New Collection, e As Variant
     Dim i As Long, leftPos As Double, topPos As Double
     Dim btnW As Double, btnH As Double, gap As Double, helpRow As Long
@@ -1625,13 +1628,13 @@ Private Sub BuildSinglePanel(buttons As Collection)
 
     ws.Activate
     ws.Range("A1").Select
-    MsgBox "Macros tab built with " & buttons.Count & " button(s).", vbInformation, "Setup Complete"
+    If Not silent Then MsgBox "Macros tab built with " & buttons.Count & " button(s).", vbInformation, "Setup Complete"
 End Sub
 
 ' Grouped layout: place each button onto a "Macros N" page by its code. Blank code
 ' -> page 1 Unassigned column (9999); "hide" -> omitted; unparseable -> Unassigned.
 ' Admin buttons always land in a reserved "Setup" column (9998) on page 1.
-Private Sub BuildGroupedPanels(buttons As Collection, codeMap As Object)
+Private Sub BuildGroupedPanels(buttons As Collection, codeMap As Object, Optional ByVal silent As Boolean = False)
     Dim pages As Object, e As Variant, id As String, code As String
     Dim tabNum As Long, colIx As Long, colL As String, unassigned As New Collection
     Set pages = CreateObject("Scripting.Dictionary")
@@ -1663,7 +1666,7 @@ NextBtn:
         If firstPanel Is Nothing Then Set firstPanel = panel
     Next ti
     If Not firstPanel Is Nothing Then firstPanel.Activate
-    MsgBox "Built " & pages.Count & " page(s).", vbInformation, "Setup Complete"
+    If Not silent Then MsgBox "Built " & pages.Count & " page(s).", vbInformation, "Setup Complete"
 End Sub
 
 ' Get-or-add a panel sheet, clear its shapes (backward loop) + cells, and format.
