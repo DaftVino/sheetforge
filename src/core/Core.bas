@@ -66,18 +66,26 @@ Public Sub Core_DeclarePackage(reg As Object, ByVal id As String, _
 End Sub
 
 Public Sub Core_AddSection(reg As Object, ByVal title As String)
-    reg("fields").Add NewField("", title, "section", "")
+    reg("fields").Add NewField("", title, "section", "", "simple", "")
 End Sub
 
+' tier is "simple" (default) or "advanced". Advanced fields are grouped under an
+' "ADVANCED - most users can leave these as-is" band so regular users can stop
+' after the simple fields. help is an optional plain-language note shown in grey
+' under the field (pass via help:= to skip tier).
 Public Sub Core_AddField(reg As Object, ByVal key As String, ByVal label As String, _
-                         ByVal kind As String, ByVal dflt As String)
-    reg("fields").Add NewField(key, label, kind, dflt)
+                         ByVal kind As String, ByVal dflt As String, _
+                         Optional ByVal tier As String = "simple", _
+                         Optional ByVal help As String = "")
+    reg("fields").Add NewField(key, label, kind, dflt, tier, help)
 End Sub
 
 Public Sub Core_AddList(reg As Object, ByVal key As String, _
-                        ByVal label As String, ByVal colHeader As String)
+                        ByVal label As String, ByVal colHeader As String, _
+                        Optional ByVal tier As String = "simple", _
+                        Optional ByVal help As String = "")
     Dim f As Object
-    Set f = NewField(key, label, "list", "")
+    Set f = NewField(key, label, "list", "", tier, help)
     f("headers") = colHeader
     reg("fields").Add f
 End Sub
@@ -85,9 +93,11 @@ End Sub
 ' colHeaders is a "|"-delimited string (NOT comma - a header may itself contain
 ' commas, e.g. "Type map (T,N,D,...)"). Up to 3 columns are read (C, D, E).
 Public Sub Core_AddTable(reg As Object, ByVal key As String, _
-                         ByVal label As String, ByVal colHeaders As String)
+                         ByVal label As String, ByVal colHeaders As String, _
+                         Optional ByVal tier As String = "simple", _
+                         Optional ByVal help As String = "")
     Dim f As Object
-    Set f = NewField(key, label, "table", "")
+    Set f = NewField(key, label, "table", "", tier, help)
     f("headers") = colHeaders
     reg("fields").Add f
 End Sub
@@ -112,7 +122,8 @@ Public Sub Core_AddAction(reg As Object, ByVal actionId As String, ByVal caption
 End Sub
 
 Private Function NewField(ByVal key As String, ByVal label As String, _
-                          ByVal kind As String, ByVal dflt As String) As Object
+                          ByVal kind As String, ByVal dflt As String, _
+                          ByVal tier As String, ByVal help As String) As Object
     Dim f As Object
     Set f = CreateObject("Scripting.Dictionary")
     f.Add "key", key
@@ -121,6 +132,13 @@ Private Function NewField(ByVal key As String, ByVal label As String, _
     f.Add "default", dflt
     f.Add "headers", ""
     f.Add "defaults", New Collection
+    f.Add "help", help
+    ' Normalize the tier so an unknown or mis-cased value degrades to "simple"
+    ' (still shown) rather than matching neither render pass and vanishing.
+    Dim t As String
+    t = LCase(Trim(tier))
+    If t <> "advanced" Then t = "simple"
+    f.Add "tier", t
     Set NewField = f
 End Function
 
@@ -161,6 +179,41 @@ End Function
 Public Function Core_CfgTable(ctx As Object, ByVal key As String, _
                               ByRef a() As String, ByRef b() As String, ByRef c() As String) As Boolean
     Core_CfgTable = TableValues(ctx("reg"), key, a, b, c)
+End Function
+
+' ---- setup-helper API: read/write the LIVE Setup sheet before Finalize ----
+' For "setup helper" actions (e.g. suggest column types) that operate on what
+' the user is editing on the Setup tab, not the activated _Config. These encode
+' the Setup layout so a package never hardcodes column positions.
+
+' Read a 3-column table block (tab/prefix/type map style) from the Setup sheet.
+Public Function Core_SetupTable(ByVal key As String, _
+                                ByRef a() As String, ByRef b() As String, ByRef c() As String) As Boolean
+    Core_SetupTable = ReadTable3(SetupSheet(), key, a, b, c)
+End Function
+
+' Write one column of a block on the Setup sheet: colOffset 0=C, 1=D, 2=E.
+' Values are applied, in order, to the block's populated rows (those with a
+' non-blank first column) - the same rows Core_SetupTable returns.
+Public Sub Core_SetupSetColumn(ByVal key As String, ByVal colOffset As Long, values As Collection)
+    Dim ws As Worksheet, r As Long, nextK As Long, i As Long, n As Long
+    Set ws = SetupSheet()
+    If ws Is Nothing Then Exit Sub
+    r = FindKeyRow(ws, key)
+    If r = 0 Then Exit Sub
+    nextK = NextKeyRow(ws, r)
+    For i = r + 1 To nextK - 1
+        If Trim(CStr(ws.Cells(i, VAL_COL).Value)) <> "" Then
+            n = n + 1
+            If n <= values.Count Then ws.Cells(i, VAL_COL + colOffset).Value = values(n)
+        End If
+    Next i
+End Sub
+
+Private Function SetupSheet() As Worksheet
+    On Error Resume Next
+    Set SetupSheet = ThisWorkbook.Worksheets(SETUP_SHEET)
+    On Error GoTo 0
 End Function
 
 ' ---- value resolution: sheet read, else manifest default ----
@@ -641,18 +694,11 @@ Public Sub Core_BuildSetup()
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
         r = SectionHeader(ws, r, UCase(CStr(reg("name"))))
-        For Each f In reg("fields")
-            Select Case f("kind")
-                Case "section"
-                    r = SectionHeader(ws, r, CStr(f("label")))
-                Case "list"
-                    r = RenderList(ws, r, reg, f)
-                Case "table"
-                    r = RenderTable(ws, r, reg, f)
-                Case Else
-                    r = RenderScalar(ws, r, reg, f)
-            End Select
-        Next f
+        r = RenderTier(ws, r, reg, "simple", True)         ' simple fields, with their sections
+        If HasAdvanced(reg) Then
+            r = SectionHeader(ws, r, "ADVANCED  -  most users can leave these as-is")
+            r = RenderTier(ws, r, reg, "advanced", False)  ' advanced fields, collected flat
+        End If
         r = r + 1
     Next reg
 
@@ -689,12 +735,75 @@ Fail:
     MsgBox "Core_BuildSetup error: " & Err.Description, vbExclamation, "Create Setup Tab"
 End Sub
 
+' Render every field of the given tier. When showSections is True, a section
+' header is emitted just before its first matching field (so a section whose
+' fields are all in the other tier is not drawn). When False (the advanced
+' pass), section headers are skipped and the fields render flat under the one
+' ADVANCED band.
+Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
+                            ByVal tier As String, ByVal showSections As Boolean) As Long
+    Dim f As Object, pending As String, havePending As Boolean
+    For Each f In reg("fields")
+        If f("kind") = "section" Then
+            pending = CStr(f("label"))
+            havePending = True
+        ElseIf CStr(f("tier")) = tier Then
+            If showSections And havePending Then
+                r = SectionHeader(ws, r, pending)
+                havePending = False
+            End If
+            r = RenderField(ws, r, reg, f)
+        End If
+    Next f
+    RenderTier = r
+End Function
+
+Private Function RenderField(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
+    Select Case f("kind")
+        Case "list"
+            RenderField = RenderList(ws, r, reg, f)
+        Case "table"
+            RenderField = RenderTable(ws, r, reg, f)
+        Case Else
+            RenderField = RenderScalar(ws, r, reg, f)
+    End Select
+End Function
+
+Private Function HasAdvanced(reg As Object) As Boolean
+    Dim f As Object
+    For Each f In reg("fields")
+        If f("kind") <> "section" Then
+            If CStr(f("tier")) = "advanced" Then
+                HasAdvanced = True
+                Exit Function
+            End If
+        End If
+    Next f
+End Function
+
 Private Function RenderScalar(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     ws.Cells(r, KEY_COL).Value = f("key")
     LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, VAL_COL).Value = ScalarValue(reg, CStr(f("key")))
     Yellow ws.Cells(r, VAL_COL)
-    RenderScalar = r + 1
+    r = r + 1
+    r = RenderHelp(ws, r, CStr(f("help")))
+    RenderScalar = r
+End Function
+
+' A plain-language note under a field, grey + italic + wrapped. Its column A and
+' column C stay blank, so it is invisible to the config block readers (which key
+' off column A) and the list/table readers (which key off column C). Returns the
+' next row (unchanged when there is no help text).
+Private Function RenderHelp(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
+    If Trim(txt) = "" Then RenderHelp = r: Exit Function
+    ws.Cells(r, 2).Value = txt
+    ws.Cells(r, 2).Font.Italic = True
+    ws.Cells(r, 2).Font.Size = 9
+    ws.Cells(r, 2).Font.Color = RGB(120, 120, 120)
+    ws.Cells(r, 2).WrapText = True
+    ws.Cells(r, 2).VerticalAlignment = xlTop
+    RenderHelp = r + 1
 End Function
 
 ' Write a field label into column B, wrapped + top-aligned, so a long label
@@ -705,11 +814,36 @@ Private Sub LabelCell(rng As Range, ByVal txt As String)
     rng.VerticalAlignment = xlTop
 End Sub
 
+' For list/table fields: draw the label and the explanation in the section-tinted
+' band ABOVE the column-header row, so the headers sit directly on top of the
+' input cells (no gap). These rows keep column A and column C blank, so they are
+' invisible to the config block readers. Returns the row for the header/key row.
+Private Function BlockIntro(ws As Worksheet, ByVal r As Long, _
+                            ByVal label As String, ByVal help As String) As Long
+    ws.Range(ws.Cells(r, 2), ws.Cells(r, 5)).Interior.Color = RGB(221, 217, 240)
+    ws.Cells(r, 2).Value = label
+    ws.Cells(r, 2).Font.Bold = True
+    ws.Cells(r, 2).Font.Color = RGB(54, 32, 100)
+    ws.Cells(r, 2).WrapText = True
+    ws.Cells(r, 2).VerticalAlignment = xlTop
+    r = r + 1
+    If Trim(help) <> "" Then
+        ws.Range(ws.Cells(r, 2), ws.Cells(r, 5)).Interior.Color = RGB(221, 217, 240)
+        ws.Cells(r, 2).Value = help
+        ws.Cells(r, 2).Font.Italic = True
+        ws.Cells(r, 2).Font.Size = 9
+        ws.Cells(r, 2).Font.Color = RGB(90, 70, 120)
+        ws.Cells(r, 2).WrapText = True
+        ws.Cells(r, 2).VerticalAlignment = xlTop
+        r = r + 1
+    End If
+    BlockIntro = r
+End Function
+
 Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     Dim vals As Collection, i As Long
+    r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the header
     ws.Cells(r, KEY_COL).Value = f("key")
-    LabelCell ws.Cells(r, 2), CStr(f("label"))
-    ws.Cells(r, 2).Font.Bold = True
     ws.Cells(r, VAL_COL).Value = f("headers")
     ws.Cells(r, VAL_COL).Font.Bold = True
     r = r + 1
@@ -728,9 +862,8 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
     heads = Split(CStr(f("headers")), "|")
     nHead = UBound(heads)
     If nHead > 2 Then nHead = 2                 ' 3 columns read (C, D, E)
+    r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the headers
     ws.Cells(r, KEY_COL).Value = f("key")
-    LabelCell ws.Cells(r, 2), CStr(f("label"))
-    ws.Cells(r, 2).Font.Bold = True
     For j = 0 To nHead
         ws.Cells(r, VAL_COL + j).Value = Trim(heads(j))
         ws.Cells(r, VAL_COL + j).Font.Bold = True
@@ -838,6 +971,7 @@ Public Sub Core_BuildControlPanel()
         ws.Buttons.Delete
         On Error GoTo Fail
         ws.Cells.Clear
+        ws.Cells.UnMerge                       ' Clear does not unmerge; drop old merges
     Else
         Set ws = ThisWorkbook.Worksheets.Add(Before:=ThisWorkbook.Worksheets(1))
         ws.name = MACRO_SHEET
@@ -874,10 +1008,15 @@ Public Sub Core_BuildControlPanel()
     For Each e In entries
         i = i + 1
         AddBtn ws, "btn" & i, CStr(e(0)), CStr(e(1)), leftPos, topPos, btnW, btnH
-        ws.Cells(helpRow, 3).Value = CStr(e(2))
-        ws.Cells(helpRow, 3).Font.Size = 10
-        ws.Cells(helpRow, 3).VerticalAlignment = xlTop
-        ws.Cells(helpRow, 3).WrapText = True
+        ' Description spans 2 rows (~button height) so a long, wrapped description
+        ' shows in full instead of being clipped to one 15pt row.
+        With ws.Range(ws.Cells(helpRow, 3), ws.Cells(helpRow + 1, 3))
+            .Merge
+            .Value = CStr(e(2))
+            .Font.Size = 10
+            .WrapText = True
+            .VerticalAlignment = xlCenter
+        End With
         topPos = topPos + btnH + gap
         helpRow = helpRow + 3
     Next e

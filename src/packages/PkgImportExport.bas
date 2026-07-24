@@ -25,13 +25,17 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- GENERAL ----
     Core_AddSection reg, "GENERAL"
-    Core_AddField reg, "k_settings_sheet", "Settings / CF sheet name (kept hidden inside the export)", "sheet", "README"
-    Core_AddField reg, "k_export_base", "Export file BASE name (the date is added in front)", "text", "My Report"
-    Core_AddField reg, "k_export_offset", "Export date offset in days  (-1 = yesterday, 0 = today)", "int", "-1"
+    Core_AddField reg, "k_export_base", "Name for the exported file (a date is added in front)", "text", "My Report", _
+        help:="The saved file will be named like:  2026-01-15 <this text>.xlsx"
+    Core_AddField reg, "k_settings_sheet", "Settings / thresholds sheet name", "sheet", "README", "advanced", _
+        "The hidden sheet whose cells drive the conditional-formatting thresholds; it is kept (hidden) inside the export so the colors still work."
+    Core_AddField reg, "k_export_offset", "Date shift for the export file name (days)", "int", "-1", "advanced", _
+        "How many days to shift the date put in front of the file name.  -1 = yesterday, 0 = today, 1 = tomorrow."
 
     ' ---- EXPORT TABS ----
-    Core_AddSection reg, "EXPORT TABS  (copied into the export, in this order)"
-    Core_AddList reg, "k_export_tabs", "List each tab name to export, one per row:", "Tab name  v"
+    Core_AddSection reg, "EXPORT TABS"
+    Core_AddList reg, "k_export_tabs", "Tabs to include in the export (one per row, in order)", "Tab name", _
+        help:="Each finished tab to copy into the exported .xlsx, top to bottom in this order."
     Core_AddDefault reg, "k_export_tabs", "Sample Recap (Daily)"
     Core_AddDefault reg, "k_export_tabs", "Sample Category"
     Core_AddDefault reg, "k_export_tabs", "Sample Detail"
@@ -40,7 +44,8 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- IMPORT FILES ----
     Core_AddSection reg, "IMPORT FILES"
-    Core_AddTable reg, "k_import", "For each input tab: its name, the source-file name prefix, and the column type map.", "Input tab  v|Source file name prefix|Type map (T,N,D,DT,B,G)"
+    Core_AddTable reg, "k_import", "Import files (one row per input tab)", "Input tab (in this workbook)|Source file (name starts with...)|Column types", _
+        help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, store numbers, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them."
     Core_AddDefault reg, "k_import", "IN_Day|Target Inventory Data (day)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_PTD|Target Inventory Data (period to date)|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_InvValue|Inventory Value Data|T,T,T,T,T,T,T,N,N,N,N"
@@ -48,10 +53,14 @@ Public Sub PkgImportExport_Manifest(reg As Object)
 
     ' ---- REF_MASTER ----
     Core_AddSection reg, "REF_MASTER"
-    Core_AddField reg, "k_master_prefix", "Master-list file name prefix", "file", "Master Store List"
-    Core_AddField reg, "k_master_sheet", "Source sheet name inside that file", "text", "Current Master"
-    Core_AddField reg, "k_master_dest", "Destination tab in THIS workbook", "sheet", "Ref_Master"
-    Core_AddList reg, "k_master_cols", "Source column headers to copy, in order (1st = Store, kept as text):", "Header  v"
+    Core_AddField reg, "k_master_prefix", "Master-list file (name starts with...)", "file", "Master Store List", _
+        help:="The newest file in THIS workbook's folder whose name starts with this text; used to refresh the destination tab below. A trailing (1) or (2) is ignored."
+    Core_AddField reg, "k_master_dest", "Destination tab (in this workbook)", "sheet", "Ref_Master", _
+        help:="The tab in THIS workbook that the master list is written into."
+    Core_AddField reg, "k_master_sheet", "Sheet name inside the master file", "text", "Current Master", "advanced", _
+        "The worksheet name to read from inside the master-list file."
+    Core_AddList reg, "k_master_cols", "Columns to copy from the master file (in order)", "Column header", _
+        help:="The exact column headers to pull from the master file, in order. The FIRST one is the store key and is always kept as text."
     Core_AddDefault reg, "k_master_cols", "Store #"
     Core_AddDefault reg, "k_master_cols", "Location Name"
     Core_AddDefault reg, "k_master_cols", "Entity"
@@ -63,6 +72,7 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     Core_AddAction reg, "importexport.import", "2.  Import Source Data", "PkgImportExport_Import", "Clears the input tabs, then imports the matching source files from this folder (auto-handles (1)/(2) name suffixes)."
     Core_AddAction reg, "importexport.updateMaster", "3.  Update Ref_Master", "PkgImportExport_UpdateMaster", "Refreshes the Ref_Master tab from the master-list file in this folder."
     Core_AddAction reg, "importexport.export", "4.  Export Dashboard (.xlsx)", "PkgImportExport_Export", "Saves a values-only copy of the main tabs (formatting + filters + conditional formatting kept)."
+    Core_AddAction reg, "importexport.suggestTypes", "Suggest Import Types", "PkgImportExport_SuggestTypes", "SETUP HELPER: after you fill the input tabs + source prefixes on the Setup tab, this opens each source file and fills a SUGGESTED type map for review. Always double-check ID/code columns stay T."
 End Sub
 
 '================================================================
@@ -429,8 +439,141 @@ Fail:
 End Sub
 
 '================================================================
+' SETUP HELPER - suggest a type map per import row from its source file
+'================================================================
+Public Sub PkgImportExport_SuggestTypes(ctx As Object)
+    Dim tabs() As String, prefixes() As String, typeMaps() As String
+    Dim i As Long, srcPath As String, sug As Collection, tm As String
+    Dim found As Long, missed As String
+    On Error GoTo Fail
+
+    If Not Core_SetupTable("k_import", tabs, prefixes, typeMaps) Then
+        MsgBox "No import rows on the Setup tab yet." & vbCrLf & _
+               "Run 'Create Setup Tab', fill each input tab + source-file prefix, then try again.", _
+               vbExclamation, "Suggest Import Types"
+        Exit Sub
+    End If
+
+    Set sug = New Collection
+    Core_SpeedOn
+    Application.AskToUpdateLinks = False
+    For i = 1 To UBound(tabs)
+        srcPath = Core_FindFile(prefixes(i))
+        If srcPath = "" Then
+            sug.Add typeMaps(i)                    ' no source -> keep existing map
+            missed = missed & vbCrLf & "   - " & tabs(i) & "  (no file matching '" & prefixes(i) & "')"
+        Else
+            tm = InferTypeMap(srcPath)
+            If tm = "" Then tm = typeMaps(i)       ' inference failed -> keep existing
+            sug.Add tm
+            found = found + 1
+        End If
+    Next i
+    Core_SetupSetColumn "k_import", 2, sug         ' column E (offset 2) = the type map
+    Application.AskToUpdateLinks = True
+    Core_SpeedOff
+
+    MsgBox "Suggested type maps filled for " & found & " import row(s)." & vbCrLf & vbCrLf & _
+           "PLEASE REVIEW on the Setup tab: a column of ID / code numbers (e.g. store #) must " & _
+           "be T (text) even though it looks numeric, or the dashboard's lookups break. " & _
+           "Adjust any cell, then run 'Finalize Setup Tab'." & _
+           IIf(missed = "", "", vbCrLf & vbCrLf & "No source file found for:" & missed), _
+           vbInformation, "Suggest Import Types"
+    Exit Sub
+Fail:
+    Application.AskToUpdateLinks = True
+    Core_Fail ctx, "importexport.suggestTypes", Err
+End Sub
+
+'================================================================
 ' Package-private helpers
 '================================================================
+
+' Open a source workbook, sample its first sheet, and return a per-column type
+' map string (e.g. "T,T,N,D"). Returns "" if the file can't be read.
+Private Function InferTypeMap(ByVal srcPath As String) As String
+    Dim wb As Workbook, ws As Worksheet
+    Dim lastCol As Long, lastRow As Long, sampleTo As Long, cCol As Long, codes As String
+    On Error GoTo CleanFail
+    Set wb = Application.Workbooks.Open(fileName:=srcPath, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, CorruptLoad:=xlRepairFile)
+    Set ws = wb.Worksheets(1)
+    lastCol = Core_LastCol(ws, 1)
+    lastRow = Core_LastRowUp(ws, 1)
+    sampleTo = lastRow
+    If sampleTo > 51 Then sampleTo = 51            ' header + up to 50 data rows
+    For cCol = 1 To lastCol
+        If codes <> "" Then codes = codes & ","
+        codes = codes & InferColumn(ws, cCol, sampleTo, CStr(ws.Cells(1, cCol).Value))
+    Next cCol
+    wb.Close SaveChanges:=False
+    InferTypeMap = codes
+    Exit Function
+CleanFail:
+    On Error Resume Next
+    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+    On Error GoTo 0
+    InferTypeMap = ""
+End Function
+
+' Infer one column's code from a data sample. Leans SAFE on the dangerous case:
+' an integer column whose header looks like an identifier is called T (text),
+' because an ID silently turned into a number breaks type-strict lookups.
+Private Function InferColumn(ws As Worksheet, ByVal col As Long, _
+                             ByVal lastSampleRow As Long, ByVal hdr As String) As String
+    Dim r As Long, v As Variant, d As Double, n As Long
+    Dim allDate As Boolean, allNum As Boolean, anyDecimal As Boolean
+    allDate = True: allNum = True
+    For r = 2 To lastSampleRow
+        v = ws.Cells(r, col).Value
+        ' Branch on VarType FIRST; never compare an Error-subtype Variant to a
+        ' string (VBA does not short-circuit And, so that would raise error 13).
+        If IsError(v) Then
+            n = n + 1: allDate = False: allNum = False       ' error cell -> text
+        ElseIf IsEmpty(v) Then
+            ' blank -> ignore
+        ElseIf VarType(v) = vbString Then
+            If v <> "" Then
+                n = n + 1: allDate = False
+                If IsNumeric(v) Then
+                    d = CDbl(v)
+                    If d <> Int(d) Then anyDecimal = True     ' numeric text
+                Else
+                    allNum = False
+                End If
+            End If
+        ElseIf VarType(v) = vbDate Then
+            n = n + 1                                          ' date -> allDate stays true
+        ElseIf IsNumeric(v) Then
+            n = n + 1: allDate = False
+            d = CDbl(v)
+            If d <> Int(d) Then anyDecimal = True              ' fractional -> decimal (locale-safe)
+        Else
+            n = n + 1: allDate = False: allNum = False         ' boolean/other -> text
+        End If
+    Next r
+    If n = 0 Then InferColumn = "T": Exit Function          ' no data -> text (safe)
+    If allDate Then InferColumn = "D": Exit Function
+    If allNum Then
+        If Not anyDecimal And LooksLikeId(hdr) Then
+            InferColumn = "T"                                ' integer identifier -> text
+        Else
+            InferColumn = "N"
+        End If
+        Exit Function
+    End If
+    InferColumn = "T"
+End Function
+
+' Header looks like an identifier/code column (so an integer column should stay
+' text). Pad with spaces so " id " matches the whole word "id" but not "paid" or
+' "void"; the other tokens are specific enough to use as substrings.
+Private Function LooksLikeId(ByVal hdr As String) As Boolean
+    Dim h As String
+    h = " " & LCase(Trim(hdr)) & " "
+    LooksLikeId = (InStr(h, " id ") > 0 Or InStr(h, "store") > 0 Or InStr(h, "code") > 0 _
+                Or InStr(h, "#") > 0 Or InStr(h, "zip") > 0 Or InStr(h, "phone") > 0 _
+                Or InStr(h, "acct") > 0 Or InStr(h, "account") > 0)
+End Function
 
 ' Clear row 2 downward on each named tab that exists (no speed management,
 ' no dialog - the caller wraps this). Returns the comma list of tab names.
