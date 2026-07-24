@@ -814,15 +814,39 @@ Private Sub LabelCell(rng As Range, ByVal txt As String)
     rng.VerticalAlignment = xlTop
 End Sub
 
+' For list/table fields: draw the label and the explanation in the section-tinted
+' band ABOVE the column-header row, so the headers sit directly on top of the
+' input cells (no gap). These rows keep column A and column C blank, so they are
+' invisible to the config block readers. Returns the row for the header/key row.
+Private Function BlockIntro(ws As Worksheet, ByVal r As Long, _
+                            ByVal label As String, ByVal help As String) As Long
+    ws.Range(ws.Cells(r, 2), ws.Cells(r, 5)).Interior.Color = RGB(221, 217, 240)
+    ws.Cells(r, 2).Value = label
+    ws.Cells(r, 2).Font.Bold = True
+    ws.Cells(r, 2).Font.Color = RGB(54, 32, 100)
+    ws.Cells(r, 2).WrapText = True
+    ws.Cells(r, 2).VerticalAlignment = xlTop
+    r = r + 1
+    If Trim(help) <> "" Then
+        ws.Range(ws.Cells(r, 2), ws.Cells(r, 5)).Interior.Color = RGB(221, 217, 240)
+        ws.Cells(r, 2).Value = help
+        ws.Cells(r, 2).Font.Italic = True
+        ws.Cells(r, 2).Font.Size = 9
+        ws.Cells(r, 2).Font.Color = RGB(90, 70, 120)
+        ws.Cells(r, 2).WrapText = True
+        ws.Cells(r, 2).VerticalAlignment = xlTop
+        r = r + 1
+    End If
+    BlockIntro = r
+End Function
+
 Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     Dim vals As Collection, i As Long
+    r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the header
     ws.Cells(r, KEY_COL).Value = f("key")
-    LabelCell ws.Cells(r, 2), CStr(f("label"))
-    ws.Cells(r, 2).Font.Bold = True
     ws.Cells(r, VAL_COL).Value = f("headers")
     ws.Cells(r, VAL_COL).Font.Bold = True
     r = r + 1
-    r = RenderHelp(ws, r, CStr(f("help")))
     Set vals = ListValues(reg, CStr(f("key")))
     For i = 1 To MAX_LIST
         If i <= vals.Count Then ws.Cells(r, VAL_COL).Value = vals(i)
@@ -838,15 +862,13 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
     heads = Split(CStr(f("headers")), "|")
     nHead = UBound(heads)
     If nHead > 2 Then nHead = 2                 ' 3 columns read (C, D, E)
+    r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the headers
     ws.Cells(r, KEY_COL).Value = f("key")
-    LabelCell ws.Cells(r, 2), CStr(f("label"))
-    ws.Cells(r, 2).Font.Bold = True
     For j = 0 To nHead
         ws.Cells(r, VAL_COL + j).Value = Trim(heads(j))
         ws.Cells(r, VAL_COL + j).Font.Bold = True
     Next j
     r = r + 1
-    r = RenderHelp(ws, r, CStr(f("help")))
     hasData = TableValues(reg, CStr(f("key")), a, b, c)
     For i = 1 To MAX_LIST
         If hasData Then
