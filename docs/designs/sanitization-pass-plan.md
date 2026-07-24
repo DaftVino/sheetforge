@@ -21,7 +21,7 @@
 
 ```bash
 # $SWEEP = the jargon regex, case-insensitive, word-boundary on MIC
-SWEEP='food|foodDash|target inventory|inventory value|floater|MIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='food|foodDash|target inventory|inventory value|floater|\bMIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
 ```
 
 ---
@@ -40,7 +40,7 @@ SWEEP='food|foodDash|target inventory|inventory value|floater|MIC\b|Calc_Clock|n
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|foodDash|target inventory|inventory value|floater|MIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='food|foodDash|target inventory|inventory value|floater|\bMIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
 git grep -i -n -E "$SWEEP" -- src/packages/PkgImportExport.bas src/core/Core.bas
 ```
 Expected: multiple hits (L5, L13, L28, L39–43, L48, L49–52, L56, L63, L64–68, L194, L265–266, L477 in the package; L7 in Core).
@@ -114,7 +114,7 @@ git commit -m "chore(sanitize): generic demo defaults in PkgImportExport + Core 
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|foodDash|target inventory|inventory value|floater|MIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='food|foodDash|target inventory|inventory value|floater|\bMIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
 git grep -i -n -E "$SWEEP" -- src/legacy/SetupImportExportMacros.bas
 ```
 Expected: hits at L1, L5, L73–90, L188, L210, L243, L307–308, L409, L749, L889, L897, L909–910, L924–925.
@@ -205,7 +205,7 @@ git commit -m "chore(sanitize): generic names in legacy reference module + renam
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|foodDash|target inventory|inventory value|floater|MIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='food|foodDash|target inventory|inventory value|floater|\bMIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
 git grep -i -n -E "$SWEEP" -- docs/handoff.md docs/engine-architecture-draft.md docs/macro-catalog-plug-and-play.md CHANGELOG.md
 ```
 Expected: hits at handoff L16/L64/L75, draft L13/L58/L220/L221, macro-catalog L9, CHANGELOG L33.
@@ -255,7 +255,7 @@ git commit -m "docs(sanitize): generic module + dashboard names across docs and 
 
 ```bash
 cd x:/Projects/sheetforge
-SWEEP='food|foodDash|target inventory|inventory value|floater|MIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
+SWEEP='food|foodDash|target inventory|inventory value|floater|\bMIC\b|Calc_Clock|net sales|master store|category var|var detail|inv value|clock in and out|store key|store number|store #|Food Recap|IN_Day|IN_PTD|IN_InvValue|IN_Clock'
 git grep -i -n -E "$SWEEP" -- . ':(exclude)dist/' ':(exclude)docs/designs/setup-simplicity.md' ':(exclude)docs/designs/sanitization-pass.md' ':(exclude)docs/designs/sanitization-pass-plan.md'
 ```
 Expected: **no output** (exit 1). If any straggler appears, fix it inline, re-run, then commit with `chore(sanitize): straggler`.
