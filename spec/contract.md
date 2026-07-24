@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 1.0.0** (frozen 2026-07-24) · SemVer, independent of the
+**Contract version: 1.1.0** (2026-07-24) · SemVer, independent of the
 repo `VERSION` and of per-package versions.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -160,6 +160,25 @@ and the keys are identical across platforms**. Values are exchanged as strings;
 lists are ordered rows; table rows are columns spread across the value columns
 (never `"|"`-joined in storage — the `"|"` form is only for `defaults[]` seeds).
 
+### Composite actions — chains (v1.1.0)
+
+A **chain** is deployment config (not manifest data) that composes existing
+actions into one button:
+- **id** — an immutable, opaque token `chain.<token>`, minted once and preserved
+  across label edits. NEVER derived live from the label. `chain.*` is reserved:
+  no action id may use it.
+- **label** — the button caption; freely editable without changing identity.
+- **steps** — an ordered list of **action ids** (not captions). Stored as an
+  id-list joined by a delimiter that cannot occur in an id (reference: newline).
+- **semantics** — run steps in list order; each step's completion dialog is
+  suppressed; on a step failure the engine prompts the user Continue/Stop; one
+  combined summary is shown at the end. Chains resolve + validate at activate time.
+
+**Engine-owned config (v1.1.0):** config MAY originate from the engine itself
+(chains, placement) via an explicit engine schema hook, not only from package
+manifests. It is authored on the same Setup grid with the same key/value model,
+and MUST NOT be discovered through the package-probing mechanism (§1).
+
 ---
 
 ## 6. Action contract
@@ -188,6 +207,22 @@ the shared error handler — reference: the handler calls `Core_SpeedOn` /
 additionally runs a fail-safe restore if a handler errors before cleaning up. A
 package implements only its own logic plus these shared calls.
 
+**Dispatch (v1.1.0):** the single public dispatch entry resolves either an action
+id or a reserved `chain.*` id. A **quiet convention** lets composed steps suppress
+their **completion** dialogs: a handler reports completion through the engine's
+done-sink, which suppresses the dialog when the context is quiet. Suppression is
+guaranteed only for completion dialogs routed through that sink; interactive
+prompts (e.g. a range picker) and error dialogs are not suppressible.
+
+**Grouping / layout (v1.1.0):** each button (action or chain) may carry a
+**placement code** `<page-number><column-letters>` (e.g. `1A` = page 1, column A;
+`12AB` = page 12, column "AB"). Semantics: if NO button anywhere has a code, a
+single default button page is built (legacy behavior). If any code is present, a
+layout is active: numbered pages are built; a blank-coded button goes to page 1
+(the default page)'s **Unassigned** area; the explicit code **`hide`** omits a button.
+Same-code buttons stack in authoring order. Core's own admin controls are never
+user-placeable.
+
 ---
 
 ## 7. Naming rules (contract-level)
@@ -196,6 +231,7 @@ package implements only its own logic plus these shared calls.
 - **Field key** — opaque token, **unique across all enabled packages** (single
   shared config namespace). Namespace by convention (`k_*`, `clean_*`).
 - **Action id** — `pkg.verb`, unique.
+- **Reserved:** the id namespace `chain.*` is reserved for engine chains; no package action id may use it.
 - Reference-implementation binding names (`Pkg<Name>_<Verb>` entry points,
   `Pkg<Name>_Manifest`, `Core_*` API) are an Excel/VBA detail, not part of the
   portable contract.
@@ -312,3 +348,7 @@ port realizes them per platform rather than re-deriving them:
   this document**.
 - **Reserved for first use:** the `bool` kind (§3) — its encoding is fixed, and
   this document updated, when the first package uses it.
+- **v1.1.0 (additive):** adds the `chain` config entity, the reserved `chain.*`
+  id namespace, engine-owned config, the grouping/layout placement code, and the
+  quiet/dispatch convention. No existing key, action id, kind, value encoding, or
+  semantics changed — v1.0.0 deployments remain valid.

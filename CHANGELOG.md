@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- **Compose Your Buttons** — a Core-owned Setup section with two capabilities: **Chains** (compose several actions into one button that runs them in order — steps authored as `Label [action.id]` tokens; each chain is an immutable `chain.<id>` with a freely-editable label; on a step failure the runner prompts Continue/Stop; per-step success dialogs are suppressed and one summary is shown) and **Grouping/layout** (assign each button a page/column code like `1A`; no codes → the single "Macros" tab as before; any code → numbered "Macros N" pages, blank-coded buttons on page 1's "Unassigned" area, `hide` to omit; Setup/Finalize admin controls always present on page 1). Finalize validates chains + placement and blocks activation on structural errors (unknown steps, bad codes, reserved-namespace or id collisions).
+- Contract frozen at **v1.1.0** (additive): the `chain` config entity, reserved `chain.*` namespace, engine-owned config, placement code, and the dispatch/quiet convention.
+- Package completion dialogs now route through `Core_Done` so they suppress inside a chain.
+
+### Removed
+
+- The standalone `MacroLayout.bas` grouping prototype (its logic is absorbed into Core).
+
 ## [0.2.1] - 2026-07-23
 
 ### Fixed
