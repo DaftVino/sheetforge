@@ -6,36 +6,53 @@ Use this to continue the project in VS Code (Claude Code). Read **Current status
 
 ## Current status (2026-07-24)
 
-**The engine + portable contract are done and published.** `main` is on a
-**private** remote `github.com/DaftVino/sheetforge`.
+**The engine + portable contract are done and published; "Compose Your
+Buttons" (grouping + chaining) is now built on `feat/compose-your-buttons`,
+contract v1.1.0, pending merge to `main`.** `main` remains on a **private**
+remote `github.com/DaftVino/sheetforge`.
 
-- **Shipped (v0.1.0–v0.2.1):** `src/core/Core.bas` (config engine, Setup renderer,
-  button builder, `Core_Run` dispatcher, `_Packages` registry, shared helpers) +
-  `PkgImportExport` + `PkgClean`; `build/build.ps1` (Core + `Pkg*.bas` →
-  single-module `dist/MacrosBundle.bas`; fails on duplicate proc names / block
-  imbalance). Two-tier Setup UX (Simple/Advanced, help notes, suggest-import-types).
-  Verify = `pwsh build/build.ps1` (green: Sub 32/32, Function 55/55, 87 procs) +
-  a manual Excel import (owner-confirmed each release).
-- **Contract frozen:** `spec/contract.md` **v1.0.0** — language-neutral SoT
-  (manifest object, field model, kind vocabulary, tiers, config storage/read,
-  action contract, frozen registry for both packages, portability appendix,
-  SemVer change control). `/review`-audited against the code.
+- **Shipped (v0.1.0–v0.2.1) on `main`:** `src/core/Core.bas` (config engine,
+  Setup renderer, button builder, `Core_Run` dispatcher, `_Packages` registry,
+  shared helpers) + `PkgImportExport` + `PkgClean`; `build/build.ps1` (Core +
+  `Pkg*.bas` → single-module `dist/MacrosBundle.bas`; fails on duplicate proc
+  names / block imbalance). Two-tier Setup UX (Simple/Advanced, help notes,
+  suggest-import-types). Verify = `pwsh build/build.ps1` (green) + a manual
+  Excel import (owner-confirmed each release).
+- **Shipped (branch `feat/compose-your-buttons`, contract v1.1.0):**
+  **Compose Your Buttons** — a Core-owned Setup section with **Chains**
+  (compose several actions into one button run in order, `Label [action.id]`
+  step tokens, immutable `chain.<id>` config entity, Continue/Stop prompt on a
+  step failure, per-step dialogs suppressed via `Core_Done` in favor of one
+  summary) and **Grouping/layout** (`1A`-style page/column codes per button; no
+  codes → the single "Macros" tab; any code → numbered "Macros N" pages, blank
+  → page 1 "Unassigned", `hide` → omitted; Setup/Finalize admin controls always
+  on page 1). Finalize validates chains + placement and blocks activation on
+  structural errors. This finishes the long-pending **step 7** below.
+  `src/packages/MacroLayout.bas` — the standalone grouping prototype — has been
+  **deleted**; its logic (`ParseCode`, `IndexToCol`, `SortedKeys`,
+  `DeletePanels`, `AddText`, geometry) was absorbed into Core. Build verified
+  green (`pwsh build/build.ps1`, exit 0); **manual Excel import/run is
+  pending the owner** (checklist in the PR).
+- **Contract frozen:** `spec/contract.md` **v1.0.0**, extended additively to
+  **v1.1.0** for the `chain` config entity, reserved `chain.*` namespace,
+  engine-owned config, placement code, and the dispatch/quiet convention.
+  `/review`-audited against the code.
 - **Sanitized + first publish:** all client jargon + the real store number
   scrubbed; pushed **tree-only** (pre-`d29b0d7` *history* still holds jargon —
   private repo; revisit before any public release).
 
-**Two things intended but NOT done (not lost — deferred):**
+**Deferred (not lost):**
 
-- **Grouping/layout integration = step 7 below.** `MacroLayout.bas` is a working
-  standalone prototype, still **un-built** (excluded from the bundle) and
-  **un-wired** (`ML_RunById` placeholder, never connected to `Core_Run`).
+- **Built-page polish** (design §8) — per-page titles/column headings/legend,
+  Previous/Next page navigation, a live placement preview, a visually distinct
+  admin area. Out of scope for "Compose your buttons"; tracked in `TODOS.md`
+  Roadmap.
 - **Catalog build-out.** Only 2 of ~60 `macro-catalog-plug-and-play.md` macros
   are packages.
 
-**Next phase = the "Compose your buttons" spec** — grouping integration + a new
-chaining capability (compose actions into one sequential button), as one
-Setup-page feature; additive **contract v1.1.0**. See `TODOS.md` "Next — active"
-and the Next-session prompt at the bottom.
+**Next phase** — merge `feat/compose-your-buttons` to `main` once the owner
+completes the manual Excel checklist, then pick up Catalog build-out or the
+Apps Script port. See `TODOS.md` Roadmap.
 
 ---
 
@@ -106,7 +123,7 @@ spreadsheet-macros/
 
 ## Build order (status)
 
-Engine + contract (1–6) are **done**; 7–9 are the open scope.
+Engine + contract (1–7) are **done**; 8–9 are the open scope.
 
 1. ✓ `git init`, repo layout, `CLAUDE.md`.
 2. ✓ **Extract Core** from `SetupImportExportMacros` (config engine, Setup renderer, button builder, helpers, `Core_Run` dispatcher, manifest API, `_Packages` registry).
@@ -114,12 +131,13 @@ Engine + contract (1–6) are **done**; 7–9 are the open scope.
 4. ✓ **Second package `PkgClean`** — proved the contract generalizes with zero new wiring.
 5. ✓ **Freeze `spec/contract.md`** (v1.0.0) — `/review`-audited.
 6. ✓ **`build/build.ps1`** — concatenate Core + `Pkg*.bas` → `dist/MacrosBundle.bas`.
-7. **→ NEXT — "Compose your buttons":** one spec + build for **(a) grouping
-   integration** (wire `MacroLayout`'s `ML_RunById` → `Core_Run` and surface
-   grouping on the Setup page; adopt or rewrite the prototype) and **(b)
-   chaining** (compose actions into one sequential button; generalizes the
-   hardcoded clear→import). Additive **contract v1.1.0**. `brainstorming` →
-   `writing-plans` first.
+7. ✓ **"Compose your buttons"** — grouping integration (assign each button a
+   page/column code on the Setup page; `MacroLayout.bas`'s prototype logic
+   absorbed into Core, the standalone file deleted) **and** chaining (compose
+   actions into one sequential button, `Label [action.id]` steps, immutable
+   `chain.<id>` config, Continue/Stop on failure). Additive **contract v1.1.0**.
+   Built on `feat/compose-your-buttons`; manual Excel verification pending the
+   owner.
 8. **Catalog build-out** (separate track): more `Pkg<Name>.bas` toward the ~60 in
    `macro-catalog-plug-and-play.md`.
 9. **Apps Script port:** implement the frozen contract on Google Sheets, once the
@@ -133,16 +151,21 @@ Engine + contract (1–6) are **done**; 7–9 are the open scope.
 >
 > **Read manifest:**
 > - `CLAUDE.md` (~5KB) — workflow gates
-> - `docs/handoff.md` (this file, ~14KB) — Current status + Project context
-> - `TODOS.md` (~8KB) — the **"Next — active"** item IS this task
-> - `spec/contract.md` (~20KB) — frozen **contract v1.0.0**; you'll extend it to v1.1.0
-> - `src/core/Core.bas` (44KB, 1127 lines — read in slices via Grep / `docs/code-map.md`): dispatcher `Core_Run` (~L601), button builder `Core_BuildControlPanel` (~L979), Setup renderer `Core_BuildSetup` (~L695)
-> - `src/packages/MacroLayout.bas` (28KB) — standalone grouping prototype; `ML_RunById` (~L350) is the seam to `Core_Run`
-> - `src/packages/PkgImportExport.bas` (28KB) — `PkgImportExport_Import` (~L106) is the hardcoded clear→import that chaining generalizes
-> - `docs/engine-architecture-draft.md` §9 (Setup page) — design principles
+> - `docs/handoff.md` (this file) — Current status + Project context
+> - `TODOS.md` — Roadmap section has the next candidates (Catalog build-out, Apps Script port)
+> - `spec/contract.md` — frozen **contract v1.1.0** (chains + grouping added additively over v1.0.0)
+> - `src/core/Core.bas` — read in slices via Grep / `docs/code-map.md`
 >
-> **Task — spec then build the "Compose your buttons" feature.** ONE feature, two linked Setup-page sections:
-> 1. **Grouping/layout** — assign actions to pages/sections. Finish the pending **step 7**: wire `MacroLayout`'s `ML_RunById` onto `Core_Run` and surface grouping on the Setup page (adopt or rewrite the prototype — today it's standalone, un-built, un-integrated).
-> 2. **Chaining** — compose several actions into ONE button that runs them sequentially (generalizes the hardcoded clear→import). User-defined chains are deployment-specific **config**, not manifest data — a new config entity.
+> **Status:** "Compose Your Buttons" (chains + grouping/layout) is built on
+> `feat/compose-your-buttons`, `pwsh build/build.ps1` is green, and
+> `src/packages/MacroLayout.bas` (the standalone grouping prototype) has been
+> deleted — its logic now lives in Core. **What's outstanding:** the owner's
+> manual Excel import/run of `dist/MacrosBundle.bas` (checklist recorded in the
+> Task 10 PR) — do this before merging the branch to `main`.
 >
-> This touches Core (`Core_Run`, button builder, Setup renderer) + the contract → additive **contract v1.1.0**. So: **`brainstorming` first** to settle the open design questions — where chains live (config vs manifest), mid-chain error handling (stop vs continue on failure), whether chained steps suppress their individual confirmation dialogs, adopt-vs-rewrite MacroLayout, and how grouping + chaining share the Setup surface — then `writing-plans`, build in `src/`, `pwsh build/build.ps1`, `/review`, land to `main`. **Catalog build-out is a separate track — not part of this.**
+> **Task — pick the next roadmap item** (see `TODOS.md` Roadmap): Catalog
+> build-out (more `Pkg<Name>.bas` toward the ~60 in
+> `macro-catalog-plug-and-play.md`), the Apps Script port, or the deferred
+> built-page polish (design §8: per-page titles/headings/legend, page nav, a
+> live placement preview, a distinct admin area). Confirm with the user which
+> to pick up before starting `brainstorming`/`writing-plans`.
