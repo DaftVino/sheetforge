@@ -1429,3 +1429,21 @@ git commit -m "chore: remove MacroLayout prototype; docs for compose-your-button
 
 **Next phase.** After the manual run passes → **`/ship`** to land PR #1 to `main`. Then pick up a SEPARATE track: **catalog build-out** (`docs/macro-catalog-plug-and-play.md`, ~58 of ~60 macros unbuilt) or the **Apps Script port** of the now-v1.1.0 contract.
 Read manifest: `spec/contract.md` (~22KB, v1.1.0) · `docs/designs/2026-07-24-compose-your-buttons-design.md` (~17KB) · this plan (~60KB) · `.superpowers/sdd/progress.md` (SDD ledger + deferred Minors) · `src/core/Core.bas` (~90KB, read in slices via Grep — dispatch `Core_Run`/`RunAction`/`Core_RunChain`, gate `Core_FinalizeSetup`/`ComposeReport`, builder `Core_BuildControlPanel`/`BuildGroupedPanels`).
+
+### 2026-07-24 — SHIPPED v0.3.0; next phase = finish Excel
+
+**Merged.** PR #1 (`b95eae3`, first batch) then PR #2 (`974a888`, the v0.3.0 delta) → `main`. `main` now at **VERSION 0.3.0**, CHANGELOG `[0.3.0] - 2026-07-24`, contract `spec/contract.md` **v1.1.0**. `feat/compose-your-buttons` deleted. Build green (Sub 41/41, Function 85/85); Excel Debug ▸ Compile clean + owner-exercised.
+
+**What shipped (beyond the earlier handoff entry above).** All 10 tasks + the testing-fix loop the owner's Excel run flushed out. Files: `src/core/Core.bas` (heavy), `src/packages/PkgImportExport.bas` + `PkgClean.bas` (Core_Done), `spec/contract.md` (v1.1.0), `build/build.ps1` (+structural check), `scripts/vba-syntax-check.mjs` (new), `CHANGELOG.md`/`VERSION`/`TODOS.md`/docs; deleted `src/packages/MacroLayout.bas`. No automated tests (repo policy).
+
+**What the plan got wrong — corrected post-review during Excel testing, DO NOT REVERT** (earlier do-not-revert list still applies; these are additional):
+- **Module-level `Const` must be in the declarations section**, never between procedures — VBA compile error ("variable not defined", surfaced on `ReadChains`). `build.ps1` now fails on this class. *Do not move `CHAINS_KEY`/`LAYOUT_KEY`/`RID_COL` back down.*
+- **`_Config` must be unhidden before `.Delete` in `Core_FinalizeSetup`** — a very-hidden sheet resists Delete, so a 2nd Finalize hit "That name is already taken" and orphaned `Setup (2)` copies. *Do not remove the `.Visible = xlSheetVisible` before the delete.*
+- **`Core_FinalizeSetup` calls `Core_BuildControlPanel True`** (rebuild-on-finalize) so chains/grouping appear without a manual Alt+F8. *The `silent` flag suppresses the redundant popup — keep it.*
+- **Admin controls (Create/Finalize) live on their own `Setup Menu` tab**, not on the button pages / grouped page-1 col 9998. *Do not re-inject admin into the action pages.*
+
+**Discovered (empirical).** No VBA compiler in CI — `build.ps1` checks only block-balance + duplicate names. Mitigations added: the structural "module-level decl after first proc" check in `build.ps1`, and `scripts/vba-syntax-check.mjs` (drives the "VBA Pro" / `notisdataanalytics.vba-lsp` VS Code language server headlessly over stdio for a syntax gate — a PARSER, misses undefined-vars/type errors). The real gate remains Excel **Debug ▸ Compile VBAProject** + a run.
+
+**Still open.** (1) **Catalog build-out** — ~58 of ~60 macros in `docs/macro-catalog-plug-and-play.md` unbuilt; each = a thin `Pkg<Name>.bas` + one line in Core's candidate list. (2) **Design §8 built-page polish** — the owner called the panels "disorganized and cluttered": per-page titles, column headings, a legend, Previous/Next page nav, tighter spacing. (3) **Apps Script port** — DEFER TO LAST: the frozen contract makes it mechanical only *after* the Excel feature set settles; porting earlier means re-doing it against a moving target.
+
+**Next phase = "Finish Excel."** Plan the remaining Excel work (catalog build-out + §8 UI polish) before the Apps Script port. Read manifest: `CHANGELOG.md` (v0.3.0) · `spec/contract.md` (~22KB, v1.1.0) · `docs/macro-catalog-plug-and-play.md` (roadmap of candidate macros + ratings) · `docs/designs/2026-07-24-compose-your-buttons-design.md` §8 (deferred polish) · `TODOS.md` · `src/core/Core.bas` (~95KB — read in slices via Grep; `docs/code-map.md` is absent, offer `/code-map`) · `src/packages/PkgImportExport.bas` + `PkgClean.bas` (the two existing package patterns to copy).
