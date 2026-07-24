@@ -70,23 +70,23 @@ Private Sub InputConfig(ByRef tabNames() As String, _
     ReDim prefixes(1 To 4)
     ReDim typeMaps(1 To 4)
 
-    tabNames(1) = "IN_Day"
-    prefixes(1) = "Target Inventory Data (day)"
+    tabNames(1) = "IN_Data1"
+    prefixes(1) = "Source File A"
     typeMaps(1) = "T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
 
-    tabNames(2) = "IN_PTD"
-    prefixes(2) = "Target Inventory Data (period to date)"
+    tabNames(2) = "IN_Data2"
+    prefixes(2) = "Source File B"
     typeMaps(2) = "T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
 
-    tabNames(3) = "IN_InvValue"
-    prefixes(3) = "Inventory Value Data"
+    tabNames(3) = "IN_Data3"
+    prefixes(3) = "Source File C"
     typeMaps(3) = "T,T,T,T,T,T,T,N,N,N,N"
 
-    ' IN_Clock is kept ALL TEXT for the identifier/date columns: Calc_Hours
-    ' parses the clock-in/out text with DATEVALUE/TIMEVALUE, and the store key
-    ' must stay text to match TabName. Only the pay/hours columns are numeric.
-    tabNames(4) = "IN_Clock"
-    prefixes(4) = "Clock in and out Combine"
+    ' IN_Data4 is kept ALL TEXT for its identifier/date columns: a downstream
+    ' step parses the time text with DATEVALUE/TIMEVALUE, and the key column
+    ' must stay text to match the master tab. Only the numeric columns are N.
+    tabNames(4) = "IN_Data4"
+    prefixes(4) = "Source File D"
     typeMaps(4) = "T,T,T,T,T,T,T,T,T,N,N,N,N,N"
 End Sub
 
@@ -185,7 +185,7 @@ Public Sub ImportSourceData()
                     ' Text columns must be formatted as Text BEFORE writing, otherwise
                     ' Excel converts numeric-looking strings (e.g. store "12345") back to
                     ' numbers, which breaks the dashboard's type-strict MATCH lookups
-                    ' (Net Sales, category %s, TabName).
+                    ' (e.g. totals, percentages, key metrics).
                     If code = "T" Then _
                         ws.Range(ws.Cells(2, c), ws.Cells(sLastRow, c)).NumberFormat = "@"
                     For r = 1 To UBound(arr, 1)
@@ -207,7 +207,7 @@ NextTab:
     Application.Calculation = xlCalculationAutomatic
 
     ' Refresh pivot tables and force a full recalc so downstream tabs
-    ' (TabName, Sample Recap, Sample Category, etc.) update from the new data.
+    ' (the summary tabs, etc.) update from the new data.
     Dim sh As Worksheet, pt As PivotTable
     For Each sh In ThisWorkbook.Worksheets
         For Each pt In sh.PivotTables
@@ -240,7 +240,7 @@ Fail:
 End Sub
 
 '================================================================
-' BUTTON 3 - Update Ref_Master from the Master Store List
+' BUTTON 3 - Update Ref_Master from the Master List Import
 '================================================================
 Public Sub UpdateRefMaster()
     Dim srcPath As String, wbSrc As Workbook, wsSrc As Worksheet, wsDst As Worksheet
@@ -304,8 +304,8 @@ Public Sub UpdateRefMaster()
     dLast = wsDst.Cells(wsDst.Rows.Count, 1).End(xlUp).Row
     If dLast >= 2 Then wsDst.Range(wsDst.Cells(2, 1), wsDst.Cells(dLast, nCols)).ClearContents
 
-    ' Force the first (Store) column to Text so the store numbers stay text
-    ' and keep matching the dashboard's text-based store keys.
+    ' Force the first (key) column to Text so codes/IDs keep leading zeros
+    ' and keep matching the workbook's text-based keys.
     wsDst.Columns(1).NumberFormat = "@"
 
     outR = 2
@@ -397,7 +397,7 @@ Public Sub ExportDashboard()
     ' values FIRST, then freeze ordinary formulas. Freezing a block that holds
     ' a spill dropped every spilled row; freezing a block that holds a legacy
     ' array errored out and left those formulas un-frozen (they became #REF!
-    ' once the input tabs were deleted - the Sample Detail bug).
+    ' once the input tabs were deleted - the Trends bug).
     Dim cel As Range, sp As Range, sv As Variant
     For Each ws In newWb.Worksheets
         Set fRange = Nothing
@@ -406,7 +406,7 @@ Public Sub ExportDashboard()
         On Error GoTo Fail
         If Not fRange Is Nothing Then
             For Each cel In fRange.Cells
-                If cel.HasSpill Then                  ' dynamic-array spill (e.g. Floater Finder FILTER)
+                If cel.HasSpill Then                  ' dynamic-array spill (e.g. a FILTER formula)
                     Set sp = cel.SpillingToRange
                     sv = sp.Value
                     cel.ClearContents
@@ -894,7 +894,7 @@ Private Function ExportDateOffset() As Long
     If IsNumeric(s) Then ExportDateOffset = CLng(s) Else ExportDateOffset = -1
 End Function
 Private Function MasterPrefix() As String
-    MasterPrefix = SheetSingle(CfgSheet(), K_MPREFIX, "Master Store List")
+    MasterPrefix = SheetSingle(CfgSheet(), K_MPREFIX, "Master List Import")
 End Function
 Private Function MasterSheetName() As String
     MasterSheetName = SheetSingle(CfgSheet(), K_MSHEET, "Current Master")
@@ -906,8 +906,8 @@ Private Function GetExportTabs() As Variant
     Dim col As Collection, i As Long, arr() As String
     Set col = SheetList1(CfgSheet(), K_EXPTABS)
     If col.Count = 0 Then
-        GetExportTabs = Array("Sample Recap (Daily)", "Sample Category", "Sample Detail", _
-                              "Inv Value Outliers", "Floater Finder")
+        GetExportTabs = Array("Summary", "Details", "Trends", _
+                              "Outliers", "Breakdown")
     Else
         ReDim arr(0 To col.Count - 1)
         For i = 1 To col.Count
@@ -921,8 +921,8 @@ Private Function GetMasterCols() As Collection
     Set col = SheetList1(CfgSheet(), K_MCOLS)
     If col.Count = 0 Then
         Set col = New Collection
-        col.Add "Store #": col.Add "Location Name": col.Add "Entity"
-        col.Add "DO Name": col.Add "GM Name"
+        col.Add "Store ID": col.Add "Location Name or Address": col.Add "Entity ID"
+        col.Add "Mgr (DM) Group": col.Add "Mgr (Loc) Name"
     End If
     Set GetMasterCols = col
 End Function
