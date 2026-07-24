@@ -92,9 +92,9 @@ Public Sub PkgImportExport_Clear(ctx As Object)
     tlist = ClearTabs(tabNames)
     Core_SpeedOff
 
-    MsgBox "Cleared data (row 2 and below) on:" & vbCrLf & _
+    Core_Done ctx, "Cleared data (row 2 and below) on:" & vbCrLf & _
            "  " & tlist & vbCrLf & vbCrLf & _
-           "Headers and formatting were kept.", vbInformation, "Clear Input Tabs"
+           "Headers and formatting were kept.", "Clear Input Tabs"
     Exit Sub
 Fail:
     Core_Fail ctx, "importexport.clear", Err
@@ -180,8 +180,8 @@ NextTab:
 
     Application.AskToUpdateLinks = True
     Core_SpeedOff
-    MsgBox "Import complete (input tabs were cleared first):" & vbCrLf & vbCrLf & logTxt, _
-           vbInformation, "Import Source Data"
+    Core_Done ctx, "Import complete (input tabs were cleared first):" & vbCrLf & vbCrLf & logTxt, _
+           "Import Source Data"
     Exit Sub
 Fail:
     Core_Fail ctx, "importexport.import", Err
@@ -283,8 +283,8 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
     Application.Calculate
     Application.AskToUpdateLinks = True
     Core_SpeedOff
-    MsgBox mDest & " updated from """ & Core_FileName(srcPath) & """ (sheet '" & mSheet & "')." & vbCrLf & _
-           n & " rows written.", vbInformation, "Update Ref_Master"
+    Core_Done ctx, mDest & " updated from """ & Core_FileName(srcPath) & """ (sheet '" & mSheet & "')." & vbCrLf & _
+           n & " rows written.", "Update Ref_Master"
     Exit Sub
 Fail:
     Core_Fail ctx, "importexport.updateMaster", Err
@@ -428,8 +428,8 @@ Public Sub PkgImportExport_Export(ctx As Object)
 
     Application.PrintCommunication = True
     Core_SpeedOff
-    MsgBox "Exported (all rows, all formatting + conditional formatting kept) to:" & vbCrLf & vbCrLf & _
-           outPath, vbInformation, "Export Dashboard"
+    Core_Done ctx, "Exported (all rows, all formatting + conditional formatting kept) to:" & vbCrLf & vbCrLf & _
+           outPath, "Export Dashboard"
     Exit Sub
 Fail:
     Core_Fail ctx, "importexport.export", Err
@@ -473,12 +473,12 @@ Public Sub PkgImportExport_SuggestTypes(ctx As Object)
     Application.AskToUpdateLinks = True
     Core_SpeedOff
 
-    MsgBox "Suggested type maps filled for " & found & " import row(s)." & vbCrLf & vbCrLf & _
+    Core_Done ctx, "Suggested type maps filled for " & found & " import row(s)." & vbCrLf & vbCrLf & _
            "PLEASE REVIEW on the Setup tab: a column of ID / code numbers (e.g. an ID or code) must " & _
            "be T (text) even though it looks numeric, or the dashboard's lookups break. " & _
            "Adjust any cell, then run 'Finalize Setup Tab'." & _
            IIf(missed = "", "", vbCrLf & vbCrLf & "No source file found for:" & missed), _
-           vbInformation, "Suggest Import Types"
+           "Suggest Import Types"
     Exit Sub
 Fail:
     Application.AskToUpdateLinks = True
