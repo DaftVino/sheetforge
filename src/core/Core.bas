@@ -66,18 +66,23 @@ Public Sub Core_DeclarePackage(reg As Object, ByVal id As String, _
 End Sub
 
 Public Sub Core_AddSection(reg As Object, ByVal title As String)
-    reg("fields").Add NewField("", title, "section", "")
+    reg("fields").Add NewField("", title, "section", "", "simple")
 End Sub
 
+' tier is "simple" (default) or "advanced". Advanced fields are grouped under an
+' "ADVANCED - most users can leave these as-is" band so regular users can stop
+' after the simple fields.
 Public Sub Core_AddField(reg As Object, ByVal key As String, ByVal label As String, _
-                         ByVal kind As String, ByVal dflt As String)
-    reg("fields").Add NewField(key, label, kind, dflt)
+                         ByVal kind As String, ByVal dflt As String, _
+                         Optional ByVal tier As String = "simple")
+    reg("fields").Add NewField(key, label, kind, dflt, tier)
 End Sub
 
 Public Sub Core_AddList(reg As Object, ByVal key As String, _
-                        ByVal label As String, ByVal colHeader As String)
+                        ByVal label As String, ByVal colHeader As String, _
+                        Optional ByVal tier As String = "simple")
     Dim f As Object
-    Set f = NewField(key, label, "list", "")
+    Set f = NewField(key, label, "list", "", tier)
     f("headers") = colHeader
     reg("fields").Add f
 End Sub
@@ -85,9 +90,10 @@ End Sub
 ' colHeaders is a "|"-delimited string (NOT comma - a header may itself contain
 ' commas, e.g. "Type map (T,N,D,...)"). Up to 3 columns are read (C, D, E).
 Public Sub Core_AddTable(reg As Object, ByVal key As String, _
-                         ByVal label As String, ByVal colHeaders As String)
+                         ByVal label As String, ByVal colHeaders As String, _
+                         Optional ByVal tier As String = "simple")
     Dim f As Object
-    Set f = NewField(key, label, "table", "")
+    Set f = NewField(key, label, "table", "", tier)
     f("headers") = colHeaders
     reg("fields").Add f
 End Sub
@@ -112,7 +118,8 @@ Public Sub Core_AddAction(reg As Object, ByVal actionId As String, ByVal caption
 End Sub
 
 Private Function NewField(ByVal key As String, ByVal label As String, _
-                          ByVal kind As String, ByVal dflt As String) As Object
+                          ByVal kind As String, ByVal dflt As String, _
+                          ByVal tier As String) As Object
     Dim f As Object
     Set f = CreateObject("Scripting.Dictionary")
     f.Add "key", key
@@ -121,6 +128,12 @@ Private Function NewField(ByVal key As String, ByVal label As String, _
     f.Add "default", dflt
     f.Add "headers", ""
     f.Add "defaults", New Collection
+    ' Normalize the tier so an unknown or mis-cased value degrades to "simple"
+    ' (still shown) rather than matching neither render pass and vanishing.
+    Dim t As String
+    t = LCase(Trim(tier))
+    If t <> "advanced" Then t = "simple"
+    f.Add "tier", t
     Set NewField = f
 End Function
 
@@ -641,18 +654,11 @@ Public Sub Core_BuildSetup()
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
         r = SectionHeader(ws, r, UCase(CStr(reg("name"))))
-        For Each f In reg("fields")
-            Select Case f("kind")
-                Case "section"
-                    r = SectionHeader(ws, r, CStr(f("label")))
-                Case "list"
-                    r = RenderList(ws, r, reg, f)
-                Case "table"
-                    r = RenderTable(ws, r, reg, f)
-                Case Else
-                    r = RenderScalar(ws, r, reg, f)
-            End Select
-        Next f
+        r = RenderTier(ws, r, reg, "simple", True)         ' simple fields, with their sections
+        If HasAdvanced(reg) Then
+            r = SectionHeader(ws, r, "ADVANCED  -  most users can leave these as-is")
+            r = RenderTier(ws, r, reg, "advanced", False)  ' advanced fields, collected flat
+        End If
         r = r + 1
     Next reg
 
@@ -688,6 +694,52 @@ Fail:
     Application.ScreenUpdating = True
     MsgBox "Core_BuildSetup error: " & Err.Description, vbExclamation, "Create Setup Tab"
 End Sub
+
+' Render every field of the given tier. When showSections is True, a section
+' header is emitted just before its first matching field (so a section whose
+' fields are all in the other tier is not drawn). When False (the advanced
+' pass), section headers are skipped and the fields render flat under the one
+' ADVANCED band.
+Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
+                            ByVal tier As String, ByVal showSections As Boolean) As Long
+    Dim f As Object, pending As String, havePending As Boolean
+    For Each f In reg("fields")
+        If f("kind") = "section" Then
+            pending = CStr(f("label"))
+            havePending = True
+        ElseIf CStr(f("tier")) = tier Then
+            If showSections And havePending Then
+                r = SectionHeader(ws, r, pending)
+                havePending = False
+            End If
+            r = RenderField(ws, r, reg, f)
+        End If
+    Next f
+    RenderTier = r
+End Function
+
+Private Function RenderField(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
+    Select Case f("kind")
+        Case "list"
+            RenderField = RenderList(ws, r, reg, f)
+        Case "table"
+            RenderField = RenderTable(ws, r, reg, f)
+        Case Else
+            RenderField = RenderScalar(ws, r, reg, f)
+    End Select
+End Function
+
+Private Function HasAdvanced(reg As Object) As Boolean
+    Dim f As Object
+    For Each f In reg("fields")
+        If f("kind") <> "section" Then
+            If CStr(f("tier")) = "advanced" Then
+                HasAdvanced = True
+                Exit Function
+            End If
+        End If
+    Next f
+End Function
 
 Private Function RenderScalar(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     ws.Cells(r, KEY_COL).Value = f("key")
