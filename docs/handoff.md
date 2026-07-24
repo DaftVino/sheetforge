@@ -13,7 +13,7 @@ spreadsheet-macros/
 ├─ spec/
 │   └─ contract.md           # (to create) language-neutral config schema + action ids — source of truth
 ├─ src/
-│   ├─ core/                 # Core module(s) — extracted from FoodDashMacros
+│   ├─ core/                 # Core module(s) — extracted from SetupImportExportMacros
 │   ├─ packages/             # one .bas per package (PkgImportExport, PkgClean, ...)
 │   │   ├─ PkgImportExport.bas
 │   │   └─ MacroLayout.bas   # the grouping/layout feature (already built)
@@ -61,7 +61,7 @@ spreadsheet-macros/
 
 ## Current files (move these into the repo)
 
-- **`SetupImportExportMacros.bas`** (module `FoodDashMacros`) → `src/legacy/`. The working dashboard automation for the Food Performance Dashboard. Four buttons: Clear Input Tabs, Import Source Data (folder match + type coercion), Update Ref_Master (column-mapped refresh from a master file), Export Dashboard (values-only snapshot: flattens spills/legacy arrays/formulas, keeps formatting + conditional formatting, breaks external links, dated filename), plus a Setup/Finalize/BuildMacroTab config driver writing a hidden `_Config`. **~80% of Core already lives here** — this file is the extraction source, and its 4 buttons become the `PkgImportExport` package.
+- **`SetupImportExportMacros.bas`** (module `SetupImportExportMacros`) → `src/legacy/`. The working dashboard automation for the Sample Dashboard workbook. Four buttons: Clear Input Tabs, Import Source Data (folder match + type coercion), Update Ref_Master (column-mapped refresh from a master file), Export Dashboard (values-only snapshot: flattens spills/legacy arrays/formulas, keeps formatting + conditional formatting, breaks external links, dated filename), plus a Setup/Finalize/BuildMacroTab config driver writing a hidden `_Config`. **~80% of Core already lives here** — this file is the extraction source, and its 4 buttons become the `PkgImportExport` package.
 - **`MacroLayout.bas`** (module `MacroLayout`) → `src/packages/`. The grouping/layout feature. A Master sheet holds an Enabled flag per macro (stand-in for the future package-toggle layer); "Build Grouping Page" lists only enabled macros with a yellow **Code** cell; codes like `1A` mean tab 1 / column A (number = tab, letters = column, multi-digit tabs and `AA`+ columns supported); "Apply Layout" builds `Macros 1`, `Macros 2`... tabs placing buttons by code, stacked in list order. Buttons call a **placeholder `ML_RunById`** — the single seam to swap for `Core_Run` once the dispatcher exists. Re-running Build Grouping Page preserves already-entered codes.
 - **`macro_catalog_plug_and_play.md`** → `docs/`. ~60 candidate macros grouped by user-facing job, each rated (⭐ project importance + A–F real-world popularity), with the ones already implemented in the dashboard marked done.
 - **`engine_architecture_draft.md`** → `docs/`. The full architecture rationale, including the stress-test of the multi-file concept and the cross-platform table.
@@ -72,7 +72,7 @@ spreadsheet-macros/
 ## Next steps (build order)
 
 1. `git init`; drop in the files per the layout; paste Project context into `CLAUDE.md`.
-2. **Extract Core** from `FoodDashMacros`: config engine (`CfgSheet`/`SheetSingle`/`SheetList1`/`SheetTable3`), Setup renderer (`CreateSetupTab`/`FinalizeSetupTab`), button builder (`BuildMacroTab`), helpers (`FindSourceFile`/`CoerceVal`/`SheetExists`), plus new `Core_Run` dispatcher, `Core_DeclarePackage`/`Core_AddField`/`Core_AddAction`, and the `_Packages` registry.
+2. **Extract Core** from `SetupImportExportMacros`: config engine (`CfgSheet`/`SheetSingle`/`SheetList1`/`SheetTable3`), Setup renderer (`CreateSetupTab`/`FinalizeSetupTab`), button builder (`BuildMacroTab`), helpers (`FindSourceFile`/`CoerceVal`/`SheetExists`), plus new `Core_Run` dispatcher, `Core_DeclarePackage`/`Core_AddField`/`Core_AddAction`, and the `_Packages` registry.
 3. **Refactor the 4 dashboard buttons** into `PkgImportExport` with a manifest — proving the contract on code that already works, no behavior change for dashboard users.
 4. **Add a second tiny package** (`PkgClean`: RemoveDuplicates + TrimClean) to prove buttons appear with zero new wiring.
 5. **Freeze `spec/contract.md`** — config field keys, action ids, action semantics — as the portable source of truth.

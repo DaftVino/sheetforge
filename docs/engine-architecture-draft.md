@@ -10,7 +10,7 @@ Your idea — *multiple package `.bas` files + one setup `.bas` that runs setup 
 
 **Where you're right.** VBA standard modules all share a single global namespace inside a project. Import ten `.bas` files and every `Public` sub/function in them is instantly callable from every other module — no linking, no imports, no references. So "packages that can see the setup engine, and vice versa" is free. Your instinct that this is straightforward is correct *for the wiring*.
 
-**Where it's incomplete — the gap.** A *generic* setup engine can't do anything useful with a package it knows nothing about. Setup needs to know: what config fields does this package need? What actions does it expose? What captions/help text go on the buttons? Your current `FoodDashMacros.bas` "knows" all of that because it's **hardcoded** (the `k_export_tabs`, `k_import`, etc. keys are baked into `CreateSetupTab`). A generic engine can't hardcode that — the packages have to *tell* it. That means a **contract**: every package must declare itself in a shape Core understands. That contract is the piece your concept is missing, and it's the whole ballgame.
+**Where it's incomplete — the gap.** A *generic* setup engine can't do anything useful with a package it knows nothing about. Setup needs to know: what config fields does this package need? What actions does it expose? What captions/help text go on the buttons? Your current `SetupImportExportMacros.bas` "knows" all of that because it's **hardcoded** (the `k_export_tabs`, `k_import`, etc. keys are baked into `CreateSetupTab`). A generic engine can't hardcode that — the packages have to *tell* it. That means a **contract**: every package must declare itself in a shape Core understands. That contract is the piece your concept is missing, and it's the whole ballgame.
 
 **The second gap — discovery.** Even with a contract, how does the setup engine find out *which* packages got imported? VBA cannot enumerate its own loaded modules without enabling **"Trust access to the VBA project object model"** — the exact setting your current file deliberately avoids needing. So Core can't just "look around" for packages. It needs an explicit registry it maintains itself (details in §4).
 
@@ -55,7 +55,7 @@ Three layers. The dependency arrow points one way: packages depend on Core; Core
         LAYER 1 — PACKAGES  (optional, many, thin)
 ```
 
-**Core is not new work — it's an extraction.** Your `FoodDashMacros.bas` already contains ~80% of Core: `CfgSheet`/`SheetSingle`/`SheetList1`/`SheetTable3` (config engine), `BuildMacroTab` (button builder), `CreateSetupTab`/`FinalizeSetupTab` (Setup renderer + validation), `FindSourceFile`/`CoerceVal`/`SheetExists` (helpers), and the speed/error pattern in every button. The job is to *lift those out* of the food-dashboard specifics and make them manifest-driven.
+**Core is not new work — it's an extraction.** Your `SetupImportExportMacros.bas` already contains ~80% of Core: `CfgSheet`/`SheetSingle`/`SheetList1`/`SheetTable3` (config engine), `BuildMacroTab` (button builder), `CreateSetupTab`/`FinalizeSetupTab` (Setup renderer + validation), `FindSourceFile`/`CoerceVal`/`SheetExists` (helpers), and the speed/error pattern in every button. The job is to *lift those out* of the dashboard-specific parts and make them manifest-driven.
 
 **Packages become thin.** Your four buttons (Clear, Import, Update Ref_Master, Export) stop being the whole file and become one package — `ImportExport` — that declares a manifest and calls Core for all plumbing.
 
@@ -217,8 +217,8 @@ Principles, generalizing what your `CreateSetupTab` already does well:
 
 ## 10. Suggested build order
 
-1. **Extract Core** from `FoodDashMacros.bas`: config engine, helpers, button builder, Setup renderer — plus new `Core_Run` dispatcher, `Core_DeclarePackage`/`Core_AddField`/`Core_AddAction`, and the `_Packages` registry.
-2. **Refactor your four buttons** into a `PkgImportExport` module with a manifest. Nothing about the food dashboard changes for the user; you've just proven the contract on real code.
+1. **Extract Core** from `SetupImportExportMacros.bas`: config engine, helpers, button builder, Setup renderer — plus new `Core_Run` dispatcher, `Core_DeclarePackage`/`Core_AddField`/`Core_AddAction`, and the `_Packages` registry.
+2. **Refactor your four buttons** into a `PkgImportExport` module with a manifest. Nothing about the sample dashboard changes for the user; you've just proven the contract on real code.
 3. **Add a second tiny package** (`PkgClean`: RemoveDupes + TrimClean) to prove the contract generalizes and buttons appear with zero new wiring.
 4. **Freeze the config schema + action contract** as the portable spec file (JSON/markdown) in this project.
 5. **Only then** start the Apps Script port, mirroring the spec.

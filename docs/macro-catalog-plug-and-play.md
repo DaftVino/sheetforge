@@ -6,7 +6,7 @@ A master list of candidate macros for the config-driven macro project, grouped b
 
 - **⭐ (1–5)** — how important I think it is to *include this in the project*. 5 = core, must-have; 1 = nice-to-have / gimmick.
 - **Grade (A–F)** — how *well-used / downloaded / requested* the macro is in the real world (forums, code libraries, Stack Overflow). A = everyone wants it; F = niche.
-- **✅ DONE** — already implemented in `FoodDashMacros.bas`. `(embedded)` means it lives inside one of the four button routines rather than as its own selectable macro — worth exposing as a standalone in the library.
+- **✅ DONE** — already implemented in `SetupImportExportMacros.bas`. `(embedded)` means it lives inside one of the four button routines rather than as its own selectable macro — worth exposing as a standalone in the library.
 
 The two ratings are independent on purpose: a few things are hugely popular but low-value here (row spotlight), and a few are lower-profile but critical to *your* finance work (reconciliation, type coercion).
 
