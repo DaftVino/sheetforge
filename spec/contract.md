@@ -177,7 +177,7 @@ actions into one button:
 **Engine-owned config (v1.1.0):** config MAY originate from the engine itself
 (chains, placement) via an explicit engine schema hook, not only from package
 manifests. It is authored on the same Setup grid with the same key/value model,
-and MUST NOT be discovered through the package-probing mechanism (§ discovery).
+and MUST NOT be discovered through the package-probing mechanism (§1).
 
 ---
 
@@ -207,21 +207,21 @@ the shared error handler — reference: the handler calls `Core_SpeedOn` /
 additionally runs a fail-safe restore if a handler errors before cleaning up. A
 package implements only its own logic plus these shared calls.
 
-**Grouping / layout (v1.1.0):** each button (action or chain) may carry a
-**placement code** `<page-number><column-letters>` (e.g. `1A` = page 1, column A;
-`12AB` = page 12, column "AB"). Semantics: if NO button anywhere has a code, a
-single default button page is built (legacy behavior). If any code is present, a
-layout is active: numbered pages are built; a blank-coded button goes to the
-default page's **Unassigned** area; the explicit code **`hide`** omits a button.
-Same-code buttons stack in authoring order. Core's own admin controls are never
-user-placeable.
-
 **Dispatch (v1.1.0):** the single public dispatch entry resolves either an action
 id or a reserved `chain.*` id. A **quiet convention** lets composed steps suppress
 their **completion** dialogs: a handler reports completion through the engine's
 done-sink, which suppresses the dialog when the context is quiet. Suppression is
 guaranteed only for completion dialogs routed through that sink; interactive
 prompts (e.g. a range picker) and error dialogs are not suppressible.
+
+**Grouping / layout (v1.1.0):** each button (action or chain) may carry a
+**placement code** `<page-number><column-letters>` (e.g. `1A` = page 1, column A;
+`12AB` = page 12, column "AB"). Semantics: if NO button anywhere has a code, a
+single default button page is built (legacy behavior). If any code is present, a
+layout is active: numbered pages are built; a blank-coded button goes to page 1
+(the default page)'s **Unassigned** area; the explicit code **`hide`** omits a button.
+Same-code buttons stack in authoring order. Core's own admin controls are never
+user-placeable.
 
 ---
 
