@@ -16,9 +16,9 @@
     4. Sanity-checks Sub/Function block balance in the output.
 
   Packages are discovered by the Pkg*.bas naming convention; non-package modules
-  in src/packages (e.g. MacroLayout.bas) are excluded. Which packages are
-  actually ACTIVE at run time is a separate concern - Core's candidate list and
-  the optional _Packages sheet gate that; a bundled package can ship disabled.
+  in src/packages are excluded. Which packages are actually ACTIVE at run time
+  is a separate concern - Core's candidate list and the optional _Packages
+  sheet gate that; a bundled package can ship disabled.
 
 .PARAMETER Packages
   Optional explicit, ordered list of package module names (with or without .bas)

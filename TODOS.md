@@ -5,9 +5,11 @@ touching Core or more than one package go through `writing-plans` first. Verify 
 `pwsh build/build.ps1`; there is no headless VBA test, so also import
 `dist/MacrosBundle.bas` and run the workbook, recorded in the PR/notes.
 
-Current: **v0.2.1** on `main` (config-driven engine + PkgImportExport + PkgClean +
-build script + full Setup UX). Remote configured: `origin` =
-`github.com/DaftVino/sheetforge` (private); `main` pushed at the sanitized tip.
+Current: **v0.2.1** on `main`, **Compose Your Buttons (chains + grouping,
+contract v1.1.0) shipped on `feat/compose-your-buttons`, pending merge**
+(config-driven engine + PkgImportExport + PkgClean + build script + full Setup
+UX). Remote configured: `origin` = `github.com/DaftVino/sheetforge` (private);
+`main` pushed at the sanitized tip.
 
 ## Before the remote (blocker) — DONE (2026-07-24)
 
@@ -22,29 +24,22 @@ build script + full Setup UX). Remote configured: `origin` =
 
 ## Next — active
 
-- [ ] **"Compose your buttons" feature** — spec (`brainstorming` → `writing-plans`),
-      then build. ONE spec covering two linked Setup-page capabilities the user
-      asked for (2026-07-24):
-      - **(1) Grouping / layout** — a Setup section to assign actions to
-        pages/sections. This *finishes the long-pending handoff **step 7***: wire
-        the `src/packages/MacroLayout.bas` prototype — today a standalone,
-        **un-built** test module (excluded from the build; buttons call a
-        placeholder `ML_RunById`) — onto the real `Core_Run` + the Setup page.
-        Grouping was always intended (`docs/handoff.md`); only its integration is
-        unfinished, and its blocker (`Core_Run`) now exists.
-      - **(2) Chaining** — a separate Setup section to compose several actions
-        into ONE button that runs them **sequentially** (generalizes the
-        hardcoded clear→import inside `PkgImportExport_Import`). NEW scope:
-        user-defined chains are deployment-specific **config**, not manifest data
-        — a new config entity Core hasn't modeled before.
-      Touches Core (`Core_Run` dispatcher, button builder, Setup renderer) + the
-      contract → additive **contract v1.1.0** (composite/chained-action +
-      button-group concepts). Open design Qs: where chains live (config vs
-      manifest), mid-chain error handling (stop vs continue), whether chained
-      steps suppress their individual dialogs, adopt-vs-rewrite MacroLayout.
-      **Catalog build-out (Roadmap, below) is a SEPARATE track — not this spec.**
+Nothing active right now — next up is Roadmap, below.
 
 ## Done (recent)
+
+- [x] **"Compose your buttons" feature** — DONE (2026-07-24, contract **v1.1.0**).
+      One Core-owned Setup section, two capabilities: **Chains** (compose several
+      actions into one button that runs them in order; `Label [action.id]` step
+      tokens; immutable `chain.<id>` with an editable label; Continue/Stop prompt
+      on a step failure; per-step dialogs suppressed, one summary shown) and
+      **Grouping/layout** (per-button `1A`-style page/column codes; no codes →
+      the single "Macros" tab; any code → numbered "Macros N" pages, blank →
+      page 1 "Unassigned", `hide` → omitted; Setup/Finalize admin controls always
+      on page 1). Finalize validates chains + placement and blocks activation on
+      structural errors. This finishes the long-pending handoff **step 7**
+      (grouping integration) and absorbs `src/packages/MacroLayout.bas`'s logic
+      into Core; the standalone prototype file is deleted (Task 10).
 
 - [x] **Freeze `spec/contract.md`** — DONE (2026-07-24, contract **v1.0.0**).
       Language-neutral SoT: manifest object, field model, canonical kind
@@ -66,6 +61,11 @@ build script + full Setup UX). Remote configured: `origin` =
       always intended as user setup options, deferred by the §10 build order (now
       complete). Each is a thin `Pkg<Name>.bas` + one line in Core's candidate list.
 - [ ] Refresh `docs/code-map.md` (`/code-map`) once `src/` grows further.
+- [ ] **Built-page polish (deferred, design §8)** — the grouped "Macros N" pages
+      are functional but plain: per-page titles/column headings/legend,
+      Previous/Next page navigation, a live placement preview during Setup, and
+      a visually distinct admin area (Setup/Finalize controls) on page 1.
+      Explicitly out of scope for "Compose your buttons" (Task 10).
 
 ## Housekeeping / minor
 
