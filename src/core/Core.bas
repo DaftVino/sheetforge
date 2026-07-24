@@ -1027,9 +1027,142 @@ Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
                 "onto pages (Page code). Leave everything blank to keep one Macros tab.", _
                 10, False, True, RGB(90, 90, 90))
     r = r + 1
-    ' Task 5 inserts the Chains block here.
+    r = RenderChainsBlock(ws, r)
     ' Task 6 inserts the Placement block here.
     RenderComposeSection = r
+End Function
+
+' "Label [id]" per line -> Collection of ids (only the bracketed id is authoritative)
+Private Function ParseStepTokens(ByVal cell As String) As Collection
+    Dim out As New Collection, lines() As String, ln As String, i As Long
+    Dim lo As Long, hi As Long, id As String
+    Set ParseStepTokens = out
+    cell = Replace(cell, ";", vbLf)
+    lines = Split(cell, vbLf)
+    For i = LBound(lines) To UBound(lines)
+        ln = Trim(lines(i))
+        If Len(ln) > 0 Then
+            lo = InStrRev(ln, "["): hi = InStrRev(ln, "]")
+            If lo > 0 And hi > lo Then
+                id = Trim(Mid(ln, lo + 1, hi - lo - 1))
+            Else
+                id = ln            ' bare id with no brackets is tolerated
+            End If
+            If Len(id) > 0 Then out.Add id
+        End If
+    Next i
+End Function
+
+' "Import Source Data [importexport.import]" for an action id (falls back to the id).
+Private Function ActionTokenFor(ByVal actionId As String) As String
+    Dim reg As Object, a As Object
+    ActionTokenFor = actionId & " [" & actionId & "]"
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            If LCase(CStr(a("id"))) = LCase(actionId) Then
+                ActionTokenFor = CStr(a("caption")) & " [" & CStr(a("id")) & "]"
+                Exit Function
+            End If
+        Next a
+    Next reg
+End Function
+
+Private Function StepsToTokens(steps As Collection) As String
+    Dim s As String, v As Variant
+    For Each v In steps
+        s = s & ActionTokenFor(CStr(v)) & vbLf
+    Next v
+    StepsToTokens = Left$(s, Len(s) - IIf(Len(s) > 0, 1, 0))
+End Function
+
+Private Sub RenderActionTokens(ws As Worksheet, ByVal startRow As Long)
+    Dim reg As Object, a As Object, gr As Long
+    ws.Cells(startRow - 1, 7).Value = "Available actions - copy a token into Steps:"
+    ws.Cells(startRow - 1, 7).Font.Bold = True
+    gr = startRow
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            ws.Cells(gr, 7).Value = CStr(a("caption")) & " [" & CStr(a("id")) & "]"
+            ws.Cells(gr, 7).Font.Color = RGB(120, 120, 120)
+            gr = gr + 1
+        Next a
+    Next reg
+End Sub
+
+' chain.<slug>, unique within `used` (a dictionary of lowercased ids already taken).
+Private Function MintChainId(ByVal label As String, used As Object) As String
+    Dim base As String, s As String, ch As String, i As Long, cand As String, n As Long
+    For i = 1 To Len(label)
+        ch = LCase(Mid(label, i, 1))
+        If (ch >= "a" And ch <= "z") Or (ch >= "0" And ch <= "9") Then
+            base = base & ch
+        ElseIf Len(base) > 0 And Right$(base, 1) <> "_" Then
+            base = base & "_"
+        End If
+    Next i
+    base = Trim(Replace(base, "__", "_"))
+    If Len(base) = 0 Then base = "chain"
+    cand = "chain." & base
+    Do While used.Exists(LCase(cand))
+        n = n + 1
+        cand = "chain." & base & "_" & n
+    Loop
+    MintChainId = cand
+End Function
+
+Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
+    Dim existing As Collection, ch As Object, i As Long, tokens As String
+    r = BlockIntro(ws, r, "Chains  -  one button that runs several actions in order", _
+                   "Button name + Steps (paste tokens from the Actions list, one per line) + Page code.")
+    ws.Cells(r, KEY_COL).Value = CHAINS_KEY
+    ws.Cells(r, VAL_COL).Value = "Button name"
+    ws.Cells(r, VAL_COL + 1).Value = "Steps (one token per line)"
+    ws.Cells(r, VAL_COL + 2).Value = "Page code"
+    ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
+    r = r + 1
+
+    Set existing = ReadChains(CfgSheet())          ' re-seed from activated config
+    For i = 1 To MAX_LIST
+        If i <= existing.Count Then
+            Set ch = existing(i)
+            ws.Cells(r, VAL_COL).Value = ch("label")
+            ws.Cells(r, VAL_COL + 1).Value = StepsToTokens(ch("steps"))   ' Label [id] per line
+            ws.Cells(r, VAL_COL + 2).Value = ch("code")
+            ws.Cells(r, RID_COL).Value = ch("id")   ' preserve immutable id
+        End If
+        Yellow ws.Cells(r, VAL_COL)
+        Yellow ws.Cells(r, VAL_COL + 1)
+        Yellow ws.Cells(r, VAL_COL + 2)
+        ws.Cells(r, VAL_COL + 1).WrapText = True
+        r = r + 1
+    Next i
+    ' Copy-ready action tokens in G/H for authoring Steps.
+    RenderActionTokens ws, r - MAX_LIST
+    RenderChainsBlock = r
+End Function
+
+' Read the chains block from ws (CfgSheet at run time; SetupSheet for validation).
+' Each item: {id, label, steps(Collection of ids), code}. IDs are read from the
+' hidden RID column when present; a row with a label but no id has none yet.
+Private Function ReadChains(ws As Worksheet) As Collection
+    Dim out As New Collection, kr As Long, nk As Long, i As Long
+    Dim label As String, ch As Object
+    Set ReadChains = out
+    If ws Is Nothing Then Exit Function
+    kr = FindKeyRow(ws, CHAINS_KEY)
+    If kr = 0 Then Exit Function
+    nk = NextKeyRow(ws, kr)
+    For i = kr + 1 To nk - 1
+        label = Trim(CStr(ws.Cells(i, VAL_COL).Value))
+        If Len(label) > 0 Then
+            Set ch = CreateObject("Scripting.Dictionary")
+            ch("label") = label
+            ch("id") = Trim(CStr(ws.Cells(i, RID_COL).Value))
+            ch("code") = Trim(CStr(ws.Cells(i, VAL_COL + 2).Value))
+            Set ch("steps") = ParseStepTokens(CStr(ws.Cells(i, VAL_COL + 1).Value))
+            out.Add ch
+        End If
+    Next i
 End Function
 
 '================================================================
