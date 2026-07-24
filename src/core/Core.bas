@@ -810,6 +810,8 @@ Public Sub Core_BuildSetup()
         r = r + 1
     Next reg
 
+    r = RenderComposeSection(ws, r)
+
     ' Sentinel key in column A. The config readers bound a list/table block by
     ' scanning column A for the next non-blank cell; without a trailing key the
     ' LAST list/table on the sheet has no lower bound (End(xlUp) stops at its own
@@ -823,6 +825,7 @@ Public Sub Core_BuildSetup()
 
     ws.Columns("A").Font.Color = RGB(190, 190, 190)
     ws.Columns("A").Hidden = True
+    ws.Columns(RID_COL).Hidden = True
     ws.Activate
     ws.Range("B1").Select
     Application.ScreenUpdating = True
@@ -1008,6 +1011,25 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
         r = r + 1
     Next i
     RenderTable = r
+End Function
+
+'================================================================
+' 5b. CORE-OWNED SETUP SCHEMA  (chains + placement; NOT a package)
+'   Rendered by Core_BuildSetup outside the package-discovery loop.
+'================================================================
+Private Const CHAINS_KEY As String = "k_core_chains"   ' block sentinel (col A)
+Private Const LAYOUT_KEY As String = "k_core_layout"   ' block sentinel (col A)
+Private Const RID_COL    As Long = 10                  ' col J: hidden per-row id
+
+Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
+    r = SectionHeader(ws, r, "COMPOSE YOUR BUTTONS")
+    r = TintRow(ws, r, "Build multi-step buttons (Chains) and arrange buttons " & _
+                "onto pages (Page code). Leave everything blank to keep one Macros tab.", _
+                10, False, True, RGB(90, 90, 90))
+    r = r + 1
+    ' Task 5 inserts the Chains block here.
+    ' Task 6 inserts the Placement block here.
+    RenderComposeSection = r
 End Function
 
 '================================================================
