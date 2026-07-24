@@ -1474,9 +1474,20 @@ Public Sub Core_FinalizeSetup()
     ' --- activate: copy Setup -> hidden _Config ---
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
+    ' Remove any prior _Config. It is stored xlSheetVeryHidden, and a very-hidden
+    ' sheet can resist .Delete (the delete then silently fails under On Error
+    ' Resume Next, _Config survives, and the rename below collides -> "That name is
+    ' already taken", orphaning a "Setup (2)" copy on every retry). Unhiding it
+    ' first makes the delete reliable.
+    Dim old As Worksheet
+    Set old = Nothing
     On Error Resume Next
-    ThisWorkbook.Worksheets(CONFIG_SHEET).Delete
+    Set old = ThisWorkbook.Worksheets(CONFIG_SHEET)
     On Error GoTo Fail
+    If Not old Is Nothing Then
+        old.Visible = xlSheetVisible
+        old.Delete
+    End If
     ws.Copy After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
     Set cfg = ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
     cfg.name = CONFIG_SHEET
