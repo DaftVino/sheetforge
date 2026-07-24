@@ -719,7 +719,7 @@ Public Sub Core_Run(ByVal actionId As String)
     Dim res As Object
     If IsChainId(actionId) Then Core_RunChain actionId: Exit Sub
     Set res = RunAction(actionId, False)
-    If Not res("found") Then
+    If Not res("found") And res("errNumber") = 0 Then
         MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
     ElseIf Not res("ok") And Not res("reported") Then
         MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
@@ -1157,7 +1157,7 @@ End Sub
 
 ' chain.<slug>, unique within `used` (a dictionary of lowercased ids already taken).
 Private Function MintChainId(ByVal label As String, used As Object) As String
-    Dim base As String, s As String, ch As String, i As Long, cand As String, n As Long
+    Dim base As String, ch As String, i As Long, cand As String, n As Long
     For i = 1 To Len(label)
         ch = LCase(Mid(label, i, 1))
         If (ch >= "a" And ch <= "z") Or (ch >= "0" And ch <= "9") Then
@@ -1166,7 +1166,7 @@ Private Function MintChainId(ByVal label As String, used As Object) As String
             base = base & "_"
         End If
     Next i
-    base = Trim(Replace(base, "__", "_"))
+    base = Trim(base)                     ' loop above never forms "__"; strip any trailing "_" below
     Do While Len(base) > 0 And Right$(base, 1) = "_"
         base = Left$(base, Len(base) - 1)
     Loop
@@ -1180,7 +1180,7 @@ Private Function MintChainId(ByVal label As String, used As Object) As String
 End Function
 
 Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
-    Dim existing As Collection, ch As Object, i As Long, tokens As String
+    Dim existing As Collection, ch As Object, i As Long
     r = BlockIntro(ws, r, "Chains  -  one button that runs several actions in order", _
                    "Button name + Steps (paste tokens from the Actions list, one per line) + Page code.")
     ws.Cells(r, KEY_COL).Value = CHAINS_KEY
