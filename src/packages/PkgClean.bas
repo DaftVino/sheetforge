@@ -20,7 +20,8 @@ Public Sub PkgClean_Manifest(reg As Object)
     Core_DeclarePackage reg, "clean", "Clean & Standardize", "1.0.0"
 
     Core_AddSection reg, "CLEAN & STANDARDIZE"
-    Core_AddField reg, "clean_keycols", "Remove-duplicates key column(s), e.g. 1 or 1,2,4 (numbered from the left of the range you pick)", "text", "1"
+    Core_AddField reg, "clean_keycols", "Remove-duplicates key column(s)", "text", "1", _
+        help:="Which column(s) decide whether two rows are duplicates, numbered 1,2,3... from the LEFT of the range you pick. One number, or several like 1,2,4."
 
     Core_AddAction reg, "clean.dupes", "Remove Duplicates", "PkgClean_RemoveDupes", "Pick a range (include the header row); removes duplicate rows using the key column(s) from Setup."
     Core_AddAction reg, "clean.trim", "Trim & Clean Text", "PkgClean_TrimClean", "Pick a range; strips leading/trailing spaces, collapses double spaces, and removes non-printing characters."
