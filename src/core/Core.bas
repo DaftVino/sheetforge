@@ -500,6 +500,7 @@ End Function
 Private Function CoreCandidates() As Collection
     Dim c As New Collection
     c.Add "ImportExport"            ' probes PkgImportExport_Manifest
+    c.Add "Clean"                   ' probes PkgClean_Manifest
     Set CoreCandidates = c
 End Function
 
@@ -590,6 +591,7 @@ End Function
 '================================================================
 Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
+    Dim firstFieldRow As Long
     On Error GoTo Fail
 
     If Core_SheetExists(SETUP_SHEET) Then
@@ -635,6 +637,7 @@ Public Sub Core_BuildSetup()
     PopulateReferenceLists ws, r + 1
     r = r + 2
 
+    firstFieldRow = r
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
         r = SectionHeader(ws, r, UCase(CStr(reg("name"))))
@@ -658,6 +661,11 @@ Public Sub Core_BuildSetup()
     ' LAST list/table on the sheet has no lower bound (End(xlUp) stops at its own
     ' key row, whose value rows are blank in column A) and its values are dropped.
     ws.Cells(r, KEY_COL).Value = END_KEY
+
+    ' Long labels in column B are set to wrap (below); auto-size the field rows
+    ' so a wrapped label is fully visible instead of being clipped by the value
+    ' cell in column C.
+    ws.Rows(firstFieldRow & ":" & r).AutoFit
 
     ws.Columns("A").Font.Color = RGB(190, 190, 190)
     ws.Columns("A").Hidden = True
@@ -683,16 +691,24 @@ End Sub
 
 Private Function RenderScalar(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     ws.Cells(r, KEY_COL).Value = f("key")
-    ws.Cells(r, 2).Value = f("label")
+    LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, VAL_COL).Value = ScalarValue(reg, CStr(f("key")))
     Yellow ws.Cells(r, VAL_COL)
     RenderScalar = r + 1
 End Function
 
+' Write a field label into column B, wrapped + top-aligned, so a long label
+' stays fully visible next to the occupied value cell in column C.
+Private Sub LabelCell(rng As Range, ByVal txt As String)
+    rng.Value = txt
+    rng.WrapText = True
+    rng.VerticalAlignment = xlTop
+End Sub
+
 Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     Dim vals As Collection, i As Long
     ws.Cells(r, KEY_COL).Value = f("key")
-    ws.Cells(r, 2).Value = f("label")
+    LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, 2).Font.Bold = True
     ws.Cells(r, VAL_COL).Value = f("headers")
     ws.Cells(r, VAL_COL).Font.Bold = True
@@ -713,7 +729,7 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
     nHead = UBound(heads)
     If nHead > 2 Then nHead = 2                 ' 3 columns read (C, D, E)
     ws.Cells(r, KEY_COL).Value = f("key")
-    ws.Cells(r, 2).Value = f("label")
+    LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, 2).Font.Bold = True
     For j = 0 To nHead
         ws.Cells(r, VAL_COL + j).Value = Trim(heads(j))

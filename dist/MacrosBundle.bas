@@ -2,15 +2,10 @@ Attribute VB_Name = "MacrosBundle"
 Option Explicit
 
 '============================================================================
-'  MacrosBundle - Core + PkgImportExport, concatenated into ONE module.
-'
+'  MacrosBundle - Core + enabled packages, concatenated into ONE module.
 '  GENERATED ARTIFACT - do not edit. Source of truth:
-'    src/core/Core.bas
-'    src/packages/PkgImportExport.bas
-'  (Built by hand for step-3 verification; the real build script is step 6.)
-'
-'  To use: import this ONE .bas into the workbook's VBA project, then run
-'  Core_BuildControlPanel (Alt+F8) to draw the Macros tab and its buttons.
+'    src/core/Core.bas | src/packages/PkgImportExport.bas | src/packages/PkgClean.bas
+'  Import this ONE .bas, then run Core_BuildControlPanel (Alt+F8).
 '============================================================================
 
 '########################## src/core/Core.bas ##########################
@@ -514,6 +509,7 @@ End Function
 Private Function CoreCandidates() As Collection
     Dim c As New Collection
     c.Add "ImportExport"            ' probes PkgImportExport_Manifest
+    c.Add "Clean"                   ' probes PkgClean_Manifest
     Set CoreCandidates = c
 End Function
 
@@ -604,6 +600,7 @@ End Function
 '================================================================
 Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
+    Dim firstFieldRow As Long
     On Error GoTo Fail
 
     If Core_SheetExists(SETUP_SHEET) Then
@@ -649,6 +646,7 @@ Public Sub Core_BuildSetup()
     PopulateReferenceLists ws, r + 1
     r = r + 2
 
+    firstFieldRow = r
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
         r = SectionHeader(ws, r, UCase(CStr(reg("name"))))
@@ -672,6 +670,11 @@ Public Sub Core_BuildSetup()
     ' LAST list/table on the sheet has no lower bound (End(xlUp) stops at its own
     ' key row, whose value rows are blank in column A) and its values are dropped.
     ws.Cells(r, KEY_COL).Value = END_KEY
+
+    ' Long labels in column B are set to wrap (below); auto-size the field rows
+    ' so a wrapped label is fully visible instead of being clipped by the value
+    ' cell in column C.
+    ws.Rows(firstFieldRow & ":" & r).AutoFit
 
     ws.Columns("A").Font.Color = RGB(190, 190, 190)
     ws.Columns("A").Hidden = True
@@ -697,16 +700,24 @@ End Sub
 
 Private Function RenderScalar(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     ws.Cells(r, KEY_COL).Value = f("key")
-    ws.Cells(r, 2).Value = f("label")
+    LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, VAL_COL).Value = ScalarValue(reg, CStr(f("key")))
     Yellow ws.Cells(r, VAL_COL)
     RenderScalar = r + 1
 End Function
 
+' Write a field label into column B, wrapped + top-aligned, so a long label
+' stays fully visible next to the occupied value cell in column C.
+Private Sub LabelCell(rng As Range, ByVal txt As String)
+    rng.Value = txt
+    rng.WrapText = True
+    rng.VerticalAlignment = xlTop
+End Sub
+
 Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     Dim vals As Collection, i As Long
     ws.Cells(r, KEY_COL).Value = f("key")
-    ws.Cells(r, 2).Value = f("label")
+    LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, 2).Font.Bold = True
     ws.Cells(r, VAL_COL).Value = f("headers")
     ws.Cells(r, VAL_COL).Font.Bold = True
@@ -727,7 +738,7 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
     nHead = UBound(heads)
     If nHead > 2 Then nHead = 2                 ' 3 columns read (C, D, E)
     ws.Cells(r, KEY_COL).Value = f("key")
-    ws.Cells(r, 2).Value = f("label")
+    LabelCell ws.Cells(r, 2), CStr(f("label"))
     ws.Cells(r, 2).Font.Bold = True
     For j = 0 To nHead
         ws.Cells(r, VAL_COL + j).Value = Trim(heads(j))
@@ -1435,4 +1446,158 @@ Private Function CollectionToArray(col As Collection) As Variant
         arr(i - 1) = CStr(col(i))
     Next i
     CollectionToArray = arr
+End Function
+
+
+'#################### src/packages/PkgClean.bas ####################
+
+'================================================================
+' PkgClean - a small second package, built to prove Core is a
+' platform: a brand-new package's config field and buttons appear
+' on the Setup and Macros tabs with ZERO changes to Core beyond
+' adding "Clean" to Core's candidate list. All plumbing (config,
+' speed, errors) is Core_*; the only package-specific need - "which
+' range?" - is answered ad hoc with a range picker, so Clean needs
+' no configured target sheet.
+'
+' Depends on: Core (required).
+'================================================================
+
+'================================================================
+' MANIFEST
+'================================================================
+Public Sub PkgClean_Manifest(reg As Object)
+    Core_DeclarePackage reg, "clean", "Clean & Standardize", "1.0.0"
+
+    Core_AddSection reg, "CLEAN & STANDARDIZE"
+    Core_AddField reg, "clean_keycols", "Remove-duplicates key column(s), e.g. 1 or 1,2,4 (numbered from the left of the range you pick)", "text", "1"
+
+    Core_AddAction reg, "clean.dupes", "Remove Duplicates", "PkgClean_RemoveDupes", "Pick a range (include the header row); removes duplicate rows using the key column(s) from Setup."
+    Core_AddAction reg, "clean.trim", "Trim & Clean Text", "PkgClean_TrimClean", "Pick a range; strips leading/trailing spaces, collapses double spaces, and removes non-printing characters."
+    Core_AddAction reg, "clean.filldown", "Fill Blanks Down", "PkgClean_FillDown", "Pick a range; fills each blank cell with the value from the cell above it."
+End Sub
+
+'================================================================
+' ACTION - Remove duplicate rows on the chosen key column(s)
+'================================================================
+Public Sub PkgClean_RemoveDupes(ctx As Object)
+    Dim rng As Range, keys As String
+    On Error GoTo Fail
+    Set rng = AskRange("Remove Duplicates")
+    If rng Is Nothing Then Exit Sub                 ' user cancelled
+
+    keys = Core_Cfg(ctx, "clean_keycols")
+    Core_SpeedOn
+    rng.RemoveDuplicates Columns:=ParseCols(keys), Header:=xlYes
+    Core_SpeedOff
+
+    MsgBox "Remove Duplicates complete on " & rng.Address(False, False) & _
+           " using key column(s) " & keys & ".", vbInformation, "Remove Duplicates"
+    Exit Sub
+Fail:
+    Core_Fail ctx, "clean.dupes", Err
+End Sub
+
+'================================================================
+' ACTION - Trim & clean every text cell in the chosen range
+'================================================================
+Public Sub PkgClean_TrimClean(ctx As Object)
+    Dim rng As Range, arr As Variant, r As Long, c As Long
+    On Error GoTo Fail
+    Set rng = AskRange("Trim & Clean Text")
+    If rng Is Nothing Then Exit Sub
+
+    Core_SpeedOn
+    arr = rng.Value
+    If IsArray(arr) Then
+        For r = 1 To UBound(arr, 1)
+            For c = 1 To UBound(arr, 2)
+                If VarType(arr(r, c)) = vbString Then arr(r, c) = CleanText(CStr(arr(r, c)))
+            Next c
+        Next r
+        rng.Value = arr
+    ElseIf VarType(arr) = vbString Then              ' single-cell range
+        rng.Value = CleanText(CStr(arr))
+    End If
+    Core_SpeedOff
+
+    MsgBox "Trimmed & cleaned text on " & rng.Address(False, False) & ".", _
+           vbInformation, "Trim & Clean Text"
+    Exit Sub
+Fail:
+    Core_Fail ctx, "clean.trim", Err
+End Sub
+
+'================================================================
+' ACTION - Fill each blank cell with the value above it
+'================================================================
+Public Sub PkgClean_FillDown(ctx As Object)
+    Dim rng As Range, arr As Variant, r As Long, c As Long
+    On Error GoTo Fail
+    Set rng = AskRange("Fill Blanks Down")
+    If rng Is Nothing Then Exit Sub
+
+    Core_SpeedOn
+    arr = rng.Value
+    If IsArray(arr) Then
+        For c = 1 To UBound(arr, 2)
+            For r = 2 To UBound(arr, 1)
+                If IsBlankVal(arr(r, c)) Then arr(r, c) = arr(r - 1, c)
+            Next r
+        Next c
+        rng.Value = arr
+    End If
+    Core_SpeedOff
+
+    MsgBox "Filled blanks down on " & rng.Address(False, False) & ".", _
+           vbInformation, "Fill Blanks Down"
+    Exit Sub
+Fail:
+    Core_Fail ctx, "clean.filldown", Err
+End Sub
+
+'================================================================
+' Package-private helpers
+'================================================================
+
+' Prompt the user to select a range. Returns Nothing if they cancel
+' (InputBox Type:=8 returns Boolean False on cancel, which fails the Set).
+Private Function AskRange(ByVal title As String) As Range
+    Dim rng As Range
+    On Error Resume Next
+    Set rng = Application.InputBox( _
+        Prompt:="Select the range for '" & title & "' (include the header row):", _
+        title:=title, Type:=8)
+    On Error GoTo 0
+    Set AskRange = rng
+End Function
+
+' "1,2,4" -> Variant array of Longs for Range.RemoveDuplicates Columns.
+' Non-numeric entries are ignored; an empty result defaults to column 1.
+Private Function ParseCols(ByVal s As String) As Variant
+    Dim parts() As String, i As Long, c As Collection, out() As Variant, k As Long
+    Set c = New Collection
+    parts = Split(s, ",")
+    For i = 0 To UBound(parts)
+        If IsNumeric(Trim(parts(i))) Then c.Add CLng(Trim(parts(i)))
+    Next i
+    If c.Count = 0 Then c.Add CLng(1)
+    ReDim out(0 To c.Count - 1)
+    For k = 1 To c.Count
+        out(k - 1) = c(k)
+    Next k
+    ParseCols = out
+End Function
+
+' Excel TRIM (collapse spaces) + CLEAN (strip non-printing chars).
+Private Function CleanText(ByVal s As String) As String
+    CleanText = Application.WorksheetFunction.Clean(Application.WorksheetFunction.Trim(s))
+End Function
+
+Private Function IsBlankVal(ByVal v As Variant) As Boolean
+    If IsEmpty(v) Then
+        IsBlankVal = True
+    ElseIf VarType(v) = vbString Then
+        IsBlankVal = (v = "")
+    End If
 End Function
