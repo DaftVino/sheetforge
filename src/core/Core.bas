@@ -640,9 +640,12 @@ Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As 
     res("message") = ""
     res("errNumber") = 0
     res("errText") = ""
+    res("reported") = False
 
+    On Error GoTo StepFail
     Set reg = FindActionOwner(actionId, entry)
     If reg Is Nothing Then
+        On Error GoTo 0
         Set RunAction = res            ' found stays False
         Exit Function
     End If
@@ -654,13 +657,13 @@ Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As 
     ctx("done") = False
     ctx("doneMsg") = ""
 
-    On Error GoTo StepFail
     Application.Run entry, ctx
     On Error GoTo 0
     If CtxFlag(ctx, "failed") Then         ' handler swallowed its own error
         res("ok") = False
         res("errNumber") = CtxNum(ctx, "failNumber")
         res("errText") = CtxStr(ctx, "failMsg")
+        res("reported") = Not quiet        ' standalone: Core_Fail already showed it
     Else
         res("ok") = True
         res("message") = CtxStr(ctx, "doneMsg")
@@ -714,7 +717,7 @@ Public Sub Core_Run(ByVal actionId As String)
     Set res = RunAction(actionId, False)
     If Not res("found") Then
         MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
-    ElseIf Not res("ok") Then
+    ElseIf Not res("ok") And Not res("reported") Then
         MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
                "#" & res("errNumber") & "  " & res("errText"), vbExclamation, "Macro Error"
     End If
