@@ -709,11 +709,7 @@ End Function
 ' Button dispatcher. Every button's OnAction is  'Core_Run "<actionId>"'
 Public Sub Core_Run(ByVal actionId As String)
     Dim res As Object
-    If IsChainId(actionId) Then
-        MsgBox "Chains are not available until a configuration is activated.", _
-               vbExclamation, "Core"      ' replaced by Core_RunChain routing in Task 8
-        Exit Sub
-    End If
+    If IsChainId(actionId) Then Core_RunChain actionId: Exit Sub
     Set res = RunAction(actionId, False)
     If Not res("found") Then
         MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
@@ -722,6 +718,67 @@ Public Sub Core_Run(ByVal actionId As String)
                "#" & res("errNumber") & "  " & res("errText"), vbExclamation, "Macro Error"
     End If
 End Sub
+
+' Run a chain: each step quiet; prompt Continue/Stop on failure; one end summary.
+' No outer Core_SpeedOn/Off here - each step self-manages its own speed via its
+' handler; wrapping the whole run would corrupt the depth-counted speed state
+' when a step fails (RunAction's StepFail path hard-restores via RestoreSpeed).
+Private Sub Core_RunChain(ByVal chainId As String)
+    Dim chains As Collection, ch As Object, target As Object
+    Dim stepId As Variant, res As Object, n As Long, ok As Long, summary As String
+    Dim stopped As Boolean, total As Long
+    On Error GoTo RunnerFail
+
+    Set chains = ReadChains(CfgSheet())
+    For Each ch In chains
+        If LCase(CStr(ch("id"))) = LCase(chainId) Then Set target = ch: Exit For
+    Next ch
+    If target Is Nothing Then
+        MsgBox "Chain not found: " & chainId, vbExclamation, "Core": Exit Sub
+    End If
+    total = target("steps").Count
+
+    For Each stepId In target("steps")
+        n = n + 1
+        Set res = RunAction(CStr(stepId), True)      ' quiet; each step owns its speed
+        If Not res("found") Then
+            summary = summary & n & ". " & stepId & "  X not installed" & vbCrLf
+            If Not AskContinue(n, CStr(stepId), "action not installed") Then stopped = True: Exit For
+        ElseIf res("ok") Then
+            ok = ok + 1
+            summary = summary & n & ". " & res("label") & "  " & ChrW$(&H2713) & _
+                      IIf(Len(res("message")) > 0, "  (" & FirstLine(CStr(res("message"))) & ")", "") & vbCrLf
+        Else
+            summary = summary & n & ". " & res("label") & "  X  #" & res("errNumber") & _
+                      " " & res("errText") & vbCrLf
+            If Not AskContinue(n, CStr(res("label")), CStr(res("errText"))) Then stopped = True: Exit For
+        End If
+    Next stepId
+
+    Dim head As String
+    head = target("label") & IIf(stopped, "  - stopped at step " & n, "  - done") & _
+           "  (" & ok & "/" & total & " ok)"
+    MsgBox head & vbCrLf & vbCrLf & summary, _
+           IIf(stopped, vbExclamation, vbInformation), "Chain"
+    Exit Sub
+RunnerFail:
+    RestoreSpeed
+    MsgBox "Chain '" & chainId & "' error at step " & n & ":" & vbCrLf & vbCrLf & _
+           "#" & Err.Number & "  " & Err.Description, vbExclamation, "Chain"
+End Sub
+
+' "Step N <label> failed: <reason>. Continue with the rest?"  Yes=continue.
+Private Function AskContinue(ByVal n As Long, ByVal label As String, ByVal reason As String) As Boolean
+    AskContinue = (MsgBox("Step " & n & "  '" & label & "'  failed:" & vbCrLf & vbCrLf & _
+        reason & vbCrLf & vbCrLf & "Continue with the remaining steps?", _
+        vbExclamation + vbYesNo, "Chain - step failed") = vbYes)
+End Function
+
+Private Function FirstLine(ByVal s As String) As String
+    Dim p As Long
+    p = InStr(s, vbCr): If p = 0 Then p = InStr(s, vbLf)
+    If p > 0 Then FirstLine = Left$(s, p - 1) Else FirstLine = s   ' NOT IIf: eager Left$(s,-1) would raise
+End Function
 
 Private Function FindActionOwner(ByVal actionId As String, ByRef entry As String) As Object
     Dim reg As Object, a As Object
