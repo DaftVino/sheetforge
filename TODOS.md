@@ -6,17 +6,19 @@ touching Core or more than one package go through `writing-plans` first. Verify 
 `dist/MacrosBundle.bas` and run the workbook, recorded in the PR/notes.
 
 Current: **v0.2.1** on `main` (config-driven engine + PkgImportExport + PkgClean +
-build script + full Setup UX). Repo is **local-only** (no git remote yet).
+build script + full Setup UX). Remote configured: `origin` =
+`github.com/DaftVino/sheetforge` (private); `main` pushed at the sanitized tip.
 
-## Before the remote (blocker)
+## Before the remote (blocker) — DONE (2026-07-24)
 
-- [ ] **Sanitize real store/entity specifics** before any push to
-      `github.com/DaftVino/sheetforge` (currently private, nothing pushed yet).
-      Scrub franchise/store/entity names and real prefixes from:
-      `src/packages/PkgImportExport.bas` manifest defaults (export tabs, import
-      prefixes, master columns) and `src/legacy/SetupImportExportMacros.bas`.
-      Decide: neutral demo defaults vs. a separate private config. Then
-      `git remote add origin ...` and push.
+- [x] **Sanitize real store/entity specifics** and publish. Scrubbed all 7
+      tracked files to fully-generic demo defaults (design + plan:
+      `docs/designs/sanitization-pass.md`, `-plan.md`); genericized the real
+      store number `3176` → `12345`; renamed legacy module `FoodDashMacros` →
+      `SetupImportExportMacros`. `main` fast-forwarded and pushed to
+      `origin`. **Caveat (tree-only choice):** the pre-`d29b0d7` *history* still
+      contains the old jargon — the remote is private, so this was accepted;
+      revisit (squash/filter history) before any public release.
 
 ## Next
 
