@@ -409,8 +409,17 @@ Public Sub Core_Fail(ctx As Object, ByVal actionId As String, e As ErrObject)
     Dim m As String
     m = "#" & e.Number & "  " & e.Description
     RestoreSpeed
-    MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & m, _
-           vbExclamation, "Macro Error"
+
+    On Error Resume Next
+    ctx("failed") = True
+    ctx("failNumber") = e.Number
+    ctx("failMsg") = e.Description
+    On Error GoTo 0
+
+    Core_Log ctx, "FAILED " & actionId & ": " & m
+    If Not IsQuiet(ctx) Then _
+        MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & m, _
+               vbExclamation, "Macro Error"
 End Sub
 
 ' ---- worksheet / range utilities ----
@@ -597,24 +606,118 @@ Private Function PackageEnabled(ByVal id As String) As Boolean
     Next r
 End Function
 
-' Button dispatcher. Every button's OnAction is  'Core_Run "<actionId>"'
-Public Sub Core_Run(ByVal actionId As String)
-    Dim reg As Object, ctx As Object, entry As String
-    On Error GoTo Fail
+Private Function IsChainId(ByVal id As String) As Boolean
+    IsChainId = (LCase(Left$(id, 6)) = "chain.")
+End Function
+
+Private Function IsQuiet(ctx As Object) As Boolean
+    On Error Resume Next
+    IsQuiet = (ctx.Exists("quiet"))
+    If IsQuiet Then IsQuiet = (ctx("quiet") = True)
+End Function
+
+' Completion sink. Handlers call this instead of MsgBox for their final summary.
+' When the context is quiet (a chain step), the message is captured on the ctx
+' and the dialog is suppressed; otherwise it shows exactly as a direct MsgBox.
+Public Sub Core_Done(ctx As Object, ByVal msg As String, Optional ByVal title As String = "Done")
+    On Error Resume Next
+    ctx("doneMsg") = msg
+    ctx("done") = True
+    On Error GoTo 0
+    If Not IsQuiet(ctx) Then MsgBox msg, vbInformation, title
+End Sub
+
+' Run one action under an isolated child context. Returns a result dictionary;
+' never shows its own error/success dialog (callers decide). quiet=True suppresses
+' the handler's Core_Done completion dialog and captures its message instead.
+Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As Object
+    Dim res As Object, reg As Object, ctx As Object, entry As String
+    Set res = CreateObject("Scripting.Dictionary")
+    res("id") = actionId
+    res("label") = actionId
+    res("ok") = False
+    res("found") = False
+    res("message") = ""
+    res("errNumber") = 0
+    res("errText") = ""
+
     Set reg = FindActionOwner(actionId, entry)
     If reg Is Nothing Then
-        MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
+        Set RunAction = res            ' found stays False
+        Exit Function
+    End If
+    res("found") = True
+    res("label") = ActionCaption(reg, actionId)
+
+    Set ctx = NewCtx(actionId, reg)
+    ctx("quiet") = quiet
+    ctx("done") = False
+    ctx("doneMsg") = ""
+
+    On Error GoTo StepFail
+    Application.Run entry, ctx
+    On Error GoTo 0
+    If CtxFlag(ctx, "failed") Then         ' handler swallowed its own error
+        res("ok") = False
+        res("errNumber") = CtxNum(ctx, "failNumber")
+        res("errText") = CtxStr(ctx, "failMsg")
+    Else
+        res("ok") = True
+        res("message") = CtxStr(ctx, "doneMsg")
+    End If
+    Set RunAction = res
+    Exit Function
+
+StepFail:
+    RestoreSpeed                       ' fail-safe: never leave Excel frozen
+    res("ok") = False
+    res("errNumber") = Err.Number
+    res("errText") = Err.Description
+    Set RunAction = res
+End Function
+
+' Caption for an action id from its owning manifest (for result labels/summaries).
+Private Function ActionCaption(reg As Object, ByVal actionId As String) As String
+    Dim a As Object
+    ActionCaption = actionId
+    For Each a In reg("actions")
+        If LCase(CStr(a("id"))) = LCase(actionId) Then
+            ActionCaption = CStr(a("caption")): Exit Function
+        End If
+    Next a
+End Function
+
+' Safe ctx accessors - avoid Scripting.Dictionary missing-key errors.
+Private Function CtxFlag(ctx As Object, ByVal k As String) As Boolean
+    On Error Resume Next
+    If ctx.Exists(k) Then CtxFlag = (ctx(k) = True)
+End Function
+
+Private Function CtxStr(ctx As Object, ByVal k As String) As String
+    On Error Resume Next
+    If ctx.Exists(k) Then CtxStr = CStr(ctx(k))
+End Function
+
+Private Function CtxNum(ctx As Object, ByVal k As String) As Long
+    On Error Resume Next
+    If ctx.Exists(k) Then CtxNum = CLng(ctx(k))
+End Function
+
+' Button dispatcher. Every button's OnAction is  'Core_Run "<actionId>"'
+Public Sub Core_Run(ByVal actionId As String)
+    Dim res As Object
+    If IsChainId(actionId) Then
+        MsgBox "Chains are not available until a configuration is activated.", _
+               vbExclamation, "Core"      ' replaced by Core_RunChain routing in Task 8
         Exit Sub
     End If
-    Set ctx = NewCtx(actionId, reg)
-    Application.Run entry, ctx
-    Exit Sub
-Fail:
-    ' Safety net: a package sub that used Core_SpeedOn but raised without its
-    ' own Core_Fail handler would otherwise leave Excel frozen. Restore + report.
-    RestoreSpeed
-    MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
-           "#" & Err.Number & "  " & Err.Description, vbExclamation, "Macro Error"
+    Set res = RunAction(actionId, False)
+    If Not res("found") Then
+        MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
+    ElseIf Not res("ok") Then
+        MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
+               "#" & res("errNumber") & "  " & res("errText"), vbExclamation, "Macro Error"
+    End If
 End Sub
 
 Private Function FindActionOwner(ByVal actionId As String, ByRef entry As String) As Object
