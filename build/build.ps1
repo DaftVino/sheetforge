@@ -119,7 +119,7 @@ foreach ($src in $sources) {
     [void]$sb.Append($nl)
 }
 
-# --- write (UTF-8 no BOM; content is ASCII, so import-safe) ---
+# --- write (UTF-8 no BOM; content is asserted ASCII below, so import-safe) ---
 $outDir = Split-Path $Out -Parent
 if (-not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
 [System.IO.File]::WriteAllText($Out, $sb.ToString(), (New-Object System.Text.UTF8Encoding($false)))
@@ -138,6 +138,21 @@ if ($attr -ne 1) { $problems.Add("expected 1 Attribute VB_Name, found $attr") }
 if ($opt -ne 1) { $problems.Add("expected 1 Option Explicit, found $opt") }
 if ($subO -ne $subC) { $problems.Add("Sub/End Sub imbalance: $subO / $subC") }
 if ($fnO -ne $fnC) { $problems.Add("Function/End Function imbalance: $fnO / $fnC") }
+
+# --- guard: output must be pure ASCII ---
+# The VBE imports a .bas as ANSI/the system codepage, not UTF-8, so any
+# non-ASCII byte - a smart quote or em dash pasted from a doc, or (as caught
+# here once) a stray section-sign in a comment - gets silently mis-decoded on
+# import (a section-sign becomes "Â§"). Fails the whole build, not just a
+# warning, and names the exact line/column so it is instantly actionable.
+$asciiLines = $text -split "`n"
+for ($i = 0; $i -lt $asciiLines.Count; $i++) {
+    $m = [regex]::Match($asciiLines[$i], '[^\x00-\x7F]')
+    if ($m.Success) {
+        $ch = $m.Value
+        $problems.Add("non-ASCII character at line $($i + 1), column $($m.Index + 1): '$ch' (U+$('{0:X4}' -f [int][char]$ch))")
+    }
+}
 
 # --- guard: no module-level declaration after the first procedure ---
 # VBA requires the declarations section (Const/Dim/Type/Enum/Declare/module vars)

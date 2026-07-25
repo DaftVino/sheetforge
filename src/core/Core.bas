@@ -103,6 +103,13 @@ Private Const CHAIN_CARD_STEPS As Long = 4       ' step captions shown on a card
 ' prevent. CHAIN_CARD_CHARS bounds the composed width directly; CardHelp stops
 ' adding steps once either cap is hit, whichever comes first.
 Private Const CHAIN_CARD_CHARS As Long = 120     ' composed-text length cap before "+N more" cuts in
+' Fix round 2, fix 6: separates a real colIx (from ParseCode, or the 9998/9999
+' reserved columns) from a SYNTHETIC colIx minted by SplitTallManualColumns for
+' a same-code stack's vertical overflow (piece colIx = origColIx * VSPLIT_MULT +
+' pieceIndex). Large enough that no realistic placement code's column (up to a
+' 3-letter code, max 18278) collides with it; SplitTallManualColumns itself
+' guards the multiply against Long overflow for anything larger.
+Private Const VSPLIT_MULT As Long = 100000
 ' BTN_W, ROW_GAP, COL_GAP and HDR_H are no longer used by the card grid, but the
 ' legacy point-positioned RenderPageLegacy (still called by BuildGroupedPanels
 ' until Task 8) references them, so they stay until that builder is deleted.
@@ -2206,6 +2213,26 @@ Private Function AnyCode(map As Object) As Boolean
     Next k
 End Function
 
+' Fix round 2, fix 5: NOT the same question as AnyCode. AnyCode answers "is
+' there any non-blank cell at all", which is True for a SINGLE "hide" entry
+' with every other code left blank - a user who hides one button would then
+' flip the whole workbook into manual mode (every other, still-uncoded button
+' reads as manually placed, landing in page 1's Unassigned column, and
+' HomeLegend would tell them their page codes control a layout they never
+' authored). "hide" omits a button; it does not place one, so it must not
+' count as a placement here. Task 8 must use THIS helper, not AnyCode, both
+' to choose BuildAutoLayout vs BuildManualLayout and to set BuildHomePage's
+' isManual - AnyCode itself is left untouched because Core_BuildControlPanel's
+' existing (live, legacy) branch still reads it, and that branch is Task 8's
+' to replace, not this task's to touch.
+Private Function AnyPlacementCode(map As Object) As Boolean
+    Dim k As Variant, v As String
+    For Each k In map.Keys
+        v = Trim(CStr(map(k)))
+        If Len(v) > 0 And LCase(v) <> "hide" Then AnyPlacementCode = True: Exit Function
+    Next k
+End Function
+
 '================================================================
 ' 6. FINALIZE  (validate the Setup sheet, then activate -> _Config)
 '================================================================
@@ -2712,7 +2739,9 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
             With panel.Cells(dRow, cc)
                 ' Carry-over C: bounded for a chain (CardHelp), untouched for an
                 ' authored action - the full chain recipe stays in HomeCatalog.
-                .Value = CardHelp(CStr(it(3)), CStr(it(4)))
+                ' Fix round 2, fix 3: gated on the button's id (it(0)), not its
+                ' category (it(4)) - see CardHelp's own comment.
+                .Value = CardHelp(CStr(it(3)), CStr(it(0)))
                 .Font.Size = 9
                 .Font.Color = RGB(110, 110, 110)
                 .WrapText = True
@@ -2823,6 +2852,15 @@ NextBtn:
     For Each e In unassigned
         AddToPage layout, 1, 9999, e     ' blank-coded buttons go to page 1's Unassigned column
     Next e
+    ' Fix round 2, fix 6: AUTO_COL_MAX bounds a same-code stack in BuildAutoLayout
+    ' but nothing bounded one here - a single "1A" on 25 buttons used to draw one
+    ' column 25 deep, running off-screen with no warning, while Macros Home
+    ' reported the page as fine. Must run BEFORE CapManualColumns below, so the
+    ' horizontal capper sees (and, if needed, relocates) the extra columns this
+    ' produces - see that Sub's own comment for why splitting first and letting
+    ' the existing horizontal machinery handle any resulting overflow needs no
+    ' new page-overflow logic of its own.
+    SplitTallManualColumns layout
     ' Carry-over A: a user can type 1A/1B/1C/1D (or fill 3 coded columns and still
     ' land blank-coded buttons in Unassigned/9999 on page 1) - that is 4+ distinct
     ' columns on one page. RenderPage only draws CARD_COLS (3) card slots and
@@ -2850,6 +2888,7 @@ Private Sub LabelManualPages(layout As Object)
     Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
     Dim items As Collection, ii As Long, it As Variant
     Dim cat As String, one As String, mixed As Boolean
+    Dim origColIx As Long, contTag As String
     tabKeys = SortedKeys(layout)
     For ti = LBound(tabKeys) To UBound(tabKeys)
         tabNum = CLng(tabKeys(ti))
@@ -2860,12 +2899,25 @@ Private Sub LabelManualPages(layout As Object)
         colKeys = SortedKeys(cols)
         For ci = LBound(colKeys) To UBound(colKeys)
             colIx = CLng(colKeys(ci))
-            If colIx = 9998 Then
-                SetColHeader layout, tabNum, colIx, "Setup"
-            ElseIf colIx = 9999 Then
-                SetColHeader layout, tabNum, colIx, "Unassigned"
+            ' Fix round 2, fix 6: a colIx >= VSPLIT_MULT is a vertical-overflow
+            ' piece SplitTallManualColumns minted for an oversized same-code
+            ' stack - decode its original column straight back out of the number
+            ' (see that Sub's comment): the piece may since have been relocated
+            ' to a different page by CapManualColumns above, and a header set
+            ' before that move would not have travelled with it.
+            If colIx >= VSPLIT_MULT Then
+                origColIx = colIx \ VSPLIT_MULT
+                contTag = " (cont.)"
             Else
-                SetColHeader layout, tabNum, colIx, "Column " & IndexToCol(colIx)
+                origColIx = colIx
+                contTag = ""
+            End If
+            If origColIx = 9998 Then
+                SetColHeader layout, tabNum, colIx, "Setup" & contTag
+            ElseIf origColIx = 9999 Then
+                SetColHeader layout, tabNum, colIx, "Unassigned" & contTag
+            Else
+                SetColHeader layout, tabNum, colIx, "Column " & IndexToCol(origColIx) & contTag
             End If
             Set items = cols(colIx)
             For ii = 1 To items.Count
@@ -2882,14 +2934,78 @@ Private Sub LabelManualPages(layout As Object)
     Next ti
 End Sub
 
+' Fix round 2, fix 6: AUTO_COL_MAX bounds a same-code stack in BuildAutoLayout;
+' nothing bounded one here, so a single "1A" on (say) 25 buttons drew one column
+' 25 deep, running off-screen with no warning, while Macros Home reported the
+' page as fine. Split any column over AUTO_COL_MAX BEFORE CapManualColumns runs
+' (BuildManualLayout calls this first): the split pieces are just more columns
+' on the page by the time the existing horizontal cap-and-overflow machinery
+' looks at it, so a page that gains a 4th+ column this way overflows to a
+' continuation page exactly like an explicitly-coded 4th column already does -
+' no new page-overflow logic needed, only more columns for the old logic to see.
+'
+' A split piece's colIx encodes its origin (origColIx * VSPLIT_MULT +
+' pieceIndex) rather than getting a header written here, because
+' CapManualColumns may relocate a piece to a different page afterwards, and a
+' header set on the page it started on would not travel with it (fix round 1's
+' fix 8 deliberately removed that carry-across-a-move machinery as dead code).
+' LabelManualPages decodes the header straight back out of the colIx instead,
+' which survives being moved because AddToPage copies the colIx unchanged.
+Private Sub SplitTallManualColumns(layout As Object)
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object, cols As Object
+    Dim colKeys As Variant, ci As Long, colIx As Long, items As Collection
+    Dim needCols As Long, k As Long, n As Long, taken As Long, pieceColIx As Long
+
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set cols = page("cols")
+        colKeys = SortedKeys(cols)      ' snapshot before this page's cols dict grows below
+        For ci = LBound(colKeys) To UBound(colKeys)
+            colIx = CLng(colKeys(ci))
+            Set items = cols(colIx)
+            If items.Count <= AUTO_COL_MAX Then GoTo NextCol
+            needCols = -Int(-items.Count / AUTO_COL_MAX)     ' ceiling division
+            ' Guard against Long overflow for a pathological many-letter code -
+            ' leave it as one tall, unsplit column rather than corrupt colIx math.
+            ' (2147483647 is VBA Long's max; safe for any realistic 1-3 letter code.)
+            If colIx > (2147483647 - needCols) \ VSPLIT_MULT Then GoTo NextCol
+            taken = AUTO_COL_MAX                ' first AUTO_COL_MAX items stay at colIx
+            For k = 2 To needCols
+                pieceColIx = colIx * VSPLIT_MULT + k
+                For n = 1 To AUTO_COL_MAX
+                    taken = taken + 1
+                    If taken > items.Count Then Exit For
+                    AddToPage layout, tabNum, pieceColIx, items(taken)
+                Next n
+            Next k
+            ' items IS cols(colIx) (Collections are reference types), so trim the
+            ' overflow back out of it now that it has been copied into the pieces
+            ' above - AddToPage only ever appends, it never removes.
+            Do While items.Count > AUTO_COL_MAX
+                items.Remove items.Count
+            Loop
+NextCol:
+        Next ci
+    Next ti
+End Sub
+
 ' Carry-over A (manual side): fold any page's columns beyond CARD_COLS onto
 ' continuation page(s) appended after the highest page number already in use,
 ' CARD_COLS columns at a time, instead of letting RenderPage's slot cap (see
 ' CardCol) silently discard them. Nothing the user typed is lost - the moved
-' column keeps its items and its header (suffixed "(cont.)"), and the normal
-' << Home / Next nav still reaches it. Only manual layouts need this: capacity-
-' packed BuildAutoLayout never files more than CARD_COLS columns onto a page
-' by construction (see BuildAutoLayout's slotsUsed check).
+' column keeps its items, and the normal << Home / Next nav still reaches it;
+' its header is assigned afterwards by LabelManualPages, not carried across the
+' move (see that fix's comment immediately below for why). Only manual layouts
+' need this: capacity-packed BuildAutoLayout never files more than CARD_COLS
+' columns onto a page by construction (see BuildAutoLayout's slotsUsed check).
+' Fix round 2, fix 7: the paragraph above used to claim the moved column "keeps
+' ... its header (suffixed "(cont.)")" - stale the moment fix round 1's fix 8
+' (immediately below) deleted the code that did that, and exactly the class of
+' comment that caused fix round 1's fix 1 (a maintainer reads a comment
+' describing code that is not there, and "fixes" it back in). Corrected above,
+' not just noted here.
 ' Fix round 1, fix 8: an earlier draft carried header-preserving machinery here
 ' (read page("hdrs"), re-tag the moved column "(cont.)", remove it from the old
 ' page's hdrs) that was dead on arrival: this runs from BuildManualLayout, before
@@ -2948,10 +3064,18 @@ End Sub
 ' (category = CHAIN_CAT) are touched - authored action help passes through as-is.
 ' CHAIN_CARD_STEPS lives in the module's declarations section (top of file), next
 ' to AUTO_COL_MAX, not here - a Const after the first procedure is a compile error.
-Private Function CardHelp(ByVal helpText As String, ByVal category As String) As String
+' Fix round 2, fix 3: gates on the button's id (IsChainId, "chain.*"), NOT on
+' its category string. Category = CHAIN_CAT ("Chains") used to be the gate, but
+' CHAIN_CAT is reserved by contract section 7, not enforced in code - Core_AddAction
+' accepts any category a package declares, so a package could pass
+' category:="Chains" and have its AUTHORED help decorated (and truncated) here,
+' which section 6 forbids outright. Chains only ever reach GatherButtons through
+' the ReadChains branch, and every chain id is minted "chain.*" (MintChainId),
+' so the id namespace is the one thing an ordinary action can never spoof.
+Private Function CardHelp(ByVal helpText As String, ByVal btnId As String) As String
     Dim body As String, parts() As String, n As Long, i As Long, shown As String
     Dim usedSteps As Long, candidate As String
-    If LCase(category) <> LCase(CHAIN_CAT) Then
+    If Not IsChainId(btnId) Then
         CardHelp = helpText
         Exit Function
     End If
@@ -2975,6 +3099,17 @@ Private Function CardHelp(ByVal helpText As String, ByVal category As String) As
         shown = candidate
         usedSteps = usedSteps + 1
     Next i
+    ' Fix round 2, fix 2: the fast-path test above can fail (Len(helpText) alone
+    ' pushed it over CHAIN_CARD_CHARS because of the "Chain: " prefix) while the
+    ' loop still gets through every step before either cap actually bites - e.g.
+    ' 4 steps of 27 characters, or 3 of 38. usedSteps = n then, and appending a
+    ' "+0 more" tail would hand back a string LONGER than the input while
+    ' claiming there is more to see, when there is not. If nothing was actually
+    ' left out, return the original text unchanged.
+    If usedSteps >= n Then
+        CardHelp = helpText
+        Exit Function
+    End If
     CardHelp = "Chain: " & shown & "  +" & (n - usedSteps) & " more - see Macros Home"
 End Function
 
@@ -2995,7 +3130,7 @@ Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
 
     Set cats = CreateObject("Scripting.Dictionary")
     ' Fix round 1, fix 7: a default Dictionary is BinaryCompare, so "Reconcile"
-    ' and "reconcile" from two different packages (an explicitly supported §6
+    ' and "reconcile" from two different packages (an explicitly supported section 6
     ' scenario - two packages feeding one category) would become two adjacent
     ' columns, even though LabelAutoPages de-dupes case-insensitively and would
     ' title the page with the category named once above both. Must be set BEFORE
