@@ -89,9 +89,14 @@ Private Const BTN_ROW_H  As Double = 32          ' button row height (BTN_H + pa
 Private Const DESC_MIN_H As Double = 24          ' floor after AutoFit
 ' No DESC_MAX_H: contract 6 forbids clipping a description, and a manual clamp on
 ' an AutoFit row is exactly how Excel clips. AutoFit gets the honest height, full
-' stop - a pathological 20-step chain draws one tall row instead of a silent cut.
+' stop, for an action's AUTHORED help. A chain's help is engine-SYNTHESISED
+' (GatherButtons: "Chain: " & StepsInline(...)), not authored, so contract 6 does
+' not bind it - CardHelp (carry-over C, Task 7) bounds it before it reaches the
+' card grid instead of letting a pathological 20-step chain draw one tall row
+' that inflates every card column beside it; HomeCatalog shows the full recipe.
 Private Const AUTO_COL_MAX As Long = 6           ' buttons per card column before a new column
                                                  ' (fix round 1: was 8; 8 only fits full-HD/100%)
+Private Const CHAIN_CARD_STEPS As Long = 4       ' step captions shown on a card before "+N more"
 ' BTN_W, ROW_GAP, COL_GAP and HDR_H are no longer used by the card grid, but the
 ' legacy point-positioned RenderPageLegacy (still called by BuildGroupedPanels
 ' until Task 8) references them, so they stay until that builder is deleted.
@@ -2685,7 +2690,9 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
             AddBtnInCell panel, "b" & tabNum & "_" & colIx & "_" & ii, _
                          CStr(it(1)), CStr(it(2)), panel.Cells(bRow, cc)
             With panel.Cells(dRow, cc)
-                .Value = CStr(it(3))
+                ' Carry-over C: bounded for a chain (CardHelp), untouched for an
+                ' authored action - the full chain recipe stays in HomeCatalog.
+                .Value = CardHelp(CStr(it(3)), CStr(it(4)))
                 .Font.Size = 9
                 .Font.Color = RGB(110, 110, 110)
                 .WrapText = True
@@ -2719,8 +2726,20 @@ End Function
 ' bookkeeping and EnsurePanelSheet's Cells.Clear removes it cleanly on rebuild.
 ' ASCII arrows only - build.ps1 writes UTF-8 with no BOM on the assumption that
 ' the SOURCE is ASCII, so a literal arrow glyph in the .bas is an import hazard.
+' Carry-over B: BuildHomePage is not wired up until Task 8, so "Macros Home" can
+' legitimately not exist yet when a page renders. A hyperlink to a missing sheet
+' raises Excel's "Reference isn't valid" the moment it is clicked, so degrade to
+' plain text (same caption, no link) until the index sheet is actually there.
 Private Sub RenderNavRow(ws As Worksheet, ByVal prevSheet As String, ByVal nextSheet As String)
-    NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
+    If Core_SheetExists(HOME_SHEET) Then
+        NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
+    Else
+        With ws.Cells(1, 2)
+            .Value = "<< Home"
+            .Font.Size = 10
+            .Font.Bold = True
+        End With
+    End If
     If Len(prevSheet) > 0 Then NavLink ws.Cells(1, 4), "< Previous", prevSheet
     If Len(nextSheet) > 0 Then NavLink ws.Cells(1, 6), "Next >", nextSheet
     ws.Rows(1).RowHeight = 18
@@ -2773,6 +2792,12 @@ NextBtn:
     For Each e In unassigned
         AddToPage layout, 1, 9999, e     ' blank-coded buttons go to page 1's Unassigned column
     Next e
+    ' Carry-over A: a user can type 1A/1B/1C/1D (or fill 3 coded columns and still
+    ' land blank-coded buttons in Unassigned/9999 on page 1) - that is 4+ distinct
+    ' columns on one page. RenderPage only draws CARD_COLS (3) card slots and
+    ' silently drops anything past slot 3, so cap here rather than let the
+    ' renderer discard what the user explicitly placed.
+    CapManualColumns layout
 End Sub
 
 ' Title and head a hand-built layout. Column headers keep the code-based names the
@@ -2815,6 +2840,330 @@ Private Sub LabelManualPages(layout As Object)
         If Not mixed And Len(cat) > 0 Then SetPageTitle layout, tabNum, cat
     Next ti
 End Sub
+
+' Carry-over A (manual side): fold any page's columns beyond CARD_COLS onto
+' continuation page(s) appended after the highest page number already in use,
+' CARD_COLS columns at a time, instead of letting RenderPage's slot cap (see
+' CardCol) silently discard them. Nothing the user typed is lost - the moved
+' column keeps its items and its header (suffixed "(cont.)"), and the normal
+' << Home / Next nav still reaches it. Only manual layouts need this: capacity-
+' packed BuildAutoLayout never files more than CARD_COLS columns onto a page
+' by construction (see BuildAutoLayout's slotsUsed check).
+Private Sub CapManualColumns(layout As Object)
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim cols As Object, hdrs As Object, colKeys As Variant, ci As Long, colIx As Long
+    Dim maxTab As Long, newTab As Long, chunkPos As Long
+    Dim items As Collection, ii As Long, hdr As String
+
+    tabKeys = SortedKeys(layout)
+    maxTab = 0
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        If CLng(tabKeys(ti)) > maxTab Then maxTab = CLng(tabKeys(ti))
+    Next ti
+
+    ' Snapshot the pre-existing pages before appending continuation pages, so the
+    ' loop below never revisits (or re-splits) a page it just created.
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set cols = page("cols")
+        Set hdrs = page("hdrs")
+        colKeys = SortedKeys(cols)
+        If UBound(colKeys) < LBound(colKeys) + CARD_COLS Then GoTo NextTab   ' <= CARD_COLS cols: fine
+        chunkPos = CARD_COLS                    ' forces a fresh page on the first overflow column
+        For ci = LBound(colKeys) + CARD_COLS To UBound(colKeys)
+            colIx = CLng(colKeys(ci))
+            If chunkPos >= CARD_COLS Then
+                maxTab = maxTab + 1
+                newTab = maxTab
+                chunkPos = 0
+            End If
+            chunkPos = chunkPos + 1
+            Set items = cols(colIx)
+            hdr = ""
+            If hdrs.Exists(colIx) Then hdr = CStr(hdrs(colIx))
+            For ii = 1 To items.Count
+                AddToPage layout, newTab, colIx, items(ii)
+            Next ii
+            If Len(hdr) > 0 Then SetColHeader layout, newTab, colIx, hdr & " (cont.)"
+            cols.Remove colIx
+            ' BuildManualLayout runs before LabelManualPages assigns headers, so
+            ' hdrs is typically still empty here - guard the removal instead of
+            ' assuming the Exists check above means the key is present to remove.
+            If hdrs.Exists(colIx) Then hdrs.Remove colIx
+        Next ci
+NextTab:
+    Next ti
+End Sub
+
+' Carry-over C: a chain's help is Core-synthesised ("Chain: " & StepsInline(...),
+' GatherButtons) and with MAX_LIST steps can run to ~500 characters - roughly 14
+' wrapped lines on a card's width - which AutoFit then applies to the WHOLE row,
+' inflating it across all three card columns. Contract 6's no-clipping rule binds
+' an action's AUTHORED help; a chain's help is engine-generated, so Core is free
+' to bound it here. Cards get the first few step captions plus a "+N more"
+' pointer; HomeCatalog (Macros Home) is untouched and always shows the full
+' recipe, so the complete step list stays visible somewhere. Only chain buttons
+' (category = CHAIN_CAT) are touched - authored action help passes through as-is.
+' CHAIN_CARD_STEPS lives in the module's declarations section (top of file), next
+' to AUTO_COL_MAX, not here - a Const after the first procedure is a compile error.
+Private Function CardHelp(ByVal helpText As String, ByVal category As String) As String
+    Dim body As String, parts() As String, n As Long, i As Long, shown As String
+    If LCase(category) <> LCase(CHAIN_CAT) Then
+        CardHelp = helpText
+        Exit Function
+    End If
+    body = helpText
+    If Left$(body, 7) = "Chain: " Then body = Mid$(body, 8)
+    parts = Split(body, " > ")
+    n = UBound(parts) - LBound(parts) + 1
+    If n <= CHAIN_CARD_STEPS Then
+        CardHelp = helpText
+        Exit Function
+    End If
+    For i = LBound(parts) To LBound(parts) + CHAIN_CARD_STEPS - 1
+        shown = shown & IIf(Len(shown) > 0, " > ", "") & parts(i)
+    Next i
+    CardHelp = "Chain: " & shown & "  +" & (n - CHAIN_CARD_STEPS) & " more - see Macros Home"
+End Function
+
+' Auto-layout: no button carries a page code, so distribute buttons by display
+' category. A page is a CAPACITY unit, not a category unit: up to CARD_COLS
+' category-headed columns per page, up to AUTO_COL_MAX buttons per column. Small
+' categories share a page. A category that does not fit in the remaining columns
+' starts a new page rather than straddling one - splitting a category across tabs
+' destroys the grouping that putting it in one place buys. A category larger than
+' a whole page continues onto further pages. Replaces the pre-v0.4.0 single-
+' "Macros"-tab default (contract v1.2.0), which did not survive contact with a
+' large catalog.
+Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
+    Dim cats As Object, seen As New Collection, order As Collection
+    Dim e As Variant, cat As String, ci As Long, items As Collection
+    Dim needCols As Long, tabNum As Long, slotsUsed As Long
+    Dim taken As Long, k As Long, n As Long, firstColOfCat As Boolean
+
+    Set cats = CreateObject("Scripting.Dictionary")
+    For Each e In buttons
+        cat = Trim(CStr(e(4)))
+        If Len(cat) = 0 Then cat = "Other"       ' defensive: Core_AddAction never emits blank
+        If Not cats.Exists(cat) Then
+            cats.Add cat, New Collection
+            seen.Add cat                         ' first-appearance order, stable
+        End If
+        cats(cat).Add e
+    Next e
+
+    Set order = CategoryOrder(cats, seen)
+    tabNum = 1
+    slotsUsed = 0
+    For ci = 1 To order.Count
+        cat = CStr(order(ci))
+        Set items = cats(cat)
+        needCols = -Int(-items.Count / AUTO_COL_MAX)        ' ceiling division
+        ' Start a fresh page rather than straddle, unless this category is bigger
+        ' than a whole page (in which case straddling is unavoidable).
+        If needCols <= CARD_COLS And slotsUsed > 0 And slotsUsed + needCols > CARD_COLS Then
+            tabNum = tabNum + 1
+            slotsUsed = 0
+        End If
+        taken = 0
+        firstColOfCat = True
+        For k = 1 To needCols
+            If slotsUsed >= CARD_COLS Then
+                tabNum = tabNum + 1
+                slotsUsed = 0
+            End If
+            slotsUsed = slotsUsed + 1
+            For n = 1 To AUTO_COL_MAX
+                taken = taken + 1
+                If taken > items.Count Then Exit For
+                AddToPage layout, tabNum, slotsUsed, items(taken)
+            Next n
+            If firstColOfCat Then
+                SetColHeader layout, tabNum, slotsUsed, cat
+                firstColOfCat = False
+            Else
+                SetColHeader layout, tabNum, slotsUsed, cat & " (cont.)"
+            End If
+        Next k
+    Next ci
+    LabelAutoPages layout
+End Sub
+
+' First-appearance order, with the reserved Chains category moved to the end: a
+' composed button reads as a summary of the actions above it, so it belongs last.
+Private Function CategoryOrder(cats As Object, seen As Collection) As Collection
+    Dim out As New Collection, i As Long, cat As String
+    Set CategoryOrder = out
+    For i = 1 To seen.Count
+        cat = CStr(seen(i))
+        If LCase(cat) <> LCase(CHAIN_CAT) Then out.Add cat
+    Next i
+    For i = 1 To seen.Count
+        cat = CStr(seen(i))
+        If LCase(cat) = LCase(CHAIN_CAT) Then out.Add cat
+    Next i
+End Function
+
+' A packed page may hold up to CARD_COLS categories, so title it by what is
+' actually on it: one category -> its name; several -> the distinct names joined.
+Private Sub LabelAutoPages(layout As Object)
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim hdrs As Object, hk As Variant, seen As Object, title As String, one As String
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set hdrs = page("hdrs")
+        Set seen = CreateObject("Scripting.Dictionary")
+        title = ""
+        For Each hk In hdrs.Keys
+            one = Replace(CStr(hdrs(hk)), " (cont.)", "")
+            If Not seen.Exists(LCase(one)) Then
+                seen(LCase(one)) = True
+                title = title & IIf(Len(title) > 0, "   |   ", "") & one
+            End If
+        Next hk
+        If Len(title) > 70 Then title = Left$(title, 67) & "..."
+        If Len(title) > 0 Then SetPageTitle layout, tabNum, title
+    Next ti
+End Sub
+
+' The generated index - ALWAYS built, even for a single page, so the workbook has
+' one shape at every scale (owner's call). Three parts: a page summary, the full
+' action catalog, and the legend. Built last and activated, so any rebuild lands
+' the user here.
+Private Sub BuildHomePage(layout As Object, ByVal totalButtons As Long)
+    Dim ws As Worksheet, r As Long, tabKeys As Variant, ti As Long, tabNum As Long
+    Dim page As Object
+    Set ws = EnsurePanelSheet(HOME_SHEET, True)
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = 40
+    ws.Columns("C").ColumnWidth = 9
+    ws.Columns("D").ColumnWidth = 62
+    ws.Columns("E").ColumnWidth = 16
+
+    With ws.Range("B2")
+        .Value = "Macro Toolkit"
+        .Font.Size = 18
+        .Font.Bold = True
+        .Font.Color = RGB(31, 78, 121)
+    End With
+    With ws.Range("B3")
+        .Value = "Pick a page below, or find an action in the catalog. Every page has a  << Home  link back here."
+        .Font.Italic = True
+    End With
+
+    r = 5
+    ws.Cells(r, 2).Value = "PAGE"
+    ws.Cells(r, 3).Value = "BUTTONS"
+    ws.Cells(r, 4).Value = "CATEGORIES ON IT"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 217, 240)
+    End With
+    r = r + 1
+
+    tabKeys = SortedKeys(layout)
+    If UBound(tabKeys) < LBound(tabKeys) Then
+        ws.Cells(r, 2).Value = "No actions are available as buttons yet."
+        ws.Cells(r, 2).Font.Italic = True
+        r = r + 1
+    Else
+        For ti = LBound(tabKeys) To UBound(tabKeys)
+            tabNum = CLng(tabKeys(ti))
+            Set page = layout(tabNum)
+            NavLink ws.Cells(r, 2), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+            ws.Cells(r, 3).Value = PageButtonCount(page)
+            ws.Cells(r, 4).Value = CStr(page("title"))
+            ws.Cells(r, 4).Font.Color = RGB(90, 90, 90)
+            r = r + 1
+        Next ti
+    End If
+
+    r = r + 1
+    NavLink ws.Cells(r, 2), "Setup Menu  -  first-time setup / re-configure", ADMIN_SHEET
+    r = r + 2
+    r = HomeCatalog(ws, r, layout)
+    r = r + 1
+    r = HomeLegend(ws, r, totalButtons)
+
+    ws.Activate                     ' Range.Select needs its sheet active
+    ws.Range("A1").Select
+End Sub
+
+' Every button, with its full description and the page it is on. This is the one
+' screen that answers "what can this workbook do?" - and unlike a card, a cell
+' here is as wide as it needs to be, so nothing is abbreviated. Deliberately reads
+' it(3) directly (not CardHelp) - this is where a bounded chain card points a
+' user for the full recipe, so it must never itself be bounded.
+Private Function HomeCatalog(ws As Worksheet, ByVal r As Long, layout As Object) As Long
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
+    Dim items As Collection, ii As Long, it As Variant, firstRow As Long
+    ws.Cells(r, 2).Value = "ALL ACTIONS"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    ws.Cells(r, 2).Value = "ACTION"
+    ws.Cells(r, 3).Value = "PAGE"
+    ws.Cells(r, 4).Value = "WHAT IT DOES"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 4))
+        .Font.Bold = True
+        .Font.Size = 10
+        .Interior.Color = RGB(240, 240, 245)
+    End With
+    r = r + 1
+    firstRow = r
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set cols = page("cols")
+        colKeys = SortedKeys(cols)
+        For ci = LBound(colKeys) To UBound(colKeys)
+            colIx = CLng(colKeys(ci))
+            Set items = cols(colIx)
+            For ii = 1 To items.Count
+                it = items(ii)
+                ws.Cells(r, 2).Value = CStr(it(1))
+                NavLink ws.Cells(r, 3), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+                With ws.Cells(r, 4)
+                    .Value = CStr(it(3))
+                    .Font.Size = 10
+                    .Font.Color = RGB(90, 90, 90)
+                    .WrapText = True
+                    .VerticalAlignment = xlTop
+                End With
+                r = r + 1
+            Next ii
+        Next ci
+    Next ti
+    ' Nothing here is merged, so AutoFit gives every description its full height.
+    If r > firstRow Then ws.Rows(firstRow & ":" & (r - 1)).AutoFit
+    HomeCatalog = r
+End Function
+
+' The legend. This is the only place the page-code convention and Availability are
+' explained where a daily user will actually see them.
+Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long) As Long
+    ws.Cells(r, 2).Value = "HOW THESE PAGES ARE BUILT"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to 3 per page.")
+    r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
+    r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
+    r = HomeLine(ws, r, "As soon as ONE code is filled in, the codes control everything and uncoded buttons land on page 1.")
+    r = HomeLine(ws, r, "Availability on the Setup tab: 'Button' = shown here. 'Chains only' = no button, but a Chain can run it.")
+    r = HomeLine(ws, r, "'Off' = no button and it will not run at all; Finalize refuses to activate a Chain that uses one.")
+    HomeLegend = r
+End Function
+
+Private Function HomeLine(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
+    ws.Cells(r, 2).Value = txt
+    ws.Cells(r, 2).Font.Size = 10
+    ws.Cells(r, 2).Font.Color = RGB(90, 90, 90)
+    HomeLine = r + 1
+End Function
 
 ' Frameless textbox label (ported from MacroLayout ML_AddText).
 Private Function AddText(ws As Worksheet, ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
