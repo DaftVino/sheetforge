@@ -54,7 +54,12 @@ Private Const AVAIL_OFF      As String = "off"
 ' presentation, is user-editable, and must never decide whether saved config is
 ' preserved or discarded (contract section 5). Task 4 builds the migration on it;
 ' it is declared and read here because ReadAvailMap needs it.
-Private Const SCHEMA_VER     As String = "1.2"
+' The "v" prefix is load-bearing: a bare "1.2" is stored as General and Excel
+' coerces it to the NUMBER 1.2, which is then read back through a locale-aware
+' CStr (a comma-decimal locale yields "1,2"; some locales read it as a date).
+' A non-numeric token cannot be coerced, so the marker survives the round trip
+' byte-for-byte regardless of the workbook's locale.
+Private Const SCHEMA_VER     As String = "v1.2"
 
 ' ---- grouped control-panel geometry (ported from MacroLayout; Task 9) ----
 Private Const PANEL_BASE As String = "Macros "   ' grouped output tabs: "Macros 1", "Macros 2"...
@@ -717,20 +722,31 @@ Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As 
     res("errText") = ""
     res("reported") = False
 
+    On Error GoTo StepFail
+
     ' Defence in depth: Finalize blocks a chain that references an Off action, so
     ' this should be unreachable through a validated config. It exists because
     ' "switched off but it ran anyway" is the one failure mode of this feature
-    ' that a finance user cannot recover from.
+    ' that a finance user cannot recover from. Placed under the error trap (not
+    ' above it): ReadAvailMap does real worksheet I/O (FindKeyRow/NextKeyRow walk
+    ' the sheet with .End(xlUp) and read cells), and a protected or corrupt
+    ' _Config must land on StepFail like any other failure here, not escape the
+    ' procedure. Resolves the owner early (instead of at the un-gated lookup
+    ' below) purely so the "Off" result carries the real caption, not the raw id -
+    ' Core_RunChain's Continue/Stop prompt is exactly the dialog this gate exists
+    ' to protect, and it must not show a finance user a dotted id.
     If Not IsRunnable(ReadAvailMap(CfgSheet()), actionId) Then
+        Set reg = FindActionOwner(actionId, entry)
         res("found") = True
+        If Not reg Is Nothing Then res("label") = ActionCaption(reg, actionId)
         res("ok") = False
         res("errNumber") = 0
         res("errText") = "Action '" & actionId & "' is switched Off on the Setup tab."
+        On Error GoTo 0
         Set RunAction = res
         Exit Function
     End If
 
-    On Error GoTo StepFail
     Set reg = FindActionOwner(actionId, entry)
     If reg Is Nothing Then
         On Error GoTo 0
@@ -802,8 +818,18 @@ End Function
 Public Sub Core_Run(ByVal actionId As String)
     Dim res As Object, availMap As Object, t As String
     If IsChainId(actionId) Then Core_RunChain actionId: Exit Sub
+
+    ' Reading the availability map is a worksheet read (FindKeyRow/NextKeyRow walk
+    ' the sheet). Core_Run is a button's OnAction with no other error handler in
+    ' the call chain above it, so an unexpected failure here (a protected or
+    ' corrupt _Config) must fail CLOSED - refuse to run and say why - rather than
+    ' surface a raw VBA runtime-error dialog and break into the IDE in front of a
+    ' finance user.
+    On Error GoTo AvailReadFail
     Set availMap = ReadAvailMap(CfgSheet())
     t = AvailFor(availMap, actionId)
+    On Error GoTo 0
+
     If t <> AVAIL_BUTTON Then
         If t = AVAIL_CHAIN Then
             MsgBox "'" & actionId & "' is set to 'Chains only' on the Setup tab, so it " & _
@@ -823,6 +849,12 @@ Public Sub Core_Run(ByVal actionId As String)
         MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
                "#" & res("errNumber") & "  " & res("errText"), vbExclamation, "Macro Error"
     End If
+    Exit Sub
+
+AvailReadFail:
+    MsgBox "Could not confirm '" & actionId & "' is switched on, so it was not run." & vbCrLf & vbCrLf & _
+           "Error #" & Err.Number & ": " & Err.Description & vbCrLf & vbCrLf & _
+           "Rebuild the Setup tab if the problem continues.", vbExclamation, "Core"
 End Sub
 
 ' Run a chain: each step quiet; prompt Continue/Stop on failure; one end summary.
@@ -1374,7 +1406,18 @@ Private Function ReadAvailMap(ws As Worksheet) As Object
     If ws Is Nothing Then Exit Function
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr = 0 Then Exit Function
-    If BlockSchema(ws, kr) <> SCHEMA_VER Then Exit Function   ' pre-v1.2 block: all Button
+    ' Presence test, not equality: the Availability column arrived AT v1.2 and
+    ' removing it later would invalidate stored config, which contract section 10's
+    ' two-axis rule classifies as breaking and therefore a future major bump - so
+    ' "a marker is present" (any non-empty value) implies "the Availability column
+    ' exists at VAL_COL + 1", even for a marker newer than this build recognises.
+    ' A marker absent altogether means a genuine pre-v1.2 block: read as all Button
+    ' (contract section 5, "absent is not invalid"). ComposeReport separately blocks
+    ' Finalize when the marker is present but not exactly SCHEMA_VER - this reader
+    ' only needs to know whether the column exists, not whether ITS build understands
+    ' the exact version, so a value it does not recognise still fails closed through
+    ' ParseAvail returning "" rather than being silently treated as absent.
+    If Len(BlockSchema(ws, kr)) = 0 Then Exit Function   ' no marker: pre-v1.2 block, all Button
     nk = NextKeyRow(ws, kr)
     For i = kr + 1 To nk - 1
         id = Trim(CStr(ws.Cells(i, RID_COL).Value))
@@ -1434,7 +1477,10 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     ws.Cells(r, VAL_COL + 2).Value = "Page code"
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
     ' The machine-owned schema marker, in the hidden id column of the key row -
-    ' NOT in the visible header. See Task 4 / contract section 5.
+    ' NOT in the visible header. See Task 4 / contract section 5. Force Text so a
+    ' General-formatted cell cannot coerce the marker to a number (belt-and-braces:
+    ' SCHEMA_VER's "v" prefix already blocks numeric coercion on its own).
+    ws.Cells(r, RID_COL).NumberFormat = "@"
     ws.Cells(r, RID_COL).Value = SCHEMA_VER
     r = r + 1
 
@@ -1524,6 +1570,7 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     Dim ch2 As Object, actIds As Object, seenIds As Object, cid As String
     Dim availMap As Object, offList As String, badAvail As String
     Dim chainOnly As String, nOff As Long, t As String
+    Dim layoutKR As Long, marker As String
     Set ids = ActionIdSet()                        ' lowercased set of valid action ids
     Set chains = ReadChains(ws)
 
@@ -1591,6 +1638,31 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     ' Availability. An unrecognised cell and an Off action used by a chain are both
     ' STRUCTURAL - they block activation. "Chains only" is reported for confidence,
     ' not as a problem: it is an authored state, not an accident.
+    '
+    ' Format-marker integrity, contract section 5's fail-closed requirement. A marker
+    ' this build does not recognise, or a header that says "Availability" with no
+    ' marker behind it (a deleted/tampered hidden column), must both block Finalize -
+    ' ReadAvailMap's presence test alone is not enough, because on a bad-but-present
+    ' marker it still reads the column (so a mismatched future format is not silently
+    ' skipped as "all Button" the way an absent marker is).
+    layoutKR = FindKeyRow(ws, LAYOUT_KEY)
+    marker = BlockSchema(ws, layoutKR)
+    If Len(marker) > 0 And marker <> SCHEMA_VER Then
+        s = s & vbCrLf & "ACTION CATALOG FORMAT MISMATCH: this Setup tab's Action catalog is marked '" & _
+            marker & "', but this build expects '" & SCHEMA_VER & "'. Nothing has been activated - " & _
+            "saved Availability choices cannot be trusted until the format matches. Click " & _
+            "'Create Setup Tab' to rebuild the Action catalog block and restore the marker, then " & _
+            "re-enter any Availability changes." & vbCrLf
+        structural = structural + 1
+    ElseIf layoutKR > 0 And Len(marker) = 0 Then
+        If LCase(Trim(CStr(ws.Cells(layoutKR, VAL_COL + 1).Value))) = "availability" Then
+            s = s & vbCrLf & "ACTION CATALOG FORMAT MARKER MISSING: the hidden marker for the Action " & _
+                "catalog block has been removed or altered, so saved on/off choices cannot be " & _
+                "trusted. Nothing has been activated. Click 'Create Setup Tab' to rebuild the " & _
+                "Action catalog block and restore the marker." & vbCrLf
+            structural = structural + 1
+        End If
+    End If
     Set availMap = ReadAvailMap(ws)
     For Each regX In BuildRegistry()
         For Each aX In regX("actions")

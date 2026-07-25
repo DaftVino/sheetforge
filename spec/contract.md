@@ -300,6 +300,12 @@ predates v1.2.0 is unchanged.
 - **Portability note:** the reference implementation presents the three values as a
   validated dropdown on the authoring grid. A platform without cell validation
   still parses the same three tokens and still blocks on anything else.
+- **`button` / `chains-only` / `off` are abstract tokens, not a mandated on-screen
+  spelling.** A platform's authoring surface presents them as human-readable
+  labels; the Excel reference implementation writes and offers `Button` /
+  `Chains only` / `Off` (space, not hyphen, and title case) as its dropdown and
+  stored values. A conforming reader MUST accept either spelling of the middle
+  state (`chains-only` and `chains only`, case-insensitive) as equivalent.
 
 **Auto-layout (v1.2.0) — supersedes the "no codes" clause of the v1.1.0 grouping
 rule above.** When **no** button carries a placement code, the engine distributes
