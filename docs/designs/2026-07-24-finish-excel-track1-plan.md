@@ -3,24 +3,66 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the generated button pages from "disorganized and cluttered at seven
-buttons" into a navigable, auto-laid-out index — `Macros Home` plus category pages
-with descriptions and navigation — and add per-action enable/disable so a user only
-sees the actions and the settings they use.
+buttons" into a navigable, auto-laid-out index — `Macros Home` plus capacity-packed
+category pages with legible descriptions and navigation — and add per-action
+availability so a user only sees the actions and the settings they use.
 
 **Architecture:** Core-only; no package logic changes. Three additive manifest
-attributes (`category` on an action, `usedBy` on a field, plus an `Enabled` column
-on the existing engine-owned placement block) feed a rewritten panel builder. The
-placement block becomes the **Action Catalog** (`Action | Enabled | Page code`);
-`GatherButtons` — the single funnel for both actions and chains — filters on
-Enabled; the Setup renderer relegates settings belonging only to switched-off
-actions into one collapsed outline band at the bottom rather than omitting them.
-When no button carries a page code, buttons auto-distribute one page per display
-category; a single manual code still overrides everything.
+attributes (`category` on an action, `usedBy` on a field, plus an `Availability`
+column on the existing engine-owned placement block) feed a rewritten panel
+builder. The placement block becomes the **Action Catalog**
+(`Action | Availability | Page code`); `GatherButtons` — the single funnel for both
+actions and chains — filters on availability. The Setup renderer relegates settings
+belonging only to switched-off actions into one collapsed outline band rather than
+omitting them. When no button carries a page code, buttons auto-distribute into
+**capacity-packed** pages of up to three category-headed columns, drawn as an
+aligned, unmerged **cell-card grid** so descriptions AutoFit instead of clipping.
 
 **Tech Stack:** VBA (Excel/Windows), one required `src/core/Core.bas` + thin
 `src/packages/Pkg<Name>.bas`. Build: `pwsh build/build.ps1` → `dist/MacrosBundle.bas`.
 Syntax gate: `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas`. No headless
 VBA runner exists — see **Verification model** below.
+
+---
+
+## Provenance — read this before changing any decision below
+
+The first draft of this plan was argued by a `/deliberate` panel (native /
+veteran / aesthete; `gpt-5.6-terra` ×2 and `gpt-5.6-sol`, medium effort, 2 rounds,
+88.3k tokens, halted on the first loop). It found six problems. **Four were
+unanimous, and all four were real:**
+
+1. **Tasks 5–7 shipped three commits that would not compile.** The build script and
+   syntax checker are structural and do not resolve call targets, so an entry point
+   calling not-yet-written procedures passed the gate. In a repo whose only compiler
+   is a human, that is not acceptable. **Fixed:** the new renderer and auto-layout
+   land as dead-but-compilable code, and a small separate cutover task rewires the
+   entry point last. Every commit compiles.
+2. **The original layout made today's deployment worse.** 8 actions with no codes
+   was ONE tab; one-page-per-category would have shipped 2 category tabs + Home —
+   more tabs and an extra click, from a release motivated by "cluttered". **Fixed**
+   by capacity packing (below): 8 actions now produce one page with two category
+   columns.
+3. **One page per category is an unbounded tab multiplier** (10 categories → 11
+   page tabs, in a tab bar that shows 8–10). Home exists to solve tab sprawl and
+   that rule would have created it. **Fixed:** a page is a *capacity* unit.
+4. **The migration shim keyed off a user-editable header cell** to decide whether
+   to preserve or destroy a user's saved layout. The repo already keeps identity in
+   the hidden `RID_COL`, never in display text. **Fixed:** a machine-owned schema
+   marker in that hidden column, plus validation, plus fail-closed abort.
+
+**Owner decisions on the three contested points** (these override the panel):
+
+- **Capacity packing, but Home is ALWAYS generated** — even for a single page. One
+  page plan, one renderer, no threshold to test. The panel wanted a no-index floor;
+  the owner chose the uniform workbook shape.
+- **Descriptions stay on the action page**, as the aesthete's unmerged cell-card
+  grid, **and** Home carries a full action catalog. The native and veteran wanted
+  buttons-only pages; the owner kept point-of-click legibility.
+- **Three-state availability now** — `Button` / `Chains only` / `Off`, with an Excel
+  data-validation dropdown. The native and veteran both argued for two states on
+  the grounds that no deployment has any chains yet; the owner chose to define the
+  semantics completely in the release that introduces them.
 
 ---
 
@@ -32,17 +74,25 @@ Every task's requirements implicitly include this section.
 - **Target version:** repo `VERSION` → `0.4.0`; contract → **v1.2.0** (additive).
 - **`src/` is the source of truth.** A `.bas` edit does nothing in Excel until the
   bundle is rebuilt and re-imported. There is no round-trip back to `src/`.
+- **EVERY COMMIT MUST COMPILE.** New procedures may be unreachable, but no
+  committed call site may name a procedure that does not exist yet. Dead but
+  compilable beats a bundle that only compiles two tasks later.
 - **Flat namespace, mandatory naming.** Everything `Public` is `Core_*` or
   `Pkg<Name>_*`; everything else `Private`. Shared helpers live ONLY in Core.
   `build.ps1` FAILS on a duplicate procedure name across modules — every new
   private helper name in this plan must be globally unique.
 - **`Option Explicit` everywhere.** Max **25 line continuations** per statement.
 - **Module-level `Const`/`Dim` stays in the declarations section** at the top of
-  `Core.bas` (above `Core_DeclarePackage` at line 70). A declaration after the
-  first procedure is a VBA compile error and `build.ps1` fails on it.
-- **ASCII only.** `build.ps1` writes UTF-8 **no BOM** on the stated assumption that
-  content is ASCII and therefore import-safe. Use `<< Home`, `< Previous`,
-  `Next >` — **never** `←`/`→`/`▶`.
+  `Core.bas` (above `Core_DeclarePackage`). A declaration after the first procedure
+  is a VBA compile error and `build.ps1` fails on it.
+- **ASCII source bytes only.** `build.ps1` writes UTF-8 **no BOM** on the stated
+  assumption that content is ASCII. Use `<< Home`, `< Previous`, `Next >` — never a
+  literal `←`/`→`/`▶`. (A runtime `ChrW$(&H2713)` is fine and already used at
+  `Core.bas:1786`-ish — the constraint is on source bytes, not on rendered glyphs.)
+- **Nothing on the card grid may be merged.** Excel's AutoFit *ignores merged
+  cells* — that is why the Setup band rows already have to estimate their height
+  from a character count. The whole point of the card grid is that AutoFit works,
+  so a merge anywhere on it silently reintroduces clipping.
 - **No VBIDE trust dependency, ever.** Packages are discovered by probing
   `Pkg<Name>_Manifest` via `Application.Run` against `CoreCandidates`.
 - **Every action wraps in the speed pattern** with guaranteed restore in the error
@@ -52,14 +102,14 @@ Every task's requirements implicitly include this section.
 
 ### Do NOT revert (design §5 + the compose-your-buttons handoff log)
 
-1. **Setup COLLAPSES settings for disabled actions; it does NOT omit them.**
+1. **Setup COLLAPSES settings for unavailable actions; it does NOT omit them.**
    `Core_BuildSetup` deletes and re-seeds Setup from the **finalized** `_Config`, so
    omit-unless-enabled costs toggle → Finalize → rebuild → fill → Finalize *and*
    discards anything typed but not yet finalized. This deliberately overrides all
-   three `/deliberate` panelists.
+   three panelists of an earlier `/deliberate` round.
 2. **Module-level `Const` stays in the declarations section.**
-3. **`_Config` is unhidden before `.Delete`** (`Core_FinalizeSetup`, Core.bas:1488) —
-   a very-hidden sheet resists delete, which orphaned `Setup (2)`/`(3)` copies.
+3. **`_Config` is unhidden before `.Delete`** (`Core_FinalizeSetup`) — a very-hidden
+   sheet resists delete, which orphaned `Setup (2)`/`(3)` copies.
 4. **Admin controls stay on the `Setup Menu` tab**, never on an action page.
 5. **Action ids stay two segments** `<domain>.<operation>`; the domain is NOT the
    module name; the eight shipped ids are grandfathered literally including the two
@@ -77,11 +127,13 @@ pwsh build/build.ps1
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Both are **structural checks, not a compiler.** The real gate is **Task 9**: the
-owner imports the bundle, runs `Debug ▸ Compile VBAProject`, and clicks every
-action plus the cancel and error paths. **Never claim this work is verified before
-Task 9 passes.** Task 8 builds the `PkgFixture` harness that makes Task 9 exercise
-a 75-button layout while only 7 real actions exist.
+Both are **structural checks, not a compiler** — they do not resolve call targets,
+which is exactly the hole that let the first draft plan three uncompilable commits.
+The real gate is **Task 10**: the owner imports the bundle, runs `Debug ▸ Compile
+VBAProject`, and clicks every action plus the cancel and error paths. **Never claim
+this work is verified before Task 10 passes.** Task 9 builds the `PkgFixture`
+harness that makes Task 10 exercise a 75-button layout while only 8 real actions
+exist.
 
 ---
 
@@ -90,18 +142,18 @@ a 75-button layout while only 7 real actions exist.
 | File | Responsibility | Change |
 |---|---|---|
 | `spec/contract.md` | Language-neutral source of truth | Modify — v1.1.0 → v1.2.0 |
-| `src/core/Core.bas` | Engine: manifest API, Setup renderer, panel builder | Modify — all of Tasks 2–7 |
-| `src/packages/PkgFixture.bas` | Throwaway 75-action layout harness | Create (Task 8), delete (Task 10) |
+| `src/core/Core.bas` | Engine: manifest API, Setup renderer, panel builder | Modify — Tasks 2–8 |
+| `src/packages/PkgFixture.bas` | Throwaway 75-action layout harness | Create (Task 9), delete (Task 11) |
 | `build/build.ps1` | Bundle + structural gates | Modify — exclude fixtures from the default bundle |
-| `docs/code-map.md` | Symbol index | Regenerate (Task 10) |
-| `CHANGELOG.md`, `TODOS.md`, `VERSION` | Release docs | Modify (Task 10) |
+| `docs/code-map.md` | Symbol index | Regenerate (Task 11) |
+| `CHANGELOG.md`, `TODOS.md`, `VERSION` | Release docs | Modify (Task 11) |
 
 `Core.bas` is 1927 lines and already sectioned 1–7. Every change below lands inside
 an existing section — no restructuring, and no new file. Read it **in slices via
 `docs/code-map.md`**, never whole.
 
 **Line anchors drift.** Every `Core.bas:NNN` in this plan is measured against the
-file as of commit `514f6f4` (1927 lines), *before* any task has landed. Tasks 2–7
+file as of commit `514f6f4` (1927 lines), *before* any task has landed. Tasks 2–8
 each insert code, so from Task 3 onward the anchors are approximate. Locate the
 target by **procedure name** — grep `docs/code-map.md`, or grep `Core.bas` directly
 — and treat the number as a hint about which section you are in. Do not edit by
@@ -120,8 +172,9 @@ conform to this text, not the reverse.
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: the normative definitions of `category`, `usedBy`, `enabled`, the
-  auto-layout rule, and the reserved `Macros Home` name that Tasks 2–7 implement.
+- Produces: the normative definitions of `category`, `usedBy`, three-state
+  `availability`, capacity-packed auto-layout, the always-generated index, the
+  config schema marker, and the reserved names that Tasks 2–8 implement.
 
 - [ ] **Step 1: Bump the version header**
 
@@ -141,70 +194,122 @@ In the JSON block at `spec/contract.md:46-57`, add one line after `"help"`:
   "usedBy":   "string — optional comma-separated action ids this field configures (v1.2.0)"
 ```
 
-Then add this bullet to the list that follows (after the `default`/`defaults[]`
-bullet at `:68-69`):
+Then add this bullet after the `default`/`defaults[]` bullet at `:68-69`:
 
 ```markdown
 - **`usedBy` (v1.2.0, optional).** A comma-separated list of action `id`s this
   field configures. A field that declares nothing is **package-wide** and always
-  renders in the working area. A field whose every named action is disabled (§6)
-  is **relegated, never omitted**: the engine still renders it, still stores it,
-  and still falls back to its default — it is simply moved into one collapsed
-  "settings for actions you haven't turned on" band at the end of the Setup
-  surface. An unrecognised id in `usedBy` counts as in-use, so a typo cannot make
-  a field unreachable.
+  renders in the working area. A field is relegated only when **every** action it
+  names is `off` (§6) — an action that is `chains-only` still runs, so it still
+  needs its settings. Relegated means **moved, never omitted**: the engine still
+  renders the field, still stores it, and still falls back to its default; it is
+  simply placed in one collapsed "settings for actions you haven't turned on" band
+  at the end of the Setup surface. An unrecognised id in `usedBy` counts as in-use,
+  so a typo cannot make a field unreachable.
   **Portability note:** collapsing is a presentation affordance (reference: Excel
   row outlining). A platform that cannot collapse MUST still render the band,
   visibly and last. Omitting the fields is non-conforming — it would force a
   second activate cycle and discard un-activated input.
 ```
 
-- [ ] **Step 3: Add `category` and `enabled` to §6**
+- [ ] **Step 3: Add `category` and `availability` to the §6 action table**
 
 In the action table at `spec/contract.md:188-193`, add two rows after `help`:
 
 ```markdown
-| `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on the generated index; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
-| `enabled` | Deployment config, not manifest data (v1.2.0): whether this action gets a **button**. Defaults to enabled. |
+| `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on the generated index and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
+| `availability` | Deployment config, not manifest data (v1.2.0): one of `button`, `chains-only`, `off`. Defaults to `button`. |
 ```
 
-- [ ] **Step 4: Add the enable + auto-layout semantics to §6**
+- [ ] **Step 4: Add the availability + layout semantics to §6**
 
 Insert after the "Grouping / layout (v1.1.0)" paragraph (`spec/contract.md:224`):
 
 ```markdown
-**Per-action enable (v1.2.0):** each action carries a deployment-level `enabled`
-flag, authored on the same engine-owned surface as the placement code (§5). It
-defaults to **enabled**, so a deployment that predates v1.2.0 is unchanged.
+**Per-action availability (v1.2.0):** each action carries a deployment-level
+`availability`, authored on the same engine-owned surface as the placement code
+(§5). It has exactly three values and defaults to `button`, so a deployment that
+predates v1.2.0 is unchanged.
 
-`enabled` controls **whether a button is drawn — not whether the action can run.**
-A disabled action:
-- draws no button on any page, and is excluded from the index counts;
-- **stays listed** on the authoring surface, so it never becomes undiscoverable;
-- remains a legal chain step and remains dispatchable by id. Hiding an action's
-  button so it is reachable *only* inside a chain is a supported configuration, so
-  a chain referencing a disabled action is reported as information, not an error.
+| Value | Button drawn | Runnable directly | Runnable as a chain step |
+|---|---|---|---|
+| `button` (default) | yes | yes | yes |
+| `chains-only` | no | **no** | yes |
+| `off` | no | **no** | **no** |
+
+- **`off` means off.** The engine MUST refuse to dispatch an `off` action, and
+  Finalize MUST **block activation** when any chain references one, naming the
+  chain. An implementation where a switched-off action still executes inside a
+  chain is non-conforming: a user who disables a destructive action and then
+  watches it run has been actively misled.
+- **`chains-only`** exists so "reachable only as part of a composed button" is an
+  explicit, authored state rather than a side effect of hiding something. A direct
+  dispatch of a `chains-only` id MUST be refused.
+- An action that is not `button` **stays listed** on the authoring surface, so it
+  never becomes undiscoverable. Only `off` relegates that action's fields (§2).
+- **An unrecognised value MUST block Finalize** and report the accepted values. It
+  MUST NOT fall back to `button` — a user who typed `of` meaning `off` would
+  otherwise be handed a live destructive button. A **blank** cell is not
+  unrecognised: it means "never set" and reads as `button`.
+- **Portability note:** the reference implementation presents the three values as a
+  validated dropdown on the authoring grid. A platform without cell validation
+  still parses the same three tokens and still blocks on anything else.
 
 **Auto-layout (v1.2.0) — supersedes the "no codes" clause of the v1.1.0 grouping
-rule above.** When **no** button anywhere carries a placement code, the engine
-distributes buttons automatically: one page per display `category`, in
-first-declaration order with the reserved `Chains` category last; each page fills a
-column to a fixed maximum before wrapping to the next column, and a category that
-exceeds the page's column capacity continues onto a numbered continuation page.
-Pages are titled by category. The v1.1.0 behaviour — a single default button page —
-is withdrawn: it does not survive contact with a large catalog, which is what this
+rule above.** When **no** button carries a placement code, the engine distributes
+buttons automatically. A page is a **capacity unit, not a category unit**:
+
+- a page holds up to **three category-headed columns**; a column holds up to
+  **eight** buttons, all of one category;
+- small categories therefore **share** a page;
+- a category needing more than one column takes consecutive columns, and a
+  category that does not fit in a page's remaining columns starts a new page
+  rather than straddling one — splitting a category across tabs destroys the
+  grouping that putting it in one place buys;
+- a category larger than a whole page continues onto further pages.
+
+The v1.1.0 behaviour — a single default button page holding everything — is
+withdrawn: it does not survive contact with a large catalog, which is what this
 version exists to support. **When any code is present the v1.1.0 rule is unchanged**
 and codes remain a complete override.
 
-**Generated index (v1.2.0):** the engine generates an index surface listing one
-entry per built page with its title, its enabled-action count, and a link to it,
-plus a link to the admin surface and a legend explaining the placement code and
-`enabled`. Every built page carries a persistent link back to the index and links
-to its previous/next page. Reference implementation: a `Macros Home` sheet; that
-name is **reserved** (§7).
+**Generated index (v1.2.0):** the engine **always** generates an index surface,
+even for a single page, so the workbook has one shape at every scale. It lists one
+entry per built page with its title, its button count and a link; a full **action
+catalog** (caption, description, and the page each button is on); a link to the
+admin surface; and a legend explaining the placement code and availability. Every
+built page carries a persistent link back to the index and links to its
+previous/next page. Reference implementation: a `Macros Home` sheet; that name is
+**reserved** (§7).
+
+**Description legibility (v1.2.0, normative for grid platforms):** an action's
+`help` text is displayed with its button and MUST NOT be clipped. Reference
+implementation: an unmerged cell-card grid — button anchored to a content cell,
+the description in the cell directly beneath it, that row auto-fitted. Merged
+cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
 ```
 
-- [ ] **Step 5: Reserve the index name in §7**
+- [ ] **Step 5: Add the config schema marker to §5**
+
+Insert after the "Engine-owned config (v1.1.0)" paragraph (`spec/contract.md:180`):
+
+```markdown
+**Config schema marker (v1.2.0, normative):** the engine writes a machine-owned
+schema-version token into the config store alongside the engine-owned blocks,
+outside any user-editable cell (reference: the hidden per-row id column, on the
+placement block's key row). Readers branch on that token, **never on a visible
+label** — a display header is presentation, is user-editable, and must never
+decide whether saved configuration is preserved or discarded.
+
+Migration is **fail-closed**. When the marker is absent the store predates v1.2.0
+and is read with the older column layout; every value recovered that way MUST be
+validated against its grammar (for placement, a valid code or `hide`), and any
+conflict — an unknown marker, or a recovered value that does not validate — MUST
+abort the rebuild with a report and leave the existing surface untouched. Silently
+rebuilding with blanks is non-conforming.
+```
+
+- [ ] **Step 6: Reserve the names in §7**
 
 Add after the `chain.*` reserved bullet (`spec/contract.md:234`):
 
@@ -214,43 +319,45 @@ Add after the `chain.*` reserved bullet (`spec/contract.md:234`):
   `Macros Home`. A platform substitutes its own index surface name.
 ```
 
-- [ ] **Step 6: Record the change in §10**
+- [ ] **Step 7: Record the change in §10**
 
-Append to `spec/contract.md` after the v1.1.0 bullet (`:351-354`):
+Append after the v1.1.0 bullet (`:351-354`):
 
 ```markdown
 - **v1.2.0 (additive):** adds the optional action `category` attribute, the
-  optional field `usedBy` attribute, the deployment-level per-action `enabled`
-  flag, the auto-layout rule for uncoded buttons, the generated index surface with
-  its back/previous/next navigation, and the reserved `Chains` category +
-  `Macros Home` name. No `key`, action `id`, kind, value encoding, or **action**
-  semantics changed, so v1.0.0/v1.1.0 configs remain valid and read as
-  all-actions-enabled. The one *behaviour* replaced is engine layout for the
-  uncoded case (single page → auto-distributed pages), which §10 does not classify
-  as breaking: it renames nothing and re-encodes nothing. Owner-approved in
-  `docs/designs/2026-07-24-finish-excel-design.md` §2.2.
+  optional field `usedBy` attribute, the three-state deployment-level
+  `availability` flag, the capacity-packed auto-layout rule for uncoded buttons,
+  the always-generated index surface with its navigation and action catalog, the
+  no-clipping rule for descriptions, the config schema marker with fail-closed
+  migration, and the reserved `Chains` category + `Macros Home` name. No `key`,
+  action `id`, kind, value encoding, or **action** semantics changed, so
+  v1.0.0/v1.1.0 configs remain valid and read as all-actions-`button`. The one
+  *behaviour* replaced is engine layout for the uncoded case (single page →
+  capacity-packed pages), which §10 does not classify as breaking: it renames
+  nothing and re-encodes nothing. Owner-approved; see the Provenance section of
+  `docs/designs/2026-07-24-finish-excel-track1-plan.md` for the three contested
+  calls and who lost them.
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add spec/contract.md
-git commit -m "spec: freeze contract v1.2.0 (category, usedBy, per-action enable, auto-layout)"
+git commit -m "spec: freeze contract v1.2.0 (category, usedBy, three-state availability, packed auto-layout)"
 ```
 
 ---
 
 ### Task 2: Manifest API — `category` on actions, `usedBy` on fields
 
-Pure additive plumbing: three optional arguments and one shared predicate. Nothing
-reads them yet, so this task changes no behaviour — which is exactly why it is its
-own reviewable step.
+Pure additive plumbing: four optional arguments and one shared predicate. Nothing
+reads them yet, so this task changes no behaviour — which is why it is its own
+reviewable step.
 
 **Files:**
 - Modify: `src/core/Core.bas:80-93` (`Core_AddSection`, `Core_AddField`),
   `:95-115` (`Core_AddList`, `Core_AddTable`), `:125-134` (`Core_AddAction`),
   `:136-155` (`NewField`)
-- Modify: `src/core/Core.bas:957-967` (`HasAdvanced` — see Task 4; **not** here)
 
 **Interfaces:**
 - Consumes: nothing.
@@ -259,12 +366,11 @@ own reviewable step.
   - `Core_AddList(reg, key, label, colHeader, [tier], [help], [usedBy])`
   - `Core_AddTable(reg, key, label, colHeaders, [tier], [help], [usedBy])`
   - `Core_AddAction(reg, actionId, caption, entryPoint, help, [category])`
-  - field dictionaries gain a `"usedBy"` key (lowercased, trimmed, possibly `""`)
-  - action dictionaries gain a `"category"` key (never empty — defaults to
-    `reg("name")`)
-  - `Private Function FieldInUse(f As Object, enab As Object) As Boolean`
+  - field dictionaries gain `"usedBy"` (lowercased, trimmed, possibly `""`)
+  - action dictionaries gain `"category"` (never empty — defaults to `reg("name")`)
+  - `Private Function FieldInUse(f As Object, availMap As Object) As Boolean`
 
-- [ ] **Step 1: Add `usedBy` to `NewField` and its four callers**
+- [ ] **Step 1: Add `usedBy` to `NewField`**
 
 Replace `src/core/Core.bas:136-155` (`NewField`) with:
 
@@ -308,9 +414,10 @@ End Sub
 ' "ADVANCED - most users can leave these as-is" band so regular users can stop
 ' after the simple fields. help is an optional plain-language note shown in grey
 ' under the field (pass via help:= to skip tier). usedBy is an optional
-' comma-separated list of action ids this field configures; a field that names
-' only disabled actions is moved into the collapsed band at the bottom of Setup
-' (never omitted - see Core_BuildSetup).
+' comma-separated list of action ids this field configures; a field whose every
+' named action is Off moves into the collapsed band at the bottom of Setup (never
+' omitted - see Core_BuildSetup). A "Chains only" action still runs, so it still
+' keeps its fields in the working area.
 Public Sub Core_AddField(reg As Object, ByVal key As String, ByVal label As String, _
                          ByVal kind As String, ByVal dflt As String, _
                          Optional ByVal tier As String = "simple", _
@@ -353,11 +460,12 @@ appending an eighth `Optional` leaves all 10 call sites in `PkgClean.bas` and
 Replace `src/core/Core.bas:125-134` with:
 
 ```vba
-' category is the DISPLAY grouping used by the generated index and the page
-' titles. It defaults to the package's display name, so an action that declares
-' nothing keeps today's grouping. It is deliberately decoupled from the module:
-' two packages may feed one category, and one package may span several, so a
-' future package split never moves a button in the user's mental model.
+' category is the DISPLAY grouping used by the generated index and by the column
+' headers on a button page. It defaults to the package's display name, so an
+' action that declares nothing keeps today's grouping. It is deliberately
+' decoupled from the module: two packages may feed one category, and one package
+' may span several, so a future package split never moves a button in the user's
+' mental model.
 Public Sub Core_AddAction(reg As Object, ByVal actionId As String, ByVal caption As String, _
                           ByVal entryPoint As String, ByVal help As String, _
                           Optional ByVal category As String = "")
@@ -374,20 +482,113 @@ Public Sub Core_AddAction(reg As Object, ByVal actionId As String, ByVal caption
 End Sub
 ```
 
-- [ ] **Step 4: Add the `FieldInUse` predicate**
+`FieldInUse` — which reads these `usedBy` values — deliberately lives in **Task 3**,
+not here: it calls `IsRunnable`, and a procedure calling one that does not exist yet
+is precisely the uncompilable commit this revision exists to prevent.
 
-Append at the end of section 1, immediately after `FindField` ends
+- [ ] **Step 4: Build and syntax-check**
+
+```bash
+pwsh build/build.ps1
+node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+```
+
+Expected: build PASSES (`Core + 2 package(s)`, no duplicate-procedure error, Sub
+and Function counts balanced, no module-level-declaration error) and the syntax
+check reports no errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/core/Core.bas
+git commit -m "feat(core): add optional action category and field usedBy to the manifest API"
+```
+
+---
+
+### Task 3: The Action Catalog block — three-state availability
+
+Turns the placement block into `Action | Availability | Page code`, adds the
+readers and the dropdown, filters `GatherButtons`, gates the dispatcher, and makes
+an `off` action inside a chain a **blocking** Finalize error.
+
+**Files:**
+- Modify: `src/core/Core.bas:36-57` (declarations — `CHAIN_CAT`, `AVAIL_*`)
+- Modify: `src/core/Core.bas:722-734` (`Core_Run` — direct-dispatch gate)
+- Modify: `src/core/Core.bas:645-700` (`RunAction` — `off` gate)
+- Modify: `src/core/Core.bas:1242-1266` (`RenderPlacementBlock`)
+- Modify: `src/core/Core.bas:1549-1567` (`GatherButtons`)
+- Modify: `src/core/Core.bas:1318-1396` (`ComposeReport`)
+
+**Interfaces:**
+- Consumes: `FieldInUse` (Task 2), `a("category")` (Task 2), `FindKeyRow`,
+  `NextKeyRow`, `CfgSheet`, `Yellow`, `BlockIntro` (pre-existing).
+- Produces:
+  - module constants `CHAIN_CAT`, `AVAIL_BUTTON`, `AVAIL_CHAIN`, `AVAIL_OFF`
+  - `Private Function ParseAvail(ByVal v As String) As String` — `""` = invalid
+  - `Private Function ReadAvailMap(ws As Worksheet) As Object` — id(lower) → token
+  - `Private Function AvailFor(availMap As Object, ByVal id As String) As String`
+  - `Private Function HasButton(availMap As Object, ByVal id As String) As Boolean`
+  - `Private Function IsRunnable(availMap As Object, ByVal id As String) As Boolean`
+  - `Private Function AvailLabel(ByVal token As String) As String`
+  - `Private Sub AvailDropdown(cell As Range)`
+  - `GatherButtons` items become **5**-element arrays:
+    `Array(id, caption, onAction, help, category)`
+
+- [ ] **Step 1: Add the constants to the declarations section**
+
+In `src/core/Core.bas`, immediately after the `PACKAGES_SHEET` line (`:40`), add:
+
+```vba
+Private Const CHAIN_CAT      As String = "Chains"      ' reserved display category for chain buttons
+
+' ---- per-action availability (contract v1.2.0) ----
+' Stored in the action catalog block as the display label ("Button" / "Chains
+' only" / "Off") and parsed to these tokens. Blank means never set and reads as
+' Button, which is what makes v0.4.0 a no-op for a v0.3.0 deployment.
+Private Const AVAIL_BUTTON   As String = "button"
+Private Const AVAIL_CHAIN    As String = "chains only"
+Private Const AVAIL_OFF      As String = "off"
+
+' Config-format marker, written into the hidden RID column of the action catalog's
+' key row - a machine-owned cell, not a visible header. A display label is
+' presentation, is user-editable, and must never decide whether saved config is
+' preserved or discarded (contract section 5). Task 4 builds the migration on it;
+' it is declared and read here because ReadAvailMap needs it.
+Private Const SCHEMA_VER     As String = "1.2"
+```
+
+These must stay in the declarations section above the first procedure —
+`build.ps1` fails on a `Const` after the first `Sub`.
+
+- [ ] **Step 2: Add the schema-marker reader and `FieldInUse`**
+
+Insert immediately before `ReadCodeMap`'s comment (`src/core/Core.bas:1268`):
+
+```vba
+' The config-format marker for the action catalog block, or "" when absent
+' (meaning the block predates v1.2.0 and its page code is one column to the left).
+' Deliberately NOT read from the visible header: RID_COL is hidden, is already how
+' this codebase carries identity, and is copied into _Config with everything else.
+Private Function BlockSchema(ws As Worksheet, ByVal keyRow As Long) As String
+    If ws Is Nothing Or keyRow < 1 Then Exit Function
+    BlockSchema = Trim(CStr(ws.Cells(keyRow, RID_COL).Value))
+End Function
+```
+
+And append at the end of section 1, immediately after `FindField` ends
 (`src/core/Core.bas:167`) and **before** the `'====` band that opens section 2:
 
 ```vba
-' Does this field belong to the user's working area, given the enabled map?
+' Does this field belong to the user's working area, given the availability map?
 ' True when the field is package-wide (no usedBy) or when at least ONE action it
-' names is enabled. False means "relegate to the collapsed band" - never "omit":
+' names is not Off - a "Chains only" action still runs, so it still needs its
+' settings. False means "relegate to the collapsed band" - never "omit":
 ' Core_BuildSetup deletes and re-seeds Setup from the FINALIZED _Config, so
 ' omitting a field would cost toggle -> Finalize -> rebuild -> fill -> Finalize
 ' and would discard anything typed but not yet finalized (design section 2.3).
 ' An unknown id counts as in-use, so a typo in usedBy cannot hide a field forever.
-Private Function FieldInUse(f As Object, enab As Object) As Boolean
+Private Function FieldInUse(f As Object, availMap As Object) As Boolean
     Dim ids() As String, i As Long, one As String
     FieldInUse = True
     If f Is Nothing Then Exit Function
@@ -397,110 +598,146 @@ Private Function FieldInUse(f As Object, enab As Object) As Boolean
     For i = LBound(ids) To UBound(ids)
         one = LCase(Trim(ids(i)))
         If Len(one) > 0 Then
-            If Not enab.Exists(one) Then Exit Function     ' unknown id -> in use
-            If enab(one) Then Exit Function                ' one enabled is enough
+            If Not availMap.Exists(one) Then Exit Function     ' unknown id -> in use
+            If IsRunnable(availMap, one) Then Exit Function    ' one runnable is enough
         End If
     Next i
     FieldInUse = False
 End Function
 ```
 
-- [ ] **Step 5: Build and syntax-check**
+- [ ] **Step 3: Add the availability parser and readers**
 
-```bash
-pwsh build/build.ps1
-node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
-```
-
-Expected: build PASSES (`Core + 2 package(s)`, no duplicate-procedure error, Sub and
-Function counts balanced, no module-level-declaration error) and the syntax check
-reports no errors. `FieldInUse` is currently uncalled — that is expected and is not
-a warning either tool emits.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/core/Core.bas
-git commit -m "feat(core): add optional action category and field usedBy to the manifest API"
-```
-
----
-
-### Task 3: The Action Catalog block — per-action enable
-
-Turns the existing placement block into `Action | Enabled | Page code`, adds the
-readers, filters `GatherButtons`, and carries the v0.3.0 migration shim. This is
-the task most likely to silently destroy a user's saved layout if the shim is
-skipped — read Step 3's comment before writing it.
-
-**Files:**
-- Modify: `src/core/Core.bas:36-57` (declarations — add `CHAIN_CAT`)
-- Modify: `src/core/Core.bas:1242-1266` (`RenderPlacementBlock`)
-- Modify: `src/core/Core.bas:1269-1289` (`ReadCodeMap`)
-- Modify: `src/core/Core.bas:1549-1567` (`GatherButtons`)
-- Modify: `src/core/Core.bas:1318-1396` (`ComposeReport` — soft reporting)
-
-**Interfaces:**
-- Consumes: `FieldInUse` (Task 2, not used here), `a("category")` (Task 2).
-- Produces:
-  - `Private Function ReadEnabledMap(ws As Worksheet) As Object` — id(lower) →
-    Boolean; empty dictionary when the block or the Enabled column is absent
-  - `Private Function EnabledFor(enab As Object, ByVal id As String) As Boolean` —
-    defaults True
-  - `Private Function HasEnabledColumn(ws As Worksheet, ByVal keyRow As Long) As Boolean`
-  - `Private Function IsYes(ByVal v As String) As Boolean`
-  - `GatherButtons` items become **5**-element arrays:
-    `Array(id, caption, onAction, help, category)`
-  - module constant `CHAIN_CAT As String = "Chains"`
-
-- [ ] **Step 1: Add the `CHAIN_CAT` constant to the declarations section**
-
-In `src/core/Core.bas`, immediately after the `PACKAGES_SHEET` line (`:40`), add:
+Insert immediately before `RenderPlacementBlock`'s comment block
+(`src/core/Core.bas:1240`):
 
 ```vba
-Private Const CHAIN_CAT      As String = "Chains"      ' reserved display category for chain buttons
+' Parse an Availability cell to one of the three tokens.
+'   ""      -> AVAIL_BUTTON  (never set; a pre-v0.4.0 config reads as today)
+'   invalid -> ""            (the CALLER must block Finalize)
+' It must never fall back to Button on an unrecognised string: a user who typed
+' "of" meaning "off" would otherwise be handed a live destructive button.
+' Yes/No are accepted as synonyms so a user upgrading from a two-value habit, or
+' one who types the obvious thing, is understood rather than blocked.
+Private Function ParseAvail(ByVal v As String) As String
+    Dim s As String
+    s = LCase(Trim(v))
+    If Len(s) = 0 Then ParseAvail = AVAIL_BUTTON: Exit Function
+    Select Case s
+        Case AVAIL_BUTTON, "yes", "y", "on", "true", "1"
+            ParseAvail = AVAIL_BUTTON
+        Case AVAIL_CHAIN, "chain only", "chains", "chain", "chains-only"
+            ParseAvail = AVAIL_CHAIN
+        Case AVAIL_OFF, "no", "n", "false", "0"
+            ParseAvail = AVAIL_OFF
+        Case Else
+            ParseAvail = ""                  ' unrecognised - caller must block
+    End Select
+End Function
+
+' The display label written into the cell for a token.
+Private Function AvailLabel(ByVal token As String) As String
+    Select Case token
+        Case AVAIL_CHAIN: AvailLabel = "Chains only"
+        Case AVAIL_OFF:   AvailLabel = "Off"
+        Case Else:        AvailLabel = "Button"
+    End Select
+End Function
+
+' id(lower) -> availability token, from the action catalog block. An id with no
+' row is simply absent, and AvailFor treats absence as Button - so a v0.3.0
+' _Config (which has no Availability column at all) reads as everything on.
+' An unrecognised cell is stored as "" so ComposeReport can block on it.
+Private Function ReadAvailMap(ws As Worksheet) As Object
+    Dim map As Object, kr As Long, nk As Long, i As Long, id As String
+    Set map = CreateObject("Scripting.Dictionary")
+    Set ReadAvailMap = map
+    If ws Is Nothing Then Exit Function
+    kr = FindKeyRow(ws, LAYOUT_KEY)
+    If kr = 0 Then Exit Function
+    If BlockSchema(ws, kr) <> SCHEMA_VER Then Exit Function   ' pre-v1.2 block: all Button
+    nk = NextKeyRow(ws, kr)
+    For i = kr + 1 To nk - 1
+        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+        If Len(id) > 0 Then map(LCase(id)) = ParseAvail(CStr(ws.Cells(i, VAL_COL + 1).Value))
+    Next i
+End Function
+
+' Button unless the map says otherwise. Absence means Button, deliberately: an
+' unconfigured or pre-v1.2 deployment must show every button.
+Private Function AvailFor(availMap As Object, ByVal id As String) As String
+    AvailFor = AVAIL_BUTTON
+    If availMap Is Nothing Then Exit Function
+    If availMap.Exists(LCase(id)) Then AvailFor = CStr(availMap(LCase(id)))
+End Function
+
+' Fail closed on both: an invalid token ("") draws no button and does not run.
+Private Function HasButton(availMap As Object, ByVal id As String) As Boolean
+    HasButton = (AvailFor(availMap, id) = AVAIL_BUTTON)
+End Function
+
+Private Function IsRunnable(availMap As Object, ByVal id As String) As Boolean
+    Dim t As String
+    t = AvailFor(availMap, id)
+    IsRunnable = (t = AVAIL_BUTTON Or t = AVAIL_CHAIN)
+End Function
+
+' A validated dropdown removes free-typing from a three-value column. Wrapped in
+' On Error Resume Next because validation can be refused (a protected sheet, some
+' locales) and a refused dropdown must not abort the build - ParseAvail still
+' guards the value, and Finalize still blocks on anything unrecognised.
+Private Sub AvailDropdown(cell As Range)
+    On Error Resume Next
+    cell.Validation.Delete
+    cell.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+                        Operator:=xlBetween, Formula1:="Button,Chains only,Off"
+    cell.Validation.IgnoreBlank = True
+    cell.Validation.InCellDropdown = True
+    On Error GoTo 0
+End Sub
 ```
 
-This must stay in the declarations section above the first procedure —
-`build.ps1` fails on a `Const` after the first `Sub`.
+- [ ] **Step 4: Rewrite `RenderPlacementBlock` as the Action Catalog**
 
-- [ ] **Step 2: Rewrite `RenderPlacementBlock` as the Action Catalog**
-
-Replace `src/core/Core.bas:1240-1266` (the comment block and the whole function)
-with:
+Replace `src/core/Core.bas:1240-1266` (comment + function) with:
 
 ```vba
 ' One row per registry action: hidden id in RID_COL, "caption [id]" (grey) in C, a
-' yellow Yes/No Enabled cell in D, a yellow Page-code cell in E. Prior answers are
-' preserved from CfgSheet() by id. Disabled actions STAY listed here - that is the
-' owner's hard requirement: turning a button off must never make the action
-' undiscoverable.
+' yellow Availability cell with a validated dropdown in D, a yellow Page-code cell
+' in E. Prior answers are preserved from CfgSheet() by id. Unavailable actions STAY
+' listed here - that is the owner's hard requirement: turning a button off must
+' never make the action undiscoverable.
 Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
-    Dim prior As Object, priorEnab As Object, reg As Object, a As Object, id As String
-    r = BlockIntro(ws, r, "Action catalog  -  turn actions on or off, and place them on pages", _
-                   "Enabled: Yes draws a button, No hides it (the action stays listed here, and a " & _
-                   "Chain can still run it). Page code: leave every code blank for the automatic " & _
-                   "layout; fill in even one and codes take over - number = page, letters = " & _
-                   "column (e.g. 1A). Type  hide  to leave one button off a manual layout.")
+    Dim prior As Object, priorAvail As Object, reg As Object, a As Object, id As String
+    r = BlockIntro(ws, r, "Action catalog  -  what each action is available as, and where it goes", _
+                   "Availability: 'Button' shows a button; 'Chains only' hides the button but a " & _
+                   "Chain can still run it; 'Off' hides it and stops it running anywhere. " & _
+                   "Page code: leave every code blank for the automatic layout; fill in even one " & _
+                   "and codes take over - number = page, letters = column (e.g. 1A). " & _
+                   "Type  hide  to leave one button off a manual layout.")
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
-    ws.Cells(r, VAL_COL + 1).Value = "Enabled"
+    ws.Cells(r, VAL_COL + 1).Value = "Availability"
     ws.Cells(r, VAL_COL + 2).Value = "Page code"
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
+    ' The machine-owned schema marker, in the hidden id column of the key row -
+    ' NOT in the visible header. See Task 4 / contract section 5.
+    ws.Cells(r, RID_COL).Value = SCHEMA_VER
     r = r + 1
 
     Set prior = ReadCodeMap(CfgSheet())            ' preserve prior codes by id
-    Set priorEnab = ReadEnabledMap(CfgSheet())     ' preserve prior on/off by id
+    Set priorAvail = ReadAvailMap(CfgSheet())      ' preserve prior availability by id
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
             id = CStr(a("id"))
             ws.Cells(r, VAL_COL).Value = CStr(a("caption")) & " [" & id & "]"
             ws.Cells(r, VAL_COL).Font.Color = RGB(90, 90, 90)
             ws.Cells(r, RID_COL).Value = id
-            ws.Cells(r, VAL_COL + 1).Value = IIf(EnabledFor(priorEnab, id), "Yes", "No")
+            ws.Cells(r, VAL_COL + 1).Value = AvailLabel(AvailFor(priorAvail, id))
             If prior.Exists(LCase(id)) Then ws.Cells(r, VAL_COL + 2).Value = prior(LCase(id))
             Yellow ws.Cells(r, VAL_COL + 1)
             Yellow ws.Cells(r, VAL_COL + 2)
+            AvailDropdown ws.Cells(r, VAL_COL + 1)
             r = r + 1
         Next a
     Next reg
@@ -508,126 +745,29 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
 End Function
 ```
 
-The `Enabled` cell is written as literal `"Yes"`/`"No"` text, **not** as the
-contract's `bool` kind — §3 reserves `bool` for its first *field* use, and this is
-a column on an engine-owned block, not a field.
-
-- [ ] **Step 3: Add the readers and the v0.3.0 migration shim**
-
-Insert immediately after the new `RenderPlacementBlock` (before the `ReadCodeMap`
-comment at what was `:1268`):
-
-```vba
-' The v0.3.0 catalog block was "Action | Page code" with the code in VAL_COL + 1.
-' v0.4.0 is "Action | Enabled | Page code" with the code in VAL_COL + 2. A _Config
-' written by a v0.3.0 Finalize still carries the OLD shape, so the header cell -
-' which Finalize copies along with everything else - decides which column holds
-' the code. Without this shim, upgrading reads blanks out of the old sheet and the
-' next rebuild silently discards the user's entire manual layout.
-Private Function HasEnabledColumn(ws As Worksheet, ByVal keyRow As Long) As Boolean
-    HasEnabledColumn = (LCase(Trim(CStr(ws.Cells(keyRow, VAL_COL + 1).Value))) = "enabled")
-End Function
-
-' Tolerant read of an Enabled cell. Blank is handled by the caller (blank = Yes);
-' here anything not recognisably negative counts as Yes, so a user typing "y",
-' "TRUE" or "on" gets what they meant instead of a silently hidden button.
-Private Function IsYes(ByVal v As String) As Boolean
-    Dim s As String
-    s = LCase(Trim(v))
-    IsYes = Not (s = "no" Or s = "n" Or s = "false" Or s = "0" Or s = "off")
-End Function
-
-' id(lower) -> Boolean from the Enabled column of the action catalog block. An id
-' with no row, a blank cell, or a pre-v0.4.0 block with no Enabled column at all
-' is absent from the map, and EnabledFor treats absence as ENABLED - so upgrading
-' a v0.3.0 workbook changes nothing the user sees.
-Private Function ReadEnabledMap(ws As Worksheet) As Object
-    Dim map As Object, kr As Long, nk As Long, i As Long, id As String, cell As String
-    Set map = CreateObject("Scripting.Dictionary")
-    Set ReadEnabledMap = map
-    If ws Is Nothing Then Exit Function
-    kr = FindKeyRow(ws, LAYOUT_KEY)
-    If kr = 0 Then Exit Function
-    If Not HasEnabledColumn(ws, kr) Then Exit Function      ' pre-v0.4.0: all enabled
-    nk = NextKeyRow(ws, kr)
-    For i = kr + 1 To nk - 1
-        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
-        If Len(id) > 0 Then
-            cell = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
-            If Len(cell) = 0 Then
-                map(LCase(id)) = True
-            Else
-                map(LCase(id)) = IsYes(cell)
-            End If
-        End If
-    Next i
-End Function
-
-' Enabled unless the map says otherwise. Absence means enabled, deliberately: an
-' unconfigured or pre-v0.4.0 deployment must show every button.
-Private Function EnabledFor(enab As Object, ByVal id As String) As Boolean
-    EnabledFor = True
-    If enab Is Nothing Then Exit Function
-    If enab.Exists(LCase(id)) Then EnabledFor = enab(LCase(id))
-End Function
-```
-
-- [ ] **Step 4: Shift `ReadCodeMap` onto the code column, via the shim**
-
-Replace `src/core/Core.bas:1269-1289` (`ReadCodeMap`) with:
-
-```vba
-' id(lower) -> code, merging the action catalog block and the chains block.
-Private Function ReadCodeMap(ws As Worksheet) As Object
-    Dim map As Object, kr As Long, nk As Long, i As Long, id As String, codeCol As Long
-    Dim chains As Collection, ch As Object
-    Set map = CreateObject("Scripting.Dictionary")
-    Set ReadCodeMap = map
-    If ws Is Nothing Then Exit Function
-    ' actions
-    kr = FindKeyRow(ws, LAYOUT_KEY)
-    If kr > 0 Then
-        ' v0.4.0 inserted Enabled between Action and Page code; an older _Config
-        ' still has the code one column left. See HasEnabledColumn.
-        If HasEnabledColumn(ws, kr) Then
-            codeCol = VAL_COL + 2
-        Else
-            codeCol = VAL_COL + 1
-        End If
-        nk = NextKeyRow(ws, kr)
-        For i = kr + 1 To nk - 1
-            id = Trim(CStr(ws.Cells(i, RID_COL).Value))
-            If Len(id) > 0 Then map(LCase(id)) = Trim(CStr(ws.Cells(i, codeCol).Value))
-        Next i
-    End If
-    ' chains
-    Set chains = ReadChains(ws)
-    For Each ch In chains
-        If Len(CStr(ch("id"))) > 0 Then map(LCase(CStr(ch("id")))) = CStr(ch("code"))
-    Next ch
-End Function
-```
-
-The chains block is untouched: its Page code was already at `VAL_COL + 2`, which is
-now the same column as the catalog's — a happy consequence, not a coincidence to
-rely on.
+Note `AvailFor(priorAvail, id)` returns `AVAIL_BUTTON` for an id that was invalid
+in the prior config only because `ReadAvailMap` stored `""` and `AvailFor` returns
+the raw stored value — which for `""` is `""`, and `AvailLabel("")` yields
+`"Button"`. That is deliberate: the rebuild **repairs** an invalid cell to the safe
+default rather than propagating it, and Finalize would have blocked before that
+config was ever activated.
 
 - [ ] **Step 5: Filter `GatherButtons` and carry the category**
 
-Replace `src/core/Core.bas:1547-1567` (the comment and `GatherButtons`) with:
+Replace `src/core/Core.bas:1547-1567` (comment + `GatherButtons`) with:
 
 ```vba
 ' Each item: Array(id, caption, onAction, help, category). Actions from the
 ' registry, chains from activated config. This is the SINGLE funnel for both, so
-' the disabled-action filter lives here and nowhere else. Admin buttons are never
-' in this list - they live on the Setup Menu tab.
+' the availability filter lives here and nowhere else. Admin buttons are never in
+' this list - they live on the Setup Menu tab.
 Private Function GatherButtons() As Collection
     Dim out As New Collection, reg As Object, a As Object, chains As Collection, ch As Object
-    Dim onAct As String, enab As Object
-    Set enab = ReadEnabledMap(CfgSheet())
+    Dim onAct As String, availMap As Object
+    Set availMap = ReadAvailMap(CfgSheet())
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
-            If EnabledFor(enab, CStr(a("id"))) Then
+            If HasButton(availMap, CStr(a("id"))) Then
                 onAct = "'Core_Run " & Chr(34) & CStr(a("id")) & Chr(34) & "'"
                 out.Add Array(CStr(a("id")), CStr(a("caption")), onAct, _
                               CStr(a("help")), CStr(a("category")))
@@ -646,83 +786,297 @@ Private Function GatherButtons() As Collection
 End Function
 ```
 
-A chain is never filtered by the Enabled column — it has no such column, and a
-chain is an explicit user authoring act.
+A chain is never filtered by availability — it has no such column, and a chain is
+an explicit user authoring act.
 
-- [ ] **Step 6: Report disabled actions in `ComposeReport` — softly**
+- [ ] **Step 6: Gate the dispatcher**
 
-In `src/core/Core.bas`, inside `ComposeReport`, add to the `Dim` block (after the
-`Dim ch2 As Object, actIds As Object, seenIds As Object, cid As String` line at
-`:1323`):
+Replace `src/core/Core.bas:722-734` (`Core_Run`) with:
 
 ```vba
-    Dim enab As Object, offList As String, offInChain As String, nOff As Long
+' The single public dispatch entry. Resolves an action id or a reserved chain.* id.
+' A DIRECT invocation of anything not available as a button is refused here: with
+' the button gone the only ways to arrive are a stale shape or Alt+F8, and neither
+' should be able to run something the user switched off. Chain steps do not pass
+' through here - Core_RunChain calls RunAction, which independently refuses Off.
+Public Sub Core_Run(ByVal actionId As String)
+    Dim res As Object, availMap As Object, t As String
+    If IsChainId(actionId) Then Core_RunChain actionId: Exit Sub
+    Set availMap = ReadAvailMap(CfgSheet())
+    t = AvailFor(availMap, actionId)
+    If t <> AVAIL_BUTTON Then
+        If t = AVAIL_CHAIN Then
+            MsgBox "'" & actionId & "' is set to 'Chains only' on the Setup tab, so it " & _
+                   "runs only as a step inside a Chain." & vbCrLf & vbCrLf & _
+                   "Change its Availability to 'Button' to run it on its own.", _
+                   vbInformation, "Not available on its own"
+        Else
+            MsgBox "'" & actionId & "' is switched Off on the Setup tab." & vbCrLf & vbCrLf & _
+                   "Change its Availability to run it.", vbExclamation, "Action is off"
+        End If
+        Exit Sub
+    End If
+    Set res = RunAction(actionId, False)
+    If Not res("found") And res("errNumber") = 0 Then
+        MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
+    ElseIf Not res("ok") And Not res("reported") Then
+        MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
+               "#" & res("errNumber") & "  " & res("errText"), vbExclamation, "Macro Error"
+    End If
+End Sub
 ```
 
-Then insert this block immediately **before** the `If AnyCode(map) Then` line
-(`:1388`):
+Then in `RunAction` (`src/core/Core.bas:645`), immediately after the
+`res("reported") = False` line and **before** `On Error GoTo StepFail`, insert the
+defence-in-depth gate that covers the chain path too:
 
 ```vba
-    ' Disabled actions: informational, never structural. Enabled controls whether a
-    ' BUTTON is drawn, not whether the action can run - hiding a button so the
-    ' action is reachable only inside a chain is a supported configuration, so a
-    ' chain step pointing at a disabled action is reported, not blocked.
-    Set enab = ReadEnabledMap(ws)
+    ' Defence in depth: Finalize blocks a chain that references an Off action, so
+    ' this should be unreachable through a validated config. It exists because
+    ' "switched off but it ran anyway" is the one failure mode of this feature
+    ' that a finance user cannot recover from.
+    If Not IsRunnable(ReadAvailMap(CfgSheet()), actionId) Then
+        res("found") = True
+        res("ok") = False
+        res("errNumber") = 0
+        res("errText") = "Action '" & actionId & "' is switched Off on the Setup tab."
+        Set RunAction = res
+        Exit Function
+    End If
+```
+
+- [ ] **Step 7: Make an `off` action in a chain a BLOCKING error**
+
+In `ComposeReport`, add to the `Dim` block (after the
+`Dim ch2 As Object, actIds As Object, seenIds As Object, cid As String` line):
+
+```vba
+    Dim availMap As Object, offList As String, badAvail As String
+    Dim chainOnly As String, nOff As Long, t As String
+```
+
+Then insert immediately **before** the `If AnyCode(map) Then` line:
+
+```vba
+    ' Availability. An unrecognised cell and an Off action used by a chain are both
+    ' STRUCTURAL - they block activation. "Chains only" is reported for confidence,
+    ' not as a problem: it is an authored state, not an accident.
+    Set availMap = ReadAvailMap(ws)
     For Each regX In BuildRegistry()
         For Each aX In regX("actions")
-            If Not EnabledFor(enab, CStr(aX("id"))) Then
+            t = AvailFor(availMap, CStr(aX("id")))
+            If Len(t) = 0 Then
+                badAvail = badAvail & "  - " & CStr(aX("id")) & vbCrLf
+                structural = structural + 1
+            ElseIf t = AVAIL_OFF Then
                 nOff = nOff + 1
                 offList = offList & "  - " & CStr(aX("caption")) & " [" & CStr(aX("id")) & "]" & vbCrLf
+            ElseIf t = AVAIL_CHAIN Then
+                chainOnly = chainOnly & "  - " & CStr(aX("caption")) & " [" & CStr(aX("id")) & "]" & vbCrLf
             End If
         Next aX
     Next regX
+    If Len(badAvail) > 0 Then
+        s = s & vbCrLf & "UNRECOGNISED Availability (use Button, Chains only, or Off):" & _
+            vbCrLf & badAvail
+    End If
     For Each ch In chains
         For Each stepId In ch("steps")
             If ids.Exists(LCase(CStr(stepId))) Then
-                If Not EnabledFor(enab, CStr(stepId)) Then
-                    offInChain = offInChain & "  - " & CStr(ch("label")) & _
-                                 " uses " & CStr(stepId) & vbCrLf
+                If AvailFor(availMap, CStr(stepId)) = AVAIL_OFF Then
+                    s = s & "OFF ACTION IN CHAIN: '" & CStr(ch("label")) & "' uses " & _
+                        CStr(stepId) & ", which is switched Off." & vbCrLf
+                    structural = structural + 1
                 End If
             End If
         Next stepId
     Next ch
     If nOff > 0 Then
-        s = s & vbCrLf & "TURNED OFF (" & nOff & " action(s), no button drawn; " & _
-            "their settings collapse to the bottom of Setup):" & vbCrLf & offList
+        s = s & vbCrLf & "OFF (" & nOff & " action(s); no button, cannot run, and their " & _
+            "settings collapse to the bottom of Setup):" & vbCrLf & offList
     End If
-    If Len(offInChain) > 0 Then
-        s = s & vbCrLf & "Chains that use a turned-off action (they will still run it):" & _
-            vbCrLf & offInChain
+    If Len(chainOnly) > 0 Then
+        s = s & vbCrLf & "CHAINS ONLY (no button; runs only inside a Chain):" & vbCrLf & chainOnly
     End If
 ```
 
 `regX`, `aX`, `ch`, `stepId` and `ids` are already declared and already used
 earlier in this function; reusing them after their earlier loops is fine.
 
-- [ ] **Step 7: Build and syntax-check**
+- [ ] **Step 8: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: PASS on both. `Yellow`, `BlockIntro`, `FindKeyRow`, `NextKeyRow` and
-`CfgSheet` are all pre-existing.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/core/Core.bas
-git commit -m "feat(core): per-action enable on the action catalog block, with v0.3.0 config migration"
+git commit -m "feat(core): three-state per-action availability (Button / Chains only / Off)"
 ```
 
 ---
 
-### Task 4: Collapse settings for switched-off actions
+### Task 4: Fail-closed config migration
+
+The data-safety task, and its own reviewable unit: a reviewer could reject this
+while approving Task 3. Inserting `Availability` moved the page code from column D
+to column E. A v0.3.0 `_Config` still has it in D, and getting this wrong silently
+destroys a user's hand-built layout.
+
+**Files:**
+- Modify: `src/core/Core.bas:36-57` (declarations — `SCHEMA_VER`)
+- Modify: `src/core/Core.bas:1269-1289` (`ReadCodeMap`)
+- Modify: `src/core/Core.bas:820-916` (`Core_BuildSetup` — the abort path)
+
+**Interfaces:**
+- Consumes: `FindKeyRow`, `NextKeyRow`, `CfgSheet`, `ParseCode`, `RID_COL`.
+- Consumes additionally: `SCHEMA_VER` and `BlockSchema` (both from Task 3).
+- Produces:
+  - `Private Function ConfigSchemaStatus(ByRef detail As String) As String` —
+    `"none"` | `"ok"` | `"legacy"` | `"unknown"` | `"invalid"`
+
+`SCHEMA_VER` and `BlockSchema` already landed in Task 3 (`ReadAvailMap` needs
+them). This task builds the migration that uses them.
+
+- [ ] **Step 1: Branch `ReadCodeMap` on the marker**
+
+Replace `src/core/Core.bas:1269-1289` (`ReadCodeMap`) with:
+
+```vba
+' id(lower) -> code, merging the action catalog block and the chains block.
+' v0.4.0 inserted Availability between Action and Page code, so a pre-v1.2 block
+' keeps its code one column to the left. Callers that could DESTROY the recovered
+' values (Core_BuildSetup) must consult ConfigSchemaStatus first; this reader is
+' permissive on purpose so the report can describe what it found.
+Private Function ReadCodeMap(ws As Worksheet) As Object
+    Dim map As Object, kr As Long, nk As Long, i As Long, id As String, codeCol As Long
+    Dim chains As Collection, ch As Object
+    Set map = CreateObject("Scripting.Dictionary")
+    Set ReadCodeMap = map
+    If ws Is Nothing Then Exit Function
+    ' actions
+    kr = FindKeyRow(ws, LAYOUT_KEY)
+    If kr > 0 Then
+        If BlockSchema(ws, kr) = SCHEMA_VER Then
+            codeCol = VAL_COL + 2
+        Else
+            codeCol = VAL_COL + 1                ' legacy (v0.3.0) layout
+        End If
+        nk = NextKeyRow(ws, kr)
+        For i = kr + 1 To nk - 1
+            id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+            If Len(id) > 0 And LCase(id) <> LCase(SCHEMA_VER) Then _
+                map(LCase(id)) = Trim(CStr(ws.Cells(i, codeCol).Value))
+        Next i
+    End If
+    ' chains
+    Set chains = ReadChains(ws)
+    For Each ch In chains
+        If Len(CStr(ch("id"))) > 0 Then map(LCase(CStr(ch("id")))) = CStr(ch("code"))
+    Next ch
+End Function
+```
+
+The chains block is untouched: its page code was already at `VAL_COL + 2`, which is
+now the same column as the catalog's.
+
+- [ ] **Step 2: Add the fail-closed status check**
+
+Insert immediately after `BlockSchema`:
+
+```vba
+' Classify the ACTIVATED config before anything destructive touches the Setup
+' sheet. Returns one of:
+'   "none"    - no config yet (a fresh workbook); nothing to lose
+'   "ok"      - written by this version
+'   "legacy"  - pre-v1.2, every recovered page code validates; safe to migrate
+'   "invalid" - pre-v1.2, but a recovered code does not parse; DO NOT rebuild
+'   "unknown" - a marker this build does not recognise (a NEWER version wrote it)
+' detail is filled with a human-readable explanation for the last two.
+Private Function ConfigSchemaStatus(ByRef detail As String) As String
+    Dim ws As Worksheet, kr As Long, ver As String, nk As Long, i As Long
+    Dim id As String, code As String, tn As Long, cx As Long, cl As String
+    detail = ""
+    Set ws = CfgSheet()
+    If ws Is Nothing Then ConfigSchemaStatus = "none": Exit Function
+    kr = FindKeyRow(ws, LAYOUT_KEY)
+    If kr = 0 Then ConfigSchemaStatus = "none": Exit Function
+    ver = BlockSchema(ws, kr)
+    If ver = SCHEMA_VER Then ConfigSchemaStatus = "ok": Exit Function
+    If Len(ver) > 0 Then
+        detail = "The saved configuration was written by a newer version of this " & _
+                 "toolkit (format '" & ver & "'; this build understands '" & SCHEMA_VER & "')."
+        ConfigSchemaStatus = "unknown"
+        Exit Function
+    End If
+    ' Legacy: validate every page code recovered from the OLD column before we let
+    ' anything overwrite the sheet holding them.
+    nk = NextKeyRow(ws, kr)
+    For i = kr + 1 To nk - 1
+        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+        If Len(id) > 0 Then
+            code = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
+            If Len(code) > 0 And LCase(code) <> "hide" Then
+                If Not ParseCode(code, tn, cx, cl) Then
+                    detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
+                End If
+            End If
+        End If
+    Next i
+    If Len(detail) > 0 Then
+        detail = "These saved page codes could not be read from the older " & _
+                 "configuration format:" & vbCrLf & detail
+        ConfigSchemaStatus = "invalid"
+    Else
+        ConfigSchemaStatus = "legacy"
+    End If
+End Function
+```
+
+- [ ] **Step 3: Abort `Core_BuildSetup` before it destroys anything**
+
+In `Core_BuildSetup`, insert at the very top — **before** the
+`If Core_SheetExists(SETUP_SHEET) Then` block that deletes the sheet:
+
+```vba
+    Dim schemaState As String, schemaDetail As String
+    schemaState = ConfigSchemaStatus(schemaDetail)
+    If schemaState = "unknown" Or schemaState = "invalid" Then
+        MsgBox schemaDetail & vbCrLf & vbCrLf & _
+               "Nothing has been changed. Rebuilding the Setup tab now would " & _
+               "discard those saved answers, so it has been stopped." & vbCrLf & vbCrLf & _
+               "Note them down (or restore a backup of this workbook) before " & _
+               "rebuilding.", vbExclamation, "Create Setup Tab"
+        Exit Sub
+    End If
+```
+
+This is the fail-closed requirement: on any ambiguity the existing surface is left
+exactly as it was, and the user is told what could not be read.
+
+- [ ] **Step 4: Build and syntax-check**
+
+```bash
+pwsh build/build.ps1
+node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/core/Core.bas
+git commit -m "feat(core): machine-owned config schema marker with fail-closed v0.3.0 migration"
+```
+
+---
+
+### Task 5: Collapse settings for switched-off actions
 
 The design's most-likely-to-be-wrongly-"fixed" decision. Every field still renders
-and still saves; fields belonging only to disabled actions move into one outline
-band at the bottom.
+and still saves; fields belonging only to `Off` actions move into one outline band.
 
 **Files:**
 - Modify: `src/core/Core.bas:820-916` (`Core_BuildSetup`)
@@ -730,13 +1084,13 @@ band at the bottom.
 - Modify: `src/core/Core.bas:957-967` (`HasAdvanced`)
 
 **Interfaces:**
-- Consumes: `FieldInUse` (Task 2), `ReadEnabledMap` (Task 3), `CfgSheet`,
-  `SectionHeader`, `TintRow`, `RenderField` (all pre-existing).
+- Consumes: `FieldInUse` (Task 2), `ReadAvailMap` (Task 3), `SectionHeader`,
+  `TintRow`, `RenderField`.
 - Produces:
-  - `RenderTier(ws, r, reg, tier, showSections, bannerText, enab, wantInUse)`
-  - `HasAdvanced(reg, enab)` — now "has an **in-use** advanced field"
-  - `Private Function HasAnyTier(reg As Object, enab As Object, ByVal wantInUse As Boolean) As Boolean`
-  - `Private Function RenderOffBand(ws, r, enab, ByRef bandFirst As Long, ByRef bandLast As Long) As Long`
+  - `RenderTier(ws, r, reg, tier, showSections, bannerText, availMap, wantInUse)`
+  - `HasAdvanced(reg, availMap)` — now "has an **in-use** advanced field"
+  - `Private Function HasAnyTier(reg, availMap, ByVal wantInUse As Boolean) As Boolean`
+  - `Private Function RenderOffBand(ws, r, availMap, ByRef bandFirst, ByRef bandLast) As Long`
   - `Private Sub CollapseRows(ws As Worksheet, ByVal firstRow As Long, ByVal lastRow As Long)`
 
 - [ ] **Step 1: Add the in-use filter to `RenderTier`**
@@ -751,7 +1105,7 @@ Replace `src/core/Core.bas:918-944` (comment + `RenderTier`) with:
 ' the fields render flat under the one band.
 Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
                             ByVal tier As String, ByVal showSections As Boolean, _
-                            ByVal bannerText As String, enab As Object, _
+                            ByVal bannerText As String, availMap As Object, _
                             ByVal wantInUse As Boolean) As Long
     Dim f As Object, pending As String, havePending As Boolean
     For Each f In reg("fields")
@@ -763,7 +1117,7 @@ Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
                 havePending = True
             End If
         ElseIf CStr(f("tier")) = tier Then
-            If FieldInUse(f, enab) = wantInUse Then
+            If FieldInUse(f, availMap) = wantInUse Then
                 If showSections And havePending Then
                     r = SectionHeader(ws, r, pending)
                     havePending = False
@@ -782,14 +1136,14 @@ Replace `src/core/Core.bas:957-967` (`HasAdvanced`) with:
 
 ```vba
 ' Is there an advanced field that belongs in the working area? An advanced field
-' whose actions are all turned off goes to the off band instead, so drawing the
-' ADVANCED header for it would leave an empty band.
-Private Function HasAdvanced(reg As Object, enab As Object) As Boolean
+' whose actions are all Off goes to the off band instead, so drawing the ADVANCED
+' header for it would leave an empty band.
+Private Function HasAdvanced(reg As Object, availMap As Object) As Boolean
     Dim f As Object
     For Each f In reg("fields")
         If f("kind") <> "section" Then
             If CStr(f("tier")) = "advanced" Then
-                If FieldInUse(f, enab) Then
+                If FieldInUse(f, availMap) Then
                     HasAdvanced = True
                     Exit Function
                 End If
@@ -800,11 +1154,11 @@ End Function
 
 ' Does this package have ANY non-section field on the requested side of the
 ' in-use split? Used to skip both an empty ADVANCED band and an empty off band.
-Private Function HasAnyTier(reg As Object, enab As Object, ByVal wantInUse As Boolean) As Boolean
+Private Function HasAnyTier(reg As Object, availMap As Object, ByVal wantInUse As Boolean) As Boolean
     Dim f As Object
     For Each f In reg("fields")
         If f("kind") <> "section" Then
-            If FieldInUse(f, enab) = wantInUse Then
+            If FieldInUse(f, availMap) = wantInUse Then
                 HasAnyTier = True
                 Exit Function
             End If
@@ -815,46 +1169,45 @@ End Function
 
 - [ ] **Step 3: Add `RenderOffBand` and `CollapseRows`**
 
-Insert both immediately after the new `HasAnyTier`, before `RenderScalar`
-(`src/core/Core.bas:969`):
+Insert immediately after `HasAnyTier`, before `RenderScalar`:
 
 ```vba
-' Every field whose usedBy names only turned-off actions, from every package,
-' collected under one band at the very bottom of the field area and collapsed with
-' Excel's row outline.
+' Every field whose usedBy names only Off actions, from every package, collected
+' under one band at the very bottom of the field area and collapsed with Excel's
+' row outline.
 '
 ' They are RENDERED, never omitted. DO NOT "improve" this to skip them:
 ' Core_BuildSetup deletes and re-seeds Setup from the FINALIZED _Config, so
 ' omit-unless-enabled costs toggle -> Finalize -> rebuild -> fill -> Finalize and
 ' discards anything typed but not yet finalized (design section 2.3, which
-' deliberately overrides all three /deliberate panelists).
+' deliberately overrides all three panelists of an earlier review round).
 '
-' Returns the next free row; reports the collapsible row span through bandFirst /
+' Returns the next free row; reports the collapsible span through bandFirst /
 ' bandLast so the caller can group AFTER its AutoFit pass. bandFirst = 0 means
 ' nothing was relegated and no band was drawn.
-Private Function RenderOffBand(ws As Worksheet, ByVal r As Long, enab As Object, _
+Private Function RenderOffBand(ws As Worksheet, ByVal r As Long, availMap As Object, _
                                ByRef bandFirst As Long, ByRef bandLast As Long) As Long
     Dim reg As Object, any As Boolean
     bandFirst = 0
     bandLast = 0
     RenderOffBand = r
     For Each reg In BuildRegistry()
-        If HasAnyTier(reg, enab, False) Then any = True
+        If HasAnyTier(reg, availMap, False) Then any = True
     Next reg
     If Not any Then Exit Function              ' nothing off: draw no band at all
 
     r = SectionHeader(ws, r, "SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON")
-    r = TintRow(ws, r, "These belong to actions whose Enabled is No in the action catalog " & _
-                "above. They are kept and still saved, so nothing you typed is lost - turn " & _
-                "the action back on and they move up into the main list. Click the + in the " & _
-                "left margin to open this section.", _
+    r = TintRow(ws, r, "These belong to actions set to 'Off' in the action catalog above. " & _
+                "They are kept and still saved, so nothing you typed is lost - set the " & _
+                "action back to 'Button' and they move up into the main list. Click the + " & _
+                "in the left margin to open this section.", _
                 9, False, True, RGB(90, 70, 120))
     bandFirst = r
     For Each reg In BuildRegistry()
-        If HasAnyTier(reg, enab, False) Then
+        If HasAnyTier(reg, availMap, False) Then
             r = TintRow(ws, r, CStr(reg("name")), 10, True, False, RGB(90, 70, 120))
-            r = RenderTier(ws, r, reg, "simple", False, UCase(CStr(reg("name"))), enab, False)
-            r = RenderTier(ws, r, reg, "advanced", False, UCase(CStr(reg("name"))), enab, False)
+            r = RenderTier(ws, r, reg, "simple", False, UCase(CStr(reg("name"))), availMap, False)
+            r = RenderTier(ws, r, reg, "advanced", False, UCase(CStr(reg("name"))), availMap, False)
         End If
     Next reg
     bandLast = r - 1
@@ -877,21 +1230,20 @@ End Sub
 
 - [ ] **Step 4: Wire it into `Core_BuildSetup`**
 
-In `src/core/Core.bas`, add to `Core_BuildSetup`'s declarations (replacing
-`:821-822`):
+Add to `Core_BuildSetup`'s declarations:
 
 ```vba
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
-    Dim firstFieldRow As Long, enab As Object, bandFirst As Long, bandLast As Long
+    Dim firstFieldRow As Long, availMap As Object, bandFirst As Long, bandLast As Long
 ```
 
-Replace the package loop and what follows, `src/core/Core.bas:868-893`, with:
+Replace the package loop and what follows (`src/core/Core.bas:868-893`) with:
 
 ```vba
-    ' The enabled map comes from the ACTIVATED config, so a rebuild reflects the
-    ' last Finalize. A fresh workbook has no _Config, so the map is empty and
-    ' EnabledFor reports everything enabled - the v0.4.0 default.
-    Set enab = ReadEnabledMap(CfgSheet())
+    ' The availability map comes from the ACTIVATED config, so a rebuild reflects
+    ' the last Finalize. A fresh workbook has no _Config, so the map is empty and
+    ' AvailFor reports Button for everything - the v0.4.0 default.
+    Set availMap = ReadAvailMap(CfgSheet())
 
     firstFieldRow = r
     Dim banner As String
@@ -899,10 +1251,10 @@ Replace the package loop and what follows, `src/core/Core.bas:868-893`, with:
         nPkgs = nPkgs + 1
         banner = UCase(CStr(reg("name")))
         r = SectionHeader(ws, r, banner)
-        r = RenderTier(ws, r, reg, "simple", True, banner, enab, True)   ' simple, in use
-        If HasAdvanced(reg, enab) Then
+        r = RenderTier(ws, r, reg, "simple", True, banner, availMap, True)
+        If HasAdvanced(reg, availMap) Then
             r = SectionHeader(ws, r, "ADVANCED  -  most users can leave these as-is")
-            r = RenderTier(ws, r, reg, "advanced", False, banner, enab, True)
+            r = RenderTier(ws, r, reg, "advanced", False, banner, availMap, True)
         End If
         r = r + 1
     Next reg
@@ -912,7 +1264,7 @@ Replace the package loop and what follows, `src/core/Core.bas:868-893`, with:
     ' The off band goes BELOW Compose on purpose: the action catalog is where the
     ' user turns things on and off, so it must never sit under a collapsed section.
     r = r + 1
-    r = RenderOffBand(ws, r, enab, bandFirst, bandLast)
+    r = RenderOffBand(ws, r, availMap, bandFirst, bandLast)
 
     ' Sentinel key in column A. The config readers bound a list/table block by
     ' scanning column A for the next non-blank cell; without a trailing key the
@@ -932,7 +1284,7 @@ Replace the package loop and what follows, `src/core/Core.bas:868-893`, with:
     CollapseRows ws, bandFirst, bandLast
 ```
 
-Everything from `ws.Columns("A").Font.Color = ...` (`:895`) onward is unchanged.
+Everything from `ws.Columns("A").Font.Color = ...` onward is unchanged.
 
 - [ ] **Step 5: Build and syntax-check**
 
@@ -941,87 +1293,85 @@ pwsh build/build.ps1
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: PASS. Confirm the two `RenderTier` call sites in the package loop and the
-two in `RenderOffBand` all pass **8** arguments, and that the only `HasAdvanced`
-call passes **2** — a missing argument here is a compile error Excel catches but
-neither of these tools does.
+Confirm the two `RenderTier` call sites in the package loop and the two in
+`RenderOffBand` all pass **8** arguments, and the only `HasAdvanced` call passes
+**2** — a missing argument here is a compile error Excel catches but neither of
+these tools does.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/core/Core.bas
-git commit -m "feat(core): collapse settings belonging only to turned-off actions"
+git commit -m "feat(core): collapse settings belonging only to Off actions"
 ```
 
 ---
 
-### Task 5: Panel layout structure — one page model, descriptions, navigation
+### Task 6: The card-grid page renderer — dead but compilable
 
-Replaces the `pages` dictionary with a `layout` dictionary that carries titles and
-column headers, tightens the geometry, draws each button's description, and adds
-the Home/Previous/Next row. Auto-layout itself is Task 6; this task keeps the
-existing manual-code behaviour and only changes how a page is drawn.
+Everything needed to draw a page, added **without touching the entry point**. The
+existing `BuildSinglePanel` / `BuildGroupedPanels` path still runs after this task,
+so the commit compiles and the workbook behaves exactly as v0.3.0 did. Task 8 does
+the cutover.
 
 **Files:**
 - Modify: `src/core/Core.bas:42-48` (geometry constants + `HOME_SHEET`)
 - Modify: `src/core/Core.bas:1723-1730` (`AddToPage`)
-- Modify: `src/core/Core.bas:1732-1764` (`RenderPage`)
-- Modify: `src/core/Core.bas:1636-1665` (`BuildGroupedPanels` → `BuildManualLayout`)
-- Modify: `src/core/Core.bas:1517-1536` (`Core_BuildControlPanel`)
-- Delete: `src/core/Core.bas:1577-1630` (`BuildSinglePanel`)
+- Add: after `AddToPage` — the layout setters, the card grid, `RenderPage`,
+  `RenderNavRow`, `NavLink`, `RenderAllPages`, `BuildManualLayout`,
+  `LabelManualPages`
 
 **Interfaces:**
-- Consumes: 5-element button arrays from `GatherButtons` (Task 3), `AnyCode`,
-  `ParseCode`, `IndexToCol`, `SortedKeys`, `EnsurePanelSheet`, `AddBtn`, `AddText`
-  (all pre-existing).
-- Produces the `layout` structure every later task builds on:
-  `layout(tabNum)` → dictionary with
-  `"title"` (String), `"cols"` (colIx → Collection of button arrays),
-  `"hdrs"` (colIx → String).
-  Plus:
-  - `Private Sub AddToPage(layout, tabNum, colIx, btn)` — creates the page lazily
-  - `Private Sub SetPageTitle(layout, tabNum, title)`
-  - `Private Sub SetColHeader(layout, tabNum, colIx, hdr)`
-  - `Private Sub BuildManualLayout(buttons, codeMap, layout)` (files buttons only)
-  - `Private Sub LabelManualPages(layout)`
-  - `Private Sub RenderAllPages(layout)`
-  - `Private Function RenderPage(layout, tabNum, prevSheet, nextSheet) As Worksheet`
-  - `Private Sub RenderNavRow(ws, prevSheet, nextSheet)`
-  - `Private Sub NavLink(cell As Range, caption As String, sheetName As String)`
-  - `Private Function PageButtonCount(page As Object) As Long`
+- Consumes: 5-element button arrays (Task 3), `SortedKeys`, `EnsurePanelSheet`,
+  `AddBtn`, `ParseCode`, `IndexToCol`.
+- Produces the `layout` structure everything downstream uses:
+  `layout(tabNum)` → dictionary with `"title"` (String),
+  `"cols"` (colIx → Collection of button arrays), `"hdrs"` (colIx → String).
+  Plus: `AddToPage`, `SetPageTitle`, `SetColHeader`, `PageButtonCount`,
+  `SetupCardGrid`, `CardCol`, `AddBtnInCell`, `FitDescRows`, `RenderPage`,
+  `RenderNavRow`, `NavLink`, `RenderAllPages`, `BuildManualLayout`,
+  `LabelManualPages`.
 
-- [ ] **Step 1: Tighten the geometry and add `HOME_SHEET`**
+- [ ] **Step 1: Replace the geometry constants**
 
 Replace `src/core/Core.bas:42-48` with:
 
 ```vba
-' ---- grouped control-panel geometry (ported from MacroLayout; Task 9) ----
+' ---- button page geometry (v0.4.0: an unmerged CELL-CARD grid) ----
+' Cards live in worksheet columns B, D and F, with C and E as narrow gutters.
+' NOTHING on this grid may be merged: Excel's AutoFit ignores merged cells (which
+' is why the Setup band rows have to estimate their height instead), and AutoFit
+' on the description rows is the entire reason a description cannot clip.
 Private Const PANEL_BASE As String = "Macros "   ' grouped output tabs: "Macros 1", "Macros 2"...
 Private Const HOME_SHEET As String = "Macros Home"  ' generated index; RESERVED name (contract 7)
-Private Const BTN_W   As Double = 210
-Private Const BTN_H   As Double = 26             ' tightened in v0.4.0 (was 30)
-Private Const DESC_H  As Double = 24             ' description textbox under each button
-Private Const ROW_GAP As Double = 4              ' tightened in v0.4.0 (was 8)
-Private Const COL_GAP As Double = 16             ' tightened in v0.4.0 (was 24)
-Private Const HDR_H   As Double = 20             ' tightened in v0.4.0 (was 22)
-Private Const AUTO_COL_MAX   As Long = 8         ' buttons per column before wrapping
-Private Const AUTO_PAGE_COLS As Long = 3         ' columns per page before a new page
+Private Const CARD_COLS   As Long = 3            ' card columns per page -> B, D, F
+Private Const CARD_W      As Double = 30         ' content column width, in characters
+Private Const GUTTER_W    As Double = 3          ' spacer column width, in characters
+Private Const CARD_HDR_ROW As Long = 5           ' category header row; cards start at 6
+Private Const BTN_H      As Double = 26
+Private Const BTN_ROW_H  As Double = 30          ' button row height (BTN_H + padding)
+Private Const DESC_MIN_H As Double = 24          ' floor after AutoFit
+Private Const DESC_MAX_H As Double = 60          ' ceiling: ~5 lines at 9pt in a 30-char column,
+                                                 ' which clears the longest shipped help string
+Private Const AUTO_COL_MAX As Long = 8           ' buttons per card column before a new column
 ```
 
-Button pitch becomes `BTN_H + DESC_H + ROW_GAP` = 54pt, so a full 8-button column
-is 432pt plus the header — one screen without scrolling.
+`BTN_W`, `ROW_GAP`, `COL_GAP` and `HDR_H` are no longer used by the card grid. Leave
+them in place for now — `BuildGroupedPanels` and the old `RenderPage` still
+reference them until Task 8 deletes those, and removing a constant they use would
+break this commit's compile.
 
-- [ ] **Step 2: Replace `AddToPage` and add the two setters**
+- [ ] **Step 2: Replace `AddToPage` and add the layout helpers**
 
 Replace `src/core/Core.bas:1722-1730` (comment + `AddToPage`) with:
 
 ```vba
 ' The layout structure every panel builder fills and RenderPage consumes:
-'   layout(tabNum)("title")        page title            (String)
+'   layout(tabNum)("title")        page title             (String)
 '   layout(tabNum)("cols")(colIx)  buttons in that column (Collection of Arrays)
-'   layout(tabNum)("hdrs")(colIx)  that column's header  (String)
-' A page is created lazily by the first button filed onto it, so callers must
-' file a button BEFORE setting its title or column header.
+'   layout(tabNum)("hdrs")(colIx)  that column's header   (String)
+' A page is created lazily by the first button filed onto it, so callers must file
+' a button BEFORE setting its title or column header.
 Private Sub AddToPage(layout As Object, ByVal tabNum As Long, ByVal colIx As Long, ByVal btn As Variant)
     Dim page As Object, cols As Object, items As Collection
     If Not layout.Exists(tabNum) Then
@@ -1054,69 +1404,123 @@ Private Function PageButtonCount(page As Object) As Long
         PageButtonCount = PageButtonCount + cols(k).Count
     Next k
 End Function
+
+' B/D/F carry content, C/E are gutters. Column A stays narrow as a margin.
+Private Sub SetupCardGrid(ws As Worksheet)
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = CARD_W
+    ws.Columns("C").ColumnWidth = GUTTER_W
+    ws.Columns("D").ColumnWidth = CARD_W
+    ws.Columns("E").ColumnWidth = GUTTER_W
+    ws.Columns("F").ColumnWidth = CARD_W
+End Sub
+
+' Card content columns are B, D, F -> 2, 4, 6. slot is 1-based; 0 means off-grid.
+Private Function CardCol(ByVal slot As Long) As Long
+    If slot < 1 Or slot > CARD_COLS Then Exit Function
+    CardCol = slot * 2
+End Function
+
+' Anchor a button to a cell so it lines up with the description directly beneath.
+Private Sub AddBtnInCell(ws As Worksheet, ByVal nm As String, ByVal cap As String, _
+                         ByVal action As String, anchor As Range)
+    AddBtn ws, nm, cap, action, anchor.Left, anchor.Top + 1, anchor.Width, BTN_H
+End Sub
+
+' AutoFit each description row, then clamp. AutoFit works here ONLY because
+' nothing on the card grid is merged. The clamp is two-sided: the floor keeps
+' one-line cards from looking broken next to three-line neighbours, and the
+' ceiling stops one runaway string from pushing the page off screen.
+Private Sub FitDescRows(ws As Worksheet, ByVal firstDescRow As Long, ByVal lastRow As Long)
+    Dim r As Long
+    For r = firstDescRow To lastRow Step 2
+        ws.Rows(r).AutoFit
+        If ws.Rows(r).RowHeight < DESC_MIN_H Then ws.Rows(r).RowHeight = DESC_MIN_H
+        If ws.Rows(r).RowHeight > DESC_MAX_H Then ws.Rows(r).RowHeight = DESC_MAX_H
+    Next r
+End Sub
 ```
 
-- [ ] **Step 3: Rewrite `RenderPage`, and add the nav row**
+- [ ] **Step 3: Add the card-grid `RenderPage` and the nav row**
 
-Replace `src/core/Core.bas:1732-1764` (comment + `RenderPage`) with:
+`RenderPage` already exists (the point-positioned version). **Rename the existing
+one to `RenderPageLegacy`** so this commit still compiles with the old path
+intact, and update its single call site inside `BuildGroupedPanels`. Then add:
 
 ```vba
-' Draw one "Macros N" page: nav row, page title, per-column headers, and the
-' stacked buttons each followed by its description.
+' Draw one "Macros N" page as an unmerged card grid: nav row, page title, one
+' category-headed card column per layout column, each button followed by its
+' description in the cell below it.
 Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
                             ByVal prevSheet As String, ByVal nextSheet As String) As Worksheet
     Dim panel As Worksheet, page As Object, cols As Object, hdrs As Object
-    Dim colKeys As Variant, ci As Long, colIx As Long, items As Collection
-    Dim ii As Long, it As Variant
-    Dim leftBase As Double, topBase As Double, colLeft As Double, topPos As Double, hdr As String
+    Dim colKeys As Variant, si As Long, slot As Long, colIx As Long
+    Dim items As Collection, ii As Long, it As Variant
+    Dim cc As Long, bRow As Long, dRow As Long, lastRow As Long, hdr As String
     Set page = layout(tabNum)
     Set cols = page("cols")
     Set hdrs = page("hdrs")
     Set panel = EnsurePanelSheet(PANEL_BASE & tabNum, False)
-    ' Buttons float in points over the grid, so these narrow widths only affect
-    ' the nav cells in row 1 - they do not move Range("B5").Left, which depends on
-    ' column A alone.
-    panel.Columns("B:D").ColumnWidth = 15
+    SetupCardGrid panel
     RenderNavRow panel, prevSheet, nextSheet
+    With panel.Cells(3, 2)
+        .Value = CStr(page("title"))
+        .Font.Size = 15
+        .Font.Bold = True
+        .Font.Color = RGB(31, 78, 121)
+    End With
 
-    AddText panel, panel.Range("B3").Left, panel.Range("B3").Top, 520, 24, _
-            CStr(page("title")), 15, True, RGB(31, 78, 121)
-    leftBase = panel.Range("B5").Left
-    topBase = panel.Range("B5").Top
     colKeys = SortedKeys(cols)
-    For ci = LBound(colKeys) To UBound(colKeys)
-        colIx = CLng(colKeys(ci))
-        colLeft = leftBase + ci * (BTN_W + COL_GAP)          ' ci is 0-based across sorted columns
+    lastRow = CARD_HDR_ROW + 1
+    slot = 0
+    For si = LBound(colKeys) To UBound(colKeys)
+        colIx = CLng(colKeys(si))
+        slot = slot + 1
+        cc = CardCol(slot)
+        If cc = 0 Then GoTo NextSlot        ' more columns than card slots: never draw off-grid
         Set items = cols(colIx)
         hdr = ""
         If hdrs.Exists(colIx) Then hdr = CStr(hdrs(colIx))
-        If Len(hdr) > 0 Then _
-            AddText panel, colLeft, topBase, BTN_W, HDR_H, hdr, 11, True, RGB(90, 90, 90)
-        topPos = topBase + HDR_H + ROW_GAP
+        If Len(hdr) > 0 Then
+            With panel.Cells(CARD_HDR_ROW, cc)
+                .Value = hdr
+                .Font.Bold = True
+                .Font.Size = 11
+                .Font.Color = RGB(54, 32, 100)
+                .Interior.Color = RGB(221, 217, 240)
+            End With
+        End If
         For ii = 1 To items.Count
             it = items(ii)
-            AddBtn panel, "b" & tabNum & "_" & colIx & "_" & ii, CStr(it(1)), CStr(it(2)), _
-                   colLeft, topPos, BTN_W, BTN_H
-            ' The description goes in a textbox under its own button, not in a cell
-            ' as the old single-tab layout did: columns here are positioned in
-            ' points, so column 2 onward has no cell to line up with.
-            AddText panel, colLeft + 4, topPos + BTN_H, BTN_W - 8, DESC_H, _
-                    CStr(it(4)), 8, False, RGB(110, 110, 110)
-            topPos = topPos + BTN_H + DESC_H + ROW_GAP
+            bRow = CARD_HDR_ROW + 1 + (ii - 1) * 2
+            dRow = bRow + 1
+            panel.Rows(bRow).RowHeight = BTN_ROW_H
+            AddBtnInCell panel, "b" & tabNum & "_" & colIx & "_" & ii, _
+                         CStr(it(1)), CStr(it(2)), panel.Cells(bRow, cc)
+            With panel.Cells(dRow, cc)
+                .Value = CStr(it(3))
+                .Font.Size = 9
+                .Font.Color = RGB(110, 110, 110)
+                .WrapText = True
+                .VerticalAlignment = xlTop
+            End With
+            If dRow > lastRow Then lastRow = dRow
         Next ii
-    Next ci
+NextSlot:
+    Next si
+    FitDescRows panel, CARD_HDR_ROW + 2, lastRow
     Set RenderPage = panel
 End Function
 
 ' Row 1: a persistent Home link in a fixed position on every page, plus Previous /
-' Next. Cells rather than textboxes, because a cell hyperlink needs no shape
+' Next. Cells rather than shapes, because a cell hyperlink needs no shape
 ' bookkeeping and EnsurePanelSheet's Cells.Clear removes it cleanly on rebuild.
 ' ASCII arrows only - build.ps1 writes UTF-8 with no BOM on the assumption that
-' the content is ASCII, so a real arrow glyph would be an import hazard.
+' the SOURCE is ASCII, so a literal arrow glyph in the .bas is an import hazard.
 Private Sub RenderNavRow(ws As Worksheet, ByVal prevSheet As String, ByVal nextSheet As String)
     NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
-    If Len(prevSheet) > 0 Then NavLink ws.Cells(1, 3), "< Previous", prevSheet
-    If Len(nextSheet) > 0 Then NavLink ws.Cells(1, 4), "Next >", nextSheet
+    If Len(prevSheet) > 0 Then NavLink ws.Cells(1, 4), "< Previous", prevSheet
+    If Len(nextSheet) > 0 Then NavLink ws.Cells(1, 6), "Next >", nextSheet
     ws.Rows(1).RowHeight = 18
 End Sub
 
@@ -1129,16 +1533,29 @@ Private Sub NavLink(cell As Range, ByVal caption As String, ByVal sheetName As S
     cell.Font.Size = 10
     cell.Font.Bold = True
 End Sub
+
+' Render every page in page order, threading each one's Previous/Next sheet names
+' so the nav row is drawn in the same pass.
+Private Sub RenderAllPages(layout As Object)
+    Dim tabKeys As Variant, ti As Long, prevNm As String, nextNm As String
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        prevNm = ""
+        nextNm = ""
+        If ti > LBound(tabKeys) Then prevNm = PANEL_BASE & CLng(tabKeys(ti - 1))
+        If ti < UBound(tabKeys) Then nextNm = PANEL_BASE & CLng(tabKeys(ti + 1))
+        RenderPage layout, CLng(tabKeys(ti)), prevNm, nextNm
+    Next ti
+End Sub
 ```
 
-Note the removal of `panel.Range("A1").Select` from `RenderPage`. `Range.Select`
-raises 1004 unless its sheet is active; the old code only survived because
-`DeletePanels` forced every panel to be freshly `Worksheets.Add`ed (which
-activates). Selection is now done once, on Home, in Task 7.
+Nav links go in B, D and F — the card content columns — so they sit under the
+grid's own alignment instead of needing their own widths.
 
-- [ ] **Step 4: Convert `BuildGroupedPanels` into `BuildManualLayout` + `LabelManualPages`**
+- [ ] **Step 4: Add the manual-layout filer and labeller**
 
-Replace `src/core/Core.bas:1632-1665` (comment + `BuildGroupedPanels`) with:
+Add after `RenderAllPages`. These do **not** replace `BuildGroupedPanels` yet;
+they are the new-model equivalents that Task 8 switches to.
 
 ```vba
 ' Manual layout: file each button onto a "Macros N" page by its code. Blank code
@@ -1167,8 +1584,8 @@ NextBtn:
 End Sub
 
 ' Title and head a hand-built layout. Column headers keep the code-based names the
-' user chose. A page is titled by category only when EVERY button on it agrees -
-' a hand-built page may deliberately mix categories, and guessing a title for a
+' user chose. A page is titled by category only when EVERY button on it agrees - a
+' hand-built page may deliberately mix categories, and guessing a title for a
 ' mixed page would be worse than the generic one.
 Private Sub LabelManualPages(layout As Object)
     Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
@@ -1206,40 +1623,319 @@ Private Sub LabelManualPages(layout As Object)
         If Not mixed And Len(cat) > 0 Then SetPageTitle layout, tabNum, cat
     Next ti
 End Sub
+```
 
-' Render every page in page order, threading each one's Previous/Next sheet names
-' so the nav row is drawn in the same pass.
-Private Sub RenderAllPages(layout As Object)
-    Dim tabKeys As Variant, ti As Long, prevNm As String, nextNm As String
+- [ ] **Step 5: Build and syntax-check**
+
+```bash
+pwsh build/build.ps1
+node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+```
+
+Expected: PASS, and **the bundle still behaves exactly as v0.3.0** — the entry
+point is untouched and all of the above is unreachable. Confirm the old
+`RenderPage` → `RenderPageLegacy` rename left exactly one call site:
+
+```bash
+grep -n "RenderPageLegacy\|RenderPage " src/core/Core.bas
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/core/Core.bas
+git commit -m "feat(core): add the unmerged cell-card page renderer and nav (not yet wired)"
+```
+
+---
+
+### Task 7: Capacity-packed auto-layout and `Macros Home` — still not wired
+
+**Files:**
+- Add: `src/core/Core.bas` — after `LabelManualPages`
+
+**Interfaces:**
+- Consumes: `AddToPage` / `SetPageTitle` / `SetColHeader` / `PageButtonCount` /
+  `NavLink` (Task 6), `CHAIN_CAT`, `CARD_COLS`, `AUTO_COL_MAX`, `ADMIN_SHEET`.
+- Produces: `BuildAutoLayout`, `CategoryOrder`, `LabelAutoPages`, `BuildHomePage`,
+  `HomeCatalog`, `HomeLegend`, `HomeLine`.
+
+- [ ] **Step 1: Write the capacity-packed auto-layout**
+
+```vba
+' Auto-layout: no button carries a page code, so distribute by display category.
+' A page is a CAPACITY unit, not a category unit: up to CARD_COLS category-headed
+' columns per page, up to AUTO_COL_MAX buttons per column. Small categories share
+' a page. A category that does not fit in the remaining columns starts a new page
+' rather than straddling one - splitting a category across tabs destroys the
+' grouping that putting it in one place buys. A category larger than a whole page
+' continues onto further pages. Replaces the pre-v0.4.0 single-"Macros"-tab
+' default (contract v1.2.0), which did not survive contact with a large catalog.
+Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
+    Dim cats As Object, seen As New Collection, order As Collection
+    Dim e As Variant, cat As String, ci As Long, items As Collection
+    Dim needCols As Long, tabNum As Long, slotsUsed As Long
+    Dim taken As Long, k As Long, n As Long, firstColOfCat As Boolean
+
+    Set cats = CreateObject("Scripting.Dictionary")
+    For Each e In buttons
+        cat = Trim(CStr(e(4)))
+        If Len(cat) = 0 Then cat = "Other"       ' defensive: Core_AddAction never emits blank
+        If Not cats.Exists(cat) Then
+            cats.Add cat, New Collection
+            seen.Add cat                         ' first-appearance order, stable
+        End If
+        cats(cat).Add e
+    Next e
+
+    Set order = CategoryOrder(cats, seen)
+    tabNum = 1
+    slotsUsed = 0
+    For ci = 1 To order.Count
+        cat = CStr(order(ci))
+        Set items = cats(cat)
+        needCols = -Int(-items.Count / AUTO_COL_MAX)        ' ceiling division
+        ' Start a fresh page rather than straddle, unless this category is bigger
+        ' than a whole page (in which case straddling is unavoidable).
+        If needCols <= CARD_COLS And slotsUsed > 0 And slotsUsed + needCols > CARD_COLS Then
+            tabNum = tabNum + 1
+            slotsUsed = 0
+        End If
+        taken = 0
+        firstColOfCat = True
+        For k = 1 To needCols
+            If slotsUsed >= CARD_COLS Then
+                tabNum = tabNum + 1
+                slotsUsed = 0
+            End If
+            slotsUsed = slotsUsed + 1
+            For n = 1 To AUTO_COL_MAX
+                taken = taken + 1
+                If taken > items.Count Then Exit For
+                AddToPage layout, tabNum, slotsUsed, items(taken)
+            Next n
+            If firstColOfCat Then
+                SetColHeader layout, tabNum, slotsUsed, cat
+                firstColOfCat = False
+            Else
+                SetColHeader layout, tabNum, slotsUsed, cat & " (cont.)"
+            End If
+        Next k
+    Next ci
+    LabelAutoPages layout
+End Sub
+
+' First-appearance order, with the reserved Chains category moved to the end: a
+' composed button reads as a summary of the actions above it, so it belongs last.
+Private Function CategoryOrder(cats As Object, seen As Collection) As Collection
+    Dim out As New Collection, i As Long, cat As String
+    Set CategoryOrder = out
+    For i = 1 To seen.Count
+        cat = CStr(seen(i))
+        If LCase(cat) <> LCase(CHAIN_CAT) Then out.Add cat
+    Next i
+    For i = 1 To seen.Count
+        cat = CStr(seen(i))
+        If LCase(cat) = LCase(CHAIN_CAT) Then out.Add cat
+    Next i
+End Function
+
+' A packed page may hold up to CARD_COLS categories, so title it by what is
+' actually on it: one category -> its name; several -> the distinct names joined.
+Private Sub LabelAutoPages(layout As Object)
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim hdrs As Object, hk As Variant, seen As Object, title As String, one As String
     tabKeys = SortedKeys(layout)
     For ti = LBound(tabKeys) To UBound(tabKeys)
-        prevNm = ""
-        nextNm = ""
-        If ti > LBound(tabKeys) Then prevNm = PANEL_BASE & CLng(tabKeys(ti - 1))
-        If ti < UBound(tabKeys) Then nextNm = PANEL_BASE & CLng(tabKeys(ti + 1))
-        RenderPage layout, CLng(tabKeys(ti)), prevNm, nextNm
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set hdrs = page("hdrs")
+        Set seen = CreateObject("Scripting.Dictionary")
+        title = ""
+        For Each hk In hdrs.Keys
+            one = Replace(CStr(hdrs(hk)), " (cont.)", "")
+            If Not seen.Exists(LCase(one)) Then
+                seen(LCase(one)) = True
+                title = title & IIf(Len(title) > 0, "   |   ", "") & one
+            End If
+        Next hk
+        If Len(title) > 70 Then title = Left$(title, 67) & "..."
+        If Len(title) > 0 Then SetPageTitle layout, tabNum, title
     Next ti
 End Sub
 ```
 
-- [ ] **Step 5: Delete `BuildSinglePanel`**
+- [ ] **Step 2: Write `Macros Home`**
 
-Delete `src/core/Core.bas:1577-1630` in full — the comment `' Legacy layout: one
-"Macros" tab, ...` through the `End Sub` after the "Macros tab built with" MsgBox.
-The single-tab default is withdrawn by contract v1.2.0, and its only unique
-contribution — writing each button's description — is now in `RenderPage`.
+```vba
+' The generated index - ALWAYS built, even for a single page, so the workbook has
+' one shape at every scale (owner's call). Three parts: a page summary, the full
+' action catalog, and the legend. Built last and activated, so any rebuild lands
+' the user here.
+Private Sub BuildHomePage(layout As Object, ByVal totalButtons As Long)
+    Dim ws As Worksheet, r As Long, tabKeys As Variant, ti As Long, tabNum As Long
+    Dim page As Object
+    Set ws = EnsurePanelSheet(HOME_SHEET, True)
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = 40
+    ws.Columns("C").ColumnWidth = 9
+    ws.Columns("D").ColumnWidth = 62
+    ws.Columns("E").ColumnWidth = 16
 
-Keep `MACRO_SHEET` (`:38`) and `DeleteLegacyPanel` (`:1539-1545`): they are how an
-upgrading workbook's stale `Macros` tab gets removed.
+    With ws.Range("B2")
+        .Value = "Macro Toolkit"
+        .Font.Size = 18
+        .Font.Bold = True
+        .Font.Color = RGB(31, 78, 121)
+    End With
+    With ws.Range("B3")
+        .Value = "Pick a page below, or find an action in the catalog. Every page has a  << Home  link back here."
+        .Font.Italic = True
+    End With
 
-- [ ] **Step 6: Rewire `Core_BuildControlPanel`**
+    r = 5
+    ws.Cells(r, 2).Value = "PAGE"
+    ws.Cells(r, 3).Value = "BUTTONS"
+    ws.Cells(r, 4).Value = "CATEGORIES ON IT"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 217, 240)
+    End With
+    r = r + 1
+
+    tabKeys = SortedKeys(layout)
+    If UBound(tabKeys) < LBound(tabKeys) Then
+        ws.Cells(r, 2).Value = "No actions are available as buttons yet."
+        ws.Cells(r, 2).Font.Italic = True
+        r = r + 1
+    Else
+        For ti = LBound(tabKeys) To UBound(tabKeys)
+            tabNum = CLng(tabKeys(ti))
+            Set page = layout(tabNum)
+            NavLink ws.Cells(r, 2), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+            ws.Cells(r, 3).Value = PageButtonCount(page)
+            ws.Cells(r, 4).Value = CStr(page("title"))
+            ws.Cells(r, 4).Font.Color = RGB(90, 90, 90)
+            r = r + 1
+        Next ti
+    End If
+
+    r = r + 1
+    NavLink ws.Cells(r, 2), "Setup Menu  -  first-time setup / re-configure", ADMIN_SHEET
+    r = r + 2
+    r = HomeCatalog(ws, r, layout)
+    r = r + 1
+    r = HomeLegend(ws, r, totalButtons)
+
+    ws.Activate                     ' Range.Select needs its sheet active
+    ws.Range("A1").Select
+End Sub
+
+' Every button, with its full description and the page it is on. This is the one
+' screen that answers "what can this workbook do?" - and unlike a card, a cell
+' here is as wide as it needs to be, so nothing is abbreviated.
+Private Function HomeCatalog(ws As Worksheet, ByVal r As Long, layout As Object) As Long
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
+    Dim items As Collection, ii As Long, it As Variant, firstRow As Long
+    ws.Cells(r, 2).Value = "ALL ACTIONS"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    ws.Cells(r, 2).Value = "ACTION"
+    ws.Cells(r, 3).Value = "PAGE"
+    ws.Cells(r, 4).Value = "WHAT IT DOES"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 4))
+        .Font.Bold = True
+        .Font.Size = 10
+        .Interior.Color = RGB(240, 240, 245)
+    End With
+    r = r + 1
+    firstRow = r
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set cols = page("cols")
+        colKeys = SortedKeys(cols)
+        For ci = LBound(colKeys) To UBound(colKeys)
+            colIx = CLng(colKeys(ci))
+            Set items = cols(colIx)
+            For ii = 1 To items.Count
+                it = items(ii)
+                ws.Cells(r, 2).Value = CStr(it(1))
+                NavLink ws.Cells(r, 3), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+                With ws.Cells(r, 4)
+                    .Value = CStr(it(3))
+                    .Font.Size = 10
+                    .Font.Color = RGB(90, 90, 90)
+                    .WrapText = True
+                    .VerticalAlignment = xlTop
+                End With
+                r = r + 1
+            Next ii
+        Next ci
+    Next ti
+    ' Nothing here is merged, so AutoFit gives every description its full height.
+    If r > firstRow Then ws.Rows(firstRow & ":" & (r - 1)).AutoFit
+    HomeCatalog = r
+End Function
+
+' The legend. This is the only place the page-code convention and Availability are
+' explained where a daily user will actually see them.
+Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long) As Long
+    ws.Cells(r, 2).Value = "HOW THESE PAGES ARE BUILT"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to 3 per page.")
+    r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
+    r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
+    r = HomeLine(ws, r, "As soon as ONE code is filled in, the codes control everything and uncoded buttons land on page 1.")
+    r = HomeLine(ws, r, "Availability on the Setup tab: 'Button' = shown here. 'Chains only' = no button, but a Chain can run it.")
+    r = HomeLine(ws, r, "'Off' = no button and it will not run at all; Finalize refuses to activate a Chain that uses one.")
+    HomeLegend = r
+End Function
+
+Private Function HomeLine(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
+    ws.Cells(r, 2).Value = txt
+    ws.Cells(r, 2).Font.Size = 10
+    ws.Cells(r, 2).Font.Color = RGB(90, 90, 90)
+    HomeLine = r + 1
+End Function
+```
+
+- [ ] **Step 3: Build, syntax-check, commit**
+
+```bash
+pwsh build/build.ps1
+node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+git add src/core/Core.bas
+git commit -m "feat(core): capacity-packed auto-layout and the Macros Home index (not yet wired)"
+```
+
+Still no behaviour change: nothing above is called yet.
+
+---
+
+### Task 8: The cutover
+
+Small, and the only task that changes what a user sees. Everything it calls
+already exists and already compiles.
+
+**Files:**
+- Modify: `src/core/Core.bas:1517-1536` (`Core_BuildControlPanel`)
+- Delete: `src/core/Core.bas:1577-1630` (`BuildSinglePanel`)
+- Delete: `BuildGroupedPanels`, `RenderPageLegacy`, and the now-unused `BTN_W` /
+  `ROW_GAP` / `COL_GAP` / `HDR_H` constants
+
+- [ ] **Step 1: Rewire the entry point**
 
 Replace `src/core/Core.bas:1513-1536` (comment + `Core_BuildControlPanel`) with:
 
 ```vba
 ' Auto-layout by display category when no button carries a page code; the manual
 ' code layout when any does (codes are a complete override). Prior panels and the
-' pre-v0.4.0 single "Macros" tab are cleared before either mode draws.
+' pre-v0.4.0 single "Macros" tab are cleared before either mode draws. Home is
+' always built, even for one page, so the workbook has one shape at every scale.
 ' silent:=True suppresses the "built N ..." confirmation (used when Finalize
 ' rebuilds the panel itself and shows its own combined message).
 Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
@@ -1272,307 +1968,46 @@ Fail:
 End Sub
 ```
 
-`BuildAutoLayout` (Task 6) and `BuildHomePage` (Task 7) do not exist yet, so **the
-build will still pass** (`build.ps1` and the syntax checker are structural and do
-not resolve call targets) while Excel would refuse to compile. That is why Task 6
-and Task 7 must both land before Task 9's Excel gate — do not run an Excel import
-between here and Task 7.
+- [ ] **Step 2: Delete the old path**
 
-- [ ] **Step 7: Build and syntax-check**
+Delete, in full: `BuildSinglePanel`, `BuildGroupedPanels`, `RenderPageLegacy`, and
+the `BTN_W` / `ROW_GAP` / `COL_GAP` / `HDR_H` constants (now unreferenced).
+
+Keep `MACRO_SHEET` and `DeleteLegacyPanel`: they are how an upgrading workbook's
+stale `Macros` tab is removed.
+
+- [ ] **Step 3: Verify nothing references the removed path**
+
+```bash
+grep -n "BuildSinglePanel\|BuildGroupedPanels\|RenderPageLegacy\|BTN_W\|ROW_GAP\|COL_GAP\|HDR_H" src/core/Core.bas
+grep -n "MACRO_SHEET" src/core/Core.bas
+```
+
+Expected: the first prints **nothing**; the second prints exactly two hits (the
+`Const` and `DeleteLegacyPanel`).
+
+- [ ] **Step 4: Build, syntax-check, commit**
 
 ```bash
 pwsh build/build.ps1
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
-```
-
-Expected: PASS. `BuildSinglePanel` is gone from the unique-procedure count; Sub and
-Function totals must still balance.
-
-- [ ] **Step 8: Commit**
-
-```bash
 git add src/core/Core.bas
-git commit -m "feat(core): page layout model with titles, descriptions and Home/Prev/Next nav"
+git commit -m "feat(core)!: build Macros Home plus packed category pages; retire the single Macros tab"
 ```
 
 ---
 
-### Task 6: Auto-layout by display category
+### Task 9: `PkgFixture` — 75 no-op actions, excluded from the shipping bundle
 
-**Files:**
-- Modify: `src/core/Core.bas` — insert after `BuildManualLayout` (Task 5)
-
-**Interfaces:**
-- Consumes: 5-element button arrays (Task 3), `AddToPage` / `SetPageTitle` /
-  `SetColHeader` (Task 5), `CHAIN_CAT`, `AUTO_COL_MAX`, `AUTO_PAGE_COLS`.
-- Produces:
-  - `Private Sub BuildAutoLayout(buttons As Collection, layout As Object)` — the
-    call `Core_BuildControlPanel` already makes
-  - `Private Function CategoryOrder(cats As Object, seen As Collection) As Collection`
-  - `Private Function PageTitleFor(ByVal cat As String, ByVal partNum As Long) As String`
-  - `Private Function ColHdrFor(ByVal cat As String, ByVal colInPage As Long, ByVal partNum As Long) As String`
-
-- [ ] **Step 1: Write the auto-layout builder**
-
-Insert immediately after `BuildManualLayout`'s `End Sub` and before
-`LabelManualPages`:
-
-```vba
-' Auto-layout: no button carries a page code, so distribute by display category -
-' one page per category, in first-appearance order with the reserved Chains
-' category last. Each column fills to AUTO_COL_MAX before wrapping; a category
-' needing more than AUTO_COL_MAX * AUTO_PAGE_COLS buttons continues onto a
-' numbered continuation page. Replaces the pre-v0.4.0 single-"Macros"-tab default
-' (contract v1.2.0), which did not survive contact with a large catalog.
-Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
-    Dim cats As Object, seen As New Collection, order As Collection
-    Dim e As Variant, cat As String, ci As Long, items As Collection, ii As Long
-    Dim tabNum As Long, colInPage As Long, inCol As Long, partNum As Long
-
-    Set cats = CreateObject("Scripting.Dictionary")
-    For Each e In buttons
-        cat = Trim(CStr(e(4)))
-        If Len(cat) = 0 Then cat = "Other"       ' defensive: Core_AddAction never emits blank
-        If Not cats.Exists(cat) Then
-            cats.Add cat, New Collection
-            seen.Add cat                         ' first-appearance order, stable
-        End If
-        cats(cat).Add e
-    Next e
-
-    Set order = CategoryOrder(cats, seen)
-    tabNum = 0
-    For ci = 1 To order.Count
-        cat = CStr(order(ci))
-        Set items = cats(cat)
-        tabNum = tabNum + 1
-        partNum = 1
-        colInPage = 1
-        inCol = 0
-        For ii = 1 To items.Count
-            If inCol >= AUTO_COL_MAX Then
-                inCol = 0
-                colInPage = colInPage + 1
-                If colInPage > AUTO_PAGE_COLS Then
-                    colInPage = 1
-                    tabNum = tabNum + 1
-                    partNum = partNum + 1
-                End If
-            End If
-            ' File first: AddToPage creates the page, and the two setters no-op on
-            ' a page that does not exist yet.
-            AddToPage layout, tabNum, colInPage, items(ii)
-            SetPageTitle layout, tabNum, PageTitleFor(cat, partNum)
-            If inCol = 0 Then SetColHeader layout, tabNum, colInPage, ColHdrFor(cat, colInPage, partNum)
-            inCol = inCol + 1
-        Next ii
-    Next ci
-End Sub
-
-' First-appearance order, with the reserved Chains category moved to the end: a
-' composed button reads as a summary of the actions above it, so it belongs last.
-Private Function CategoryOrder(cats As Object, seen As Collection) As Collection
-    Dim out As New Collection, i As Long, cat As String
-    Set CategoryOrder = out
-    For i = 1 To seen.Count
-        cat = CStr(seen(i))
-        If LCase(cat) <> LCase(CHAIN_CAT) Then out.Add cat
-    Next i
-    For i = 1 To seen.Count
-        cat = CStr(seen(i))
-        If LCase(cat) = LCase(CHAIN_CAT) Then out.Add cat
-    Next i
-End Function
-
-' "Clean & Standardize" for a category's first page, "Clean & Standardize (2)" for
-' each continuation page.
-Private Function PageTitleFor(ByVal cat As String, ByVal partNum As Long) As String
-    PageTitleFor = cat
-    If partNum > 1 Then PageTitleFor = cat & " (" & partNum & ")"
-End Function
-
-' The first column of a category's first page is headed with the category. Later
-' columns and continuation pages are overflow of the same category, so repeating
-' the name there would read as a second, different group.
-Private Function ColHdrFor(ByVal cat As String, ByVal colInPage As Long, ByVal partNum As Long) As String
-    If colInPage = 1 And partNum = 1 Then
-        ColHdrFor = cat
-    Else
-        ColHdrFor = "continued"
-    End If
-End Function
-```
-
-- [ ] **Step 2: Build and syntax-check**
-
-```bash
-pwsh build/build.ps1
-node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
-```
-
-Expected: PASS. `BuildHomePage` is still undefined — Task 7.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/core/Core.bas
-git commit -m "feat(core): auto-layout uncoded buttons one page per display category"
-```
-
----
-
-### Task 7: The `Macros Home` index
-
-**Files:**
-- Modify: `src/core/Core.bas` — insert after `RenderAllPages` (Task 5)
-
-**Interfaces:**
-- Consumes: the `layout` structure and `PageButtonCount` / `NavLink` (Task 5),
-  `HOME_SHEET`, `ADMIN_SHEET`, `EnsurePanelSheet`, `SortedKeys`.
-- Produces:
-  - `Private Sub BuildHomePage(layout As Object, ByVal totalButtons As Long)` — the
-    call `Core_BuildControlPanel` already makes
-  - `Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long) As Long`
-  - `Private Function HomeLine(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long`
-
-- [ ] **Step 1: Write the index builder**
-
-Insert immediately after `RenderAllPages`'s `End Sub`:
-
-```vba
-' The generated index: one card row per built page (title, enabled-action count,
-' link), a link to the admin tab, and the legend that explains the page code and
-' Enabled to a user who never reads the Setup help text. Built last and activated,
-' so any rebuild lands the user here.
-Private Sub BuildHomePage(layout As Object, ByVal totalButtons As Long)
-    Dim ws As Worksheet, r As Long, tabKeys As Variant, ti As Long, tabNum As Long
-    Dim page As Object
-    Set ws = EnsurePanelSheet(HOME_SHEET, True)
-    ws.Columns("B").ColumnWidth = 42
-    ws.Columns("C").ColumnWidth = 10
-    ws.Columns("D").ColumnWidth = 22
-
-    With ws.Range("B2")
-        .Value = "Macro Toolkit"
-        .Font.Size = 18
-        .Font.Bold = True
-        .Font.Color = RGB(31, 78, 121)
-    End With
-    With ws.Range("B3")
-        .Value = "Pick a category below. Every page has a  << Home  link back here."
-        .Font.Italic = True
-    End With
-
-    r = 5
-    ws.Cells(r, 2).Value = "CATEGORY"
-    ws.Cells(r, 3).Value = "ACTIONS"
-    ws.Cells(r, 4).Value = "GO TO"
-    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 4))
-        .Font.Bold = True
-        .Interior.Color = RGB(221, 217, 240)
-    End With
-    r = r + 1
-
-    tabKeys = SortedKeys(layout)
-    If UBound(tabKeys) < LBound(tabKeys) Then
-        ws.Cells(r, 2).Value = "No actions are turned on yet."
-        ws.Cells(r, 2).Font.Italic = True
-        r = r + 1
-    Else
-        For ti = LBound(tabKeys) To UBound(tabKeys)
-            tabNum = CLng(tabKeys(ti))
-            Set page = layout(tabNum)
-            ws.Cells(r, 2).Value = CStr(page("title"))
-            ws.Cells(r, 3).Value = PageButtonCount(page)
-            NavLink ws.Cells(r, 4), PANEL_BASE & tabNum, PANEL_BASE & tabNum
-            r = r + 1
-        Next ti
-    End If
-
-    r = r + 1
-    NavLink ws.Cells(r, 2), "Setup Menu  -  first-time setup / re-configure", ADMIN_SHEET
-    r = r + 2
-    r = HomeLegend(ws, r, totalButtons)
-
-    ws.Activate                     ' Range.Select needs its sheet active
-    ws.Range("A1").Select
-End Sub
-
-' The legend. This is the only place the page-code convention and Enabled are
-' explained where a daily user will actually see them.
-Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long) As Long
-    ws.Cells(r, 2).Value = "HOW THESE PAGES ARE BUILT"
-    ws.Cells(r, 2).Font.Bold = True
-    r = r + 1
-    r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - one page per category.")
-    r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
-    r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
-    r = HomeLine(ws, r, "As soon as ONE code is filled in, the codes control everything and uncoded buttons land on page 1.")
-    r = HomeLine(ws, r, "'Enabled = No' hides a button. The action stays listed on Setup, and a Chain can still run it.")
-    HomeLegend = r
-End Function
-
-Private Function HomeLine(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
-    ws.Cells(r, 2).Value = txt
-    ws.Cells(r, 2).Font.Size = 10
-    ws.Cells(r, 2).Font.Color = RGB(90, 90, 90)
-    HomeLine = r + 1
-End Function
-```
-
-`EnsurePanelSheet(HOME_SHEET, True)` reuses and clears an existing sheet, so
-rebuilding does not multiply Home tabs. `DeletePanels` leaves it alone by
-construction: `IsPanelName` requires a numeric tail, and `"Home"` is not numeric —
-confirm that still holds before finishing this step.
-
-- [ ] **Step 2: Build and syntax-check**
-
-```bash
-pwsh build/build.ps1
-node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
-```
-
-Expected: PASS, and this is the first build since Task 5 with **no undefined
-call targets left** — every procedure `Core_BuildControlPanel` invokes now exists.
-
-- [ ] **Step 3: Sanity-check the reference count for the deleted single-panel path**
-
-```bash
-grep -n "BuildSinglePanel\|MACRO_SHEET" src/core/Core.bas
-```
-
-Expected: `BuildSinglePanel` returns **nothing**; `MACRO_SHEET` appears exactly
-twice — its `Const` in the declarations section and its use in
-`DeleteLegacyPanel`. Any other hit is a leftover reference to the removed path.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/core/Core.bas
-git commit -m "feat(core): generate the Macros Home index with legend, counts and links"
-```
-
----
-
-### Task 8: `PkgFixture` — 75 no-op actions, excluded from the shipping bundle
-
-Design §2.5's answer to designing a 60-button layout while only 7 actions exist.
-Deliberately **more** than 60, with uneven category sizes, so that a full column
-(8), a wrap (9), a multi-column page (12) and a page overflow (26 > 8 × 3) are all
-exercised in one Excel session.
+Design §2.5's answer to designing a large layout while only 8 actions exist.
+Deliberately uneven category sizes so a full column (8), a wrap (9), a
+multi-column category (12), page packing of small categories, and a
+larger-than-a-page category (26) are all exercised in one Excel session.
 
 **Files:**
 - Create: `src/packages/PkgFixture.bas`
 - Modify: `build/build.ps1:64-67` (default package glob)
-- Modify: `src/core/Core.bas:574-579` (`CoreCandidates` — **temporary**, removed in
-  Task 10)
-
-**Interfaces:**
-- Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`,
-  `Core_AddList`, `Core_AddTable` (with the Task 2 `usedBy` argument),
-  `Core_AddAction` (with the Task 2 `category` argument), `Core_Done`.
-- Produces: `PkgFixture_Manifest(reg)`, `PkgFixture_Noop(ctx)`, and 75 actions
-  `fixture.a1` … `fixture.a75` across 9 categories.
+- Modify: `src/core/Core.bas:574-579` (`CoreCandidates` — **temporary**)
 
 - [ ] **Step 1: Exclude fixtures from the default bundle**
 
@@ -1601,11 +2036,16 @@ Option Explicit
 '================================================================
 ' PkgFixture - TEST HARNESS, NEVER SHIPPED.
 '
-' Declares 75 no-op actions across 9 display categories so the v0.4.0 auto-layout
-' can be exercised at catalog scale while only 7 real actions exist (design
-' section 2.5). Category sizes are deliberately uneven so one Excel session
-' covers: a part-full column, an exactly-full column (8), a wrap (9), a
-' multi-column page (12) and a page overflow (26 > AUTO_COL_MAX * AUTO_PAGE_COLS).
+' Declares 75 no-op actions across 9 display categories so the v0.4.0 packed
+' auto-layout can be exercised at catalog scale while only 8 real actions exist
+' (design section 2.5). Category sizes are deliberately uneven so one Excel
+' session covers: several small categories packed onto one page, an exactly-full
+' column (8), a wrap to a second column (9), a multi-column category (12) and a
+' category larger than a whole page (26 > CARD_COLS * AUTO_COL_MAX).
+'
+' Note "Clean & Standardize" below: it deliberately COLLIDES with PkgClean's
+' display name, so two different modules feed one category. That is the whole
+' point of decoupling category from package, and it must be verified, not assumed.
 '
 ' Every action binds to the SAME entry point. Nothing in the contract requires a
 ' distinct sub per action - the ctx carries actionId - so 75 actions cost one sub.
@@ -1638,7 +2078,9 @@ Public Sub PkgFixture_Manifest(reg As Object)
             n = n + 1
             Core_AddAction reg, "fixture.a" & n, "Fixture " & n & " - " & cats(ci), _
                            "PkgFixture_Noop", _
-                           "No-op fixture action " & n & ", category " & cats(ci) & ".", _
+                           "No-op fixture action " & n & " in category " & cats(ci) & _
+                           ". This sentence is deliberately long enough to test that a " & _
+                           "card description wraps and auto-fits instead of clipping.", _
                            cats(ci)
         Next k
     Next ci
@@ -1649,11 +2091,14 @@ Public Sub PkgFixture_Manifest(reg As Object)
     Core_AddField reg, "fx_always", "Always shown (declares no usedBy)", "text", "always", _
                   "simple", "Package-wide: stays in place whatever is turned off."
     Core_AddField reg, "fx_a1", "Used by Fixture 1 only", "text", "one", _
-                  "simple", "Collapses into the off band when Fixture 1 is set to No.", _
+                  "simple", "Collapses into the off band when Fixture 1 is set to Off.", _
                   "fixture.a1"
     Core_AddField reg, "fx_a2a3", "Used by Fixture 2 or Fixture 3", "text", "two", _
-                  "simple", "Stays up while EITHER action is on; collapses only when both are off.", _
+                  "simple", "Stays up while EITHER action is runnable; collapses only when both are Off.", _
                   "fixture.a2,fixture.a3"
+    Core_AddField reg, "fx_chain", "Used by Fixture 7 (test 'Chains only')", "text", "chain", _
+                  "simple", "Fixture 7 set to 'Chains only' still runs, so this must STAY in the main list.", _
+                  "fixture.a7"
     Core_AddField reg, "fx_typo", "Names an action id that does not exist", "text", "safe", _
                   "simple", "An unknown usedBy id must count as in use, never hide the field.", _
                   "fixture.no_such_action"
@@ -1676,7 +2121,7 @@ Public Sub PkgFixture_Noop(ctx As Object)
 End Sub
 ```
 
-- [ ] **Step 3: Register the fixture in Core's candidate list — temporarily**
+- [ ] **Step 3: Register the fixture temporarily**
 
 Replace `src/core/Core.bas:574-579` with:
 
@@ -1691,165 +2136,156 @@ End Function
 ```
 
 `TryManifest` swallows the error when the module is absent, so this line is inert
-in the shipping bundle — but it is still temporary, and Task 10 removes it.
+in the shipping bundle — but it is still temporary, and Task 11 removes it.
 
-- [ ] **Step 4: Build both bundles and syntax-check both**
+- [ ] **Step 4: Build both bundles, syntax-check both, commit**
 
 ```bash
 pwsh build/build.ps1
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 pwsh build/build.ps1 -Packages PkgImportExport,PkgClean,PkgFixture -Out dist/MacrosBundle.fixture.bas
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.fixture.bas
-```
-
-Expected: the first build reports `Core + 2 package(s): PkgClean.bas,
-PkgImportExport.bas` — **`PkgFixture.bas` must NOT appear**. The second reports
-`Core + 3 package(s)` including it. Both pass the duplicate-procedure,
-block-balance and declaration-order gates, and both pass the syntax check.
-`dist/` is gitignored, so neither bundle is committed.
-
-- [ ] **Step 5: Commit**
-
-```bash
 git add src/packages/PkgFixture.bas build/build.ps1 src/core/Core.bas
 git commit -m "test: add PkgFixture (75 no-op actions, 9 categories) and keep it out of the default bundle"
 ```
 
+Expected: the first build reports `Core + 2 package(s): PkgClean.bas,
+PkgImportExport.bas` — **`PkgFixture.bas` must NOT appear**. The second reports
+`Core + 3 package(s)`. `dist/` is gitignored, so neither bundle is committed.
+
 ---
 
-### Task 9: Owner verification in Excel — THE gate
+### Task 10: Owner verification in Excel — THE gate
 
 There is no headless VBA compiler and no headless Excel. Everything above is
 structurally checked and functionally unverified. **Only the owner can run this
-task, and nothing in this plan may be described as verified until it passes.**
-
-**Files:** none — this task produces the PR verification record.
-
-**Interfaces:**
-- Consumes: `dist/MacrosBundle.fixture.bas` and `dist/MacrosBundle.bas` (Task 8).
-- Produces: a pass/fail record per check, pasted into the PR.
+task, and nothing may be described as verified until it passes.**
 
 - [ ] **Step 1: Fixture pass — compile**
 
-In a scratch copy of the workbook: import `dist/MacrosBundle.fixture.bas`, then
-`Debug ▸ Compile VBAProject`. Expected: compiles clean. A missing-argument or
-undefined-name error here is precisely what the structural gates cannot see.
+Import `dist/MacrosBundle.fixture.bas` into a scratch workbook, then
+`Debug ▸ Compile VBAProject`. Expected: clean. A missing-argument or undefined-name
+error here is exactly what the structural gates cannot see.
 
-- [ ] **Step 2: Fixture pass — build at scale**
+- [ ] **Step 2: Fixture pass — packing and geometry**
 
-Run `Core_BuildSetup` (Alt+F8), then `Finalize Setup Tab`, and confirm each:
+Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 
-- [ ] `Macros Home` exists, is the first tab, and lists **11 rows** (one per page)
-      across **10 categories**, in this order: `Import / Export` (5),
-      `Clean & Standardize` (8), `Ingest & Import` (3), `Validate` (8),
-      `Reconcile` (9), `Report` (12), `Export` (4), `Period Close` (6),
-      `Admin & Housekeeping` (2), `Bulk Fixture Set` (26, over two rows).
-- [ ] **The merge works.** `Clean & Standardize` shows **8**, not 3 and 5 on two
-      separate rows: `PkgClean`'s 3 real actions and the fixture's 5 declare the
-      same category from two different modules and land on one page. This is the
-      whole point of decoupling `category` from the package — if they split, Task 2
-      Step 3 is defaulting the category wrongly.
-- [ ] Action counts on Home match the buttons actually drawn on each page.
-- [ ] `Validate` (8 actions) fills exactly one column with no wrap.
-- [ ] `Reconcile` (9) wraps to a second column headed `continued`.
-- [ ] `Report` (12) uses two columns on one page.
-- [ ] `Bulk Fixture Set` (26) overflows to a second page titled
-      `Bulk Fixture Set (2)`.
-- [ ] Every page shows its category as the title — no `Macros - Page N` anywhere.
-- [ ] Every button has its description underneath, unclipped and not overlapping
-      the next button.
-- [ ] `<< Home` is in the same place on every page and works; `< Previous` /
-      `Next >` work and are correctly absent on the first/last page.
-- [ ] No `Macros` tab remains (the single-tab default is withdrawn).
+- [ ] `Macros Home` exists and is the first tab.
+- [ ] **The merge works.** One category row/column reads `Clean & Standardize`
+      with **8** buttons — `PkgClean`'s 3 and the fixture's 5, declared from two
+      different modules, on one page column. If they appear as two separate
+      categories, Task 2 Step 3 is defaulting the category wrongly.
+- [ ] Categories present: `Import / Export` (5), `Clean & Standardize` (8),
+      `Ingest & Import` (3), `Validate` (8), `Reconcile` (9), `Report` (12),
+      `Export` (4), `Period Close` (6), `Admin & Housekeeping` (2),
+      `Bulk Fixture Set` (26) = **10 categories, 83 buttons**.
+- [ ] **Small categories share pages** — no page has one 3-button category alone
+      while a neighbouring page has room.
+- [ ] `Validate` (8) fills exactly one column with no `(cont.)`.
+- [ ] `Reconcile` (9) wraps to a second column headed `Reconcile (cont.)`.
+- [ ] `Bulk Fixture Set` (26) spans more than one page.
+- [ ] **No category is split across two tabs unless it needs more than 24 buttons.**
+- [ ] Page titles name the categories on that page, joined by `|` when packed —
+      no bare `Macros - Page N` anywhere.
+- [ ] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
+      9pt. The fixture's help strings are deliberately long; if any is cut off,
+      `FitDescRows` or `DESC_MAX_H` is wrong.
+- [ ] Cards align across all three columns — button tops and description tops line
+      up on every row.
+- [ ] `<< Home` is in the same cell on every page and works; `< Previous` /
+      `Next >` work and are absent on the first/last page.
+- [ ] No `Macros` tab remains.
+- [ ] Home's action catalog lists all 83 buttons with full descriptions and a
+      working page link each.
 
-- [ ] **Step 3: Fixture pass — enable/disable and the collapsed band**
+- [ ] **Step 3: Fixture pass — the three availability states**
 
-- [ ] On Setup, the action catalog block reads `Action | Enabled | Page code`
-      with every row `Yes`.
-- [ ] Set `fixture.a1` to `No`, Finalize. Its button disappears; **its row stays**
-      in the catalog; Home's count for `Ingest & Import` drops by one.
-- [ ] Run `Create Setup Tab` again. `fx_a1` is now inside a collapsed
-      **SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON** band with a working `+`
-      outline control, and the value you typed into `fx_a1` **survived**.
-- [ ] `fx_typo` (unknown `usedBy` id) is still in the main area, not the band.
-- [ ] Set `fixture.a2` to `No` but leave `fixture.a3` on: `fx_a2a3` stays up. Turn
-      `fixture.a3` off too: it moves into the band.
-- [ ] Turn `fixture.a5` and `fixture.a6` off: the list and table blocks land in
-      the band, and after re-Finalizing, their values still read back correctly
-      (this is the `_core_end` sentinel still bounding the last block).
-- [ ] Turn everything back on: the band disappears entirely rather than showing
-      empty.
+- [ ] The catalog block reads `Action | Availability | Page code`, every row
+      `Button`, and the Availability cell has a **working dropdown** offering
+      exactly `Button`, `Chains only`, `Off`.
+- [ ] Set `fixture.a1` to `Off`, Finalize: its button disappears, **its row stays**
+      in the catalog, Home's counts drop by one.
+- [ ] Run `Core_Run "fixture.a1"` via Alt+F8: it **refuses** with the "switched
+      Off" message and does not run.
+- [ ] Set `fixture.a7` to `Chains only`, Finalize: no button. Alt+F8 `Core_Run
+      "fixture.a7"` refuses with the "Chains only" message.
+- [ ] Build a chain containing `fixture.a7`: it **runs** as a step, one combined
+      summary, no per-step dialogs.
+- [ ] Build a chain containing `fixture.a1` (which is `Off`): Finalize **BLOCKS**
+      with `OFF ACTION IN CHAIN`, naming the chain, and refuses to activate.
+- [ ] Type `maybe` into an Availability cell: Finalize **BLOCKS** with
+      `UNRECOGNISED Availability` and does not activate.
+- [ ] Clear an Availability cell entirely: it reads as `Button` and activates.
 
-- [ ] **Step 4: Fixture pass — manual codes still override**
+- [ ] **Step 4: Fixture pass — the collapsed band**
 
-- [ ] Put `1A` on one action and `2B` on another, leave the rest blank, Finalize.
-      Numbered pages appear, everything uncoded lands in page 1's `Unassigned`
-      column, and the column headers read `Column A` / `Column B` / `Unassigned`.
-- [ ] `hide` on one action omits its button while leaving its catalog row.
-- [ ] Clear every code and Finalize: auto-layout returns.
+- [ ] With `fixture.a1` `Off`, run `Create Setup Tab`: `fx_a1` is inside a
+      collapsed **SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON** band with a working
+      `+`, and the value previously typed into `fx_a1` **survived**.
+- [ ] `fx_chain` (used by the `Chains only` action) is **NOT** in the band — a
+      runnable action keeps its settings up.
+- [ ] `fx_typo` (unknown `usedBy` id) is not in the band.
+- [ ] `fixture.a2` `Off` but `a3` on: `fx_a2a3` stays up. Both `Off`: it moves in.
+- [ ] `fixture.a5` and `a6` `Off`: the list and table blocks land in the band, and
+      after re-Finalizing their values still read back (the `_core_end` sentinel
+      still bounds the last block).
+- [ ] Everything back to `Button`: the band disappears rather than showing empty.
 
-- [ ] **Step 5: Fixture pass — chains, cancel and error paths**
+- [ ] **Step 5: Fixture pass — manual codes, cancel and error paths**
 
-- [ ] Build a chain of three fixture actions. It appears on a `Chains` page,
-      ordered last. Running it shows one combined summary, not three dialogs.
-- [ ] Disable an action that a chain uses. Finalize reports it under *"Chains that
-      use a turned-off action"* and **does not block activation**; the chain still
-      runs that step.
-- [ ] Answer **No** to the "Activate this configuration now?" prompt: nothing is
-      rebuilt, no `_Config` is written.
-- [ ] Answer **No** to `Create Setup Tab`'s rebuild confirmation: the existing
-      Setup tab is untouched.
-- [ ] Enter a deliberately bad page code (`0A`, `A1`, `1`): Finalize blocks with a
-      `BAD CODE` line and refuses to activate.
-- [ ] Run Finalize twice in a row: no *"That name is already taken"*, and no
-      `Setup (2)` / `Setup (3)` orphans (the v0.3.0 unhide-before-delete fix).
+- [ ] `1A` on one action and `2B` on another, rest blank, Finalize: numbered pages
+      appear, uncoded buttons land in page 1's `Unassigned` column, headers read
+      `Column A` / `Column B` / `Unassigned`.
+- [ ] `hide` omits a button while leaving its catalog row.
+- [ ] Clear every code: packed auto-layout returns.
+- [ ] A bad code (`0A`, `A1`, `1`): Finalize blocks with `BAD CODE`.
+- [ ] Answer **No** to "Activate this configuration now?": nothing rebuilt, no
+      `_Config` written.
+- [ ] Answer **No** to `Create Setup Tab`'s rebuild confirmation: Setup untouched.
+- [ ] Finalize twice in a row: no *"That name is already taken"*, no `Setup (2)`.
 
 - [ ] **Step 6: Real pass — the shipping bundle**
 
-In a **fresh** copy of the real workbook: import `dist/MacrosBundle.bas` (no
-fixture), `Debug ▸ Compile VBAProject`, `Core_BuildSetup`, Finalize, then:
+Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
+`Debug ▸ Compile VBAProject`, `Core_BuildSetup`, Finalize:
 
-- [ ] Home lists exactly two categories with 5 and 3 actions.
+- [ ] Home lists **one** page holding two category columns —
+      `Import / Export` (5) and `Clean & Standardize` (3). 8 buttons fit on one
+      page, so this is the case the panel warned about: confirm it is **not** more
+      tabs than v0.3.0 had, aside from Home itself.
 - [ ] **Click all 8 real actions** and confirm each does its real work.
-- [ ] Cancel out of each action that prompts (range pickers, file dialogs) and
-      confirm no error dialog and no half-finished state.
-- [ ] Force one error path (point a `sheet` field at a missing tab, or a `file`
-      field at a missing prefix) and confirm Finalize reports it and that a
-      failing action restores `ScreenUpdating`/`Calculation`/`EnableEvents`
-      (the next action still runs normally).
+- [ ] Cancel out of each action that prompts (range pickers, file dialogs): no
+      error dialog, no half-finished state.
+- [ ] Force an error path (a `sheet` field pointing at a missing tab, a `file`
+      field at a missing prefix): Finalize reports it, and a failing action
+      restores `ScreenUpdating`/`Calculation`/`EnableEvents` so the next action
+      still runs normally.
 
-- [ ] **Step 7: Upgrade pass — the migration shim**
+- [ ] **Step 7: Upgrade pass — fail-closed migration**
 
-This is the check that protects an existing user's layout. In a copy of a workbook
-**already finalized under v0.3.0** (so its `_Config` has the old
-`Action | Page code` block), with manual page codes set:
+The check that protects an existing user's layout. Use a workbook **already
+finalized under v0.3.0** (so its `_Config` has the old `Action | Page code` block)
+with manual page codes set:
 
-- [ ] Import `dist/MacrosBundle.bas` over it and run `Core_BuildSetup`.
+- [ ] Import `dist/MacrosBundle.bas` over it, run `Core_BuildSetup`.
 - [ ] **Every prior page code is still there**, now in the `Page code` column to
-      the right of the new `Enabled` column, and every `Enabled` reads `Yes`.
+      the right of `Availability`, and every `Availability` reads `Button`.
+- [ ] Now corrupt one old code in the hidden `_Config` (unhide it, put `zzz` in the
+      old code column, re-hide): `Core_BuildSetup` must **ABORT** naming that
+      action, and must leave the Setup tab exactly as it was.
 
-If codes come back blank, `HasEnabledColumn` (Task 3 Step 3) is wrong or is not
-being consulted — stop and fix it, do not re-enter the codes by hand.
+If codes come back blank, `BlockSchema` / `ConfigSchemaStatus` (Task 4) is wrong —
+stop and fix it; do not re-enter the codes by hand.
 
 - [ ] **Step 8: Record the result**
 
-Paste the completed checklist into the PR. If any check fails, stop and fix it
-before Task 10 — a failure here means the corresponding task is not done.
+Paste the completed checklist into the PR. Any failure means the corresponding task
+is not done.
 
 ---
 
-### Task 10: Tear down the fixture, refresh docs, ship v0.4.0
-
-**Files:**
-- Delete: `src/packages/PkgFixture.bas`
-- Modify: `src/core/Core.bas:574-580` (remove the `Fixture` candidate)
-- Modify: `build/build.ps1` (remove the now-pointless exclusion)
-- Modify: `VERSION`, `CHANGELOG.md`, `TODOS.md`
-- Regenerate: `docs/code-map.md`
-
-**Interfaces:**
-- Consumes: a passing Task 9.
-- Produces: the v0.4.0 release commit and PR.
+### Task 11: Tear down the fixture, refresh docs, ship v0.4.0
 
 - [ ] **Step 1: Remove the fixture and its two hooks**
 
@@ -1857,10 +2293,9 @@ before Task 10 — a failure here means the corresponding task is not done.
 git rm src/packages/PkgFixture.bas
 ```
 
-In `src/core/Core.bas`, delete the `c.Add "Fixture"` line from `CoreCandidates`.
-In `build/build.ps1`, restore the plain default glob (the exclusion has nothing
-left to exclude, and a dangling filter invites a future fixture to be added
-silently):
+Delete `c.Add "Fixture"` from `CoreCandidates`. In `build/build.ps1`, restore the
+plain default glob — a dangling filter invites a future fixture to be added
+silently:
 
 ```powershell
 } else {
@@ -1869,7 +2304,7 @@ silently):
 }
 ```
 
-- [ ] **Step 2: Verify the fixture is gone from every surface**
+- [ ] **Step 2: Verify the fixture is gone everywhere**
 
 ```bash
 grep -rn "Fixture" src/ build/ ; rm -f dist/MacrosBundle.fixture.bas
@@ -1877,7 +2312,7 @@ pwsh build/build.ps1
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: `grep` prints **nothing**, and the build reports `Core + 2 package(s)`.
+Expected: `grep` prints **nothing**; the build reports `Core + 2 package(s)`.
 
 - [ ] **Step 3: Bump `VERSION`**
 
@@ -1894,43 +2329,46 @@ Under `## [Unreleased]`, insert:
 
 ### Added
 
-- **`Macros Home`** — a generated index tab (always first): one row per built page
-  with its title, its enabled-action count and a link, a link to `Setup Menu`, and
-  a legend explaining page codes and Enabled. The name is reserved by the contract.
-- **Auto-layout.** With no page codes filled in, buttons distribute automatically —
-  one page per display **category**, columns filled to 8 buttons before wrapping,
-  a continuation page past 3 columns. Filling in even one code still hands total
-  control back to the codes.
-- **Category pages.** Pages are titled by category instead of `"Macros - Page 1"`,
-  columns are headed by category instead of `"Column A"`, and every button now
-  carries its manifest description underneath — grouped pages previously had no
-  descriptions at all.
+- **`Macros Home`** — a generated index tab, always first and always built: one row
+  per page with its button count and a link, a full **action catalog** (every
+  button, its complete description, and the page it is on), a `Setup Menu` link,
+  and a legend explaining page codes and availability.
+- **Capacity-packed auto-layout.** With no page codes filled in, buttons
+  distribute automatically: up to three category-headed columns per page, up to 8
+  buttons per column, small categories sharing a page, and a category never split
+  across tabs unless it is larger than a whole page. Filling in even one code
+  still hands total control back to the codes.
+- **Legible descriptions.** Button pages are now an **unmerged cell-card grid** —
+  button anchored to a content cell, its description in the cell beneath, that row
+  auto-fitted. Grouped pages previously had no descriptions at all, and merged
+  cells (which Excel's AutoFit ignores) are forbidden on the grid so nothing clips.
 - **Navigation.** A persistent `<< Home` link in a fixed position on every page,
   plus `< Previous` / `Next >`.
-- **Per-action enable.** The placement block is now the **Action catalog**
-  (`Action | Enabled | Page code`). `Enabled = No` hides a button while leaving the
-  action listed on Setup and still runnable inside a chain; Finalize reports which
-  actions are off, and which chains use one, without blocking.
-- **`usedBy` on a field** — settings belonging only to switched-off actions are
-  collected into one collapsed *"Settings for actions you haven't turned on"* band
-  at the bottom of Setup. They are relegated, never omitted: Setup re-seeds from
-  the finalized `_Config`, so omitting them would cost a second Finalize and
-  discard un-finalized typing.
+- **Three-state per-action availability.** The placement block is now the **Action
+  catalog** (`Action | Availability | Page code`) with a validated dropdown:
+  `Button` (shown and runnable), `Chains only` (no button, runs only as a chain
+  step), `Off` (no button, runs nowhere). `Off` means off — the dispatcher refuses
+  it and Finalize **blocks activation** for any chain that uses one. An
+  unrecognised value blocks Finalize rather than defaulting to `Button`.
+- **`usedBy` on a field** — settings belonging only to `Off` actions collect into
+  one collapsed *"Settings for actions you haven't turned on"* band at the bottom
+  of Setup. Relegated, never omitted: Setup re-seeds from the finalized `_Config`,
+  so omitting them would cost a second Finalize and discard un-finalized typing. A
+  `Chains only` action still runs, so it keeps its settings in the main list.
 - **`category` on an action** — optional, defaults to the package name, and
-  deliberately decoupled from the module so a future package split cannot move a
-  button in the user's mental model.
+  decoupled from the module so two packages can feed one category and a future
+  package split cannot move a button in the user's mental model.
+- **A machine-owned config schema marker** in the hidden id column, with
+  **fail-closed** migration: a v0.3.0 config is detected and its page codes read
+  from the column they are actually in, every recovered code is validated, and on
+  any conflict `Create Setup Tab` aborts with a report instead of rebuilding.
 - Contract frozen at **v1.2.0** (additive).
 - **Build:** fixture/harness packages are kept out of the default bundle.
-
-### Changed
-
-- Tighter panel spacing (`BTN_H` 30→26, `ROW_GAP` 8→4, `COL_GAP` 24→16,
-  `HDR_H` 22→20), with room for the new per-button description.
 
 ### Removed
 
 - **The single `Macros` tab default.** With no page codes, v0.3.0 built one tab and
-  stacked every button on it; v0.4.0 auto-distributes by category instead, and the
+  stacked every button on it; v0.4.0 packs categories onto pages instead, and the
   stale `Macros` tab is deleted on rebuild. Manual page codes are unaffected.
 
 ### Fixed
@@ -1938,15 +2376,12 @@ Under `## [Unreleased]`, insert:
 - `RenderPage` no longer calls `Range.Select` on a possibly-inactive sheet — it
   only ever worked because rebuilding deleted and re-added every panel, which
   happens to activate it. Selection now happens once, on `Macros Home`.
-- A v0.3.0 `_Config` (whose placement block has no `Enabled` column) is detected
-  from its header row, so upgrading reads page codes from the column they are
-  actually in instead of silently discarding the user's manual layout.
 ```
 
 - [ ] **Step 5: Refresh `TODOS.md`**
 
-Replace the `Current:` paragraph (`TODOS.md:8-13`) so it names v0.4.0, contract
-v1.2.0, and track 2 (the catalog waves) as next; move the track-1 line from
+Rewrite the `Current:` paragraph (`TODOS.md:8-13`) for v0.4.0 / contract v1.2.0
+with track 2 (the catalog waves) next; move the track-1 line from
 `## Next — active` into `## Done (recent)`.
 
 - [ ] **Step 6: Regenerate the code map**
@@ -1955,8 +2390,8 @@ v1.2.0, and track 2 (the catalog waves) as next; move the track-1 line from
 node scripts/code-map.mjs
 ```
 
-The map is generated output — never hand-edit it. Committing it in the same PR as
-the code keeps its freshness stamp honest.
+Generated output — never hand-edit. Committing it in the same PR keeps its
+freshness stamp honest.
 
 - [ ] **Step 7: Final gate, then commit**
 
@@ -1964,70 +2399,66 @@ the code keeps its freshness stamp honest.
 pwsh build/build.ps1
 node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 git add -A
-git commit -m "chore: release v0.4.0 (built-page polish - Macros Home, auto-layout, per-action enable; contract v1.2.0)"
+git commit -m "chore: release v0.4.0 (Macros Home, packed card pages, three-state availability; contract v1.2.0)"
 ```
 
 - [ ] **Step 8: Review and ship**
 
-Run `/review` over the `src/` diff, then `/ship`. The PR body must carry Task 9's
+Run `/review` over the `src/` diff, then `/ship`. The PR body must carry Task 10's
 completed checklist — the build is not a substitute for it.
 
 ---
 
 ## Self-Review
 
-**Spec coverage — design §2 against the tasks:**
+**Spec coverage** — design §2 and the six panel findings against the tasks:
 
-| Design §2 requirement | Task |
+| Requirement | Task |
 |---|---|
-| `Macros Home`: title, legend, card per category with name + count + link, `Setup Menu` link | 7 |
-| `Macros N` titled by category, not `"Page 3"` | 5 (`LabelManualPages`), 6 (`PageTitleFor`) |
-| Columns headed by name, not `"Column A"` | 6 (`ColHdrFor`); manual mode keeps code headers by design |
-| Every button followed by its description | 5 (`RenderPage`) |
-| Persistent fixed-position `← Home` + Previous/Next | 5 (`RenderNavRow`) — ASCII `<< Home` per the encoding constraint |
-| Auto-layout by category, fill-to-max then wrap | 6 |
-| Manual codes remain a complete override; `hide` still omits | 5 (`BuildManualLayout`, unchanged semantics) |
-| Tighter spacing via the existing constants | 5 Step 1 |
+| `Macros Home`: legend, per-page rows with counts + links, `Setup Menu` link | 7 |
+| Home action catalog with full descriptions (owner's Q4 addition) | 7 |
+| Pages titled by category, columns headed by category | 6, 7 |
+| Every button followed by its description, unclipped | 6 (card grid + `FitDescRows`) |
+| Persistent fixed-position Home link + Previous/Next | 6 (`RenderNavRow`) |
+| Capacity-packed auto-layout, no category straddling (panel Q2/Q3) | 7 (`BuildAutoLayout`) |
+| Home always built, even for one page (owner's Q2 call) | 8 |
+| Manual codes remain a complete override; `hide` still omits | 6 (`BuildManualLayout`) |
+| Tighter spacing | 6 Step 1 |
 | No search, no Recent Actions, Favorites deferred | not built — correct |
-| Placement block → `Action \| Enabled \| Page code` | 3 |
-| Enabled defaults yes → v0.4.0 is a no-op for a current user | 3 (`EnabledFor` absence = True) + 9 Step 7 |
-| Read by a sibling of `ReadCodeMap` keyed off `RID_COL` | 3 (`ReadEnabledMap`) |
-| `GatherButtons` skips disabled actions | 3 |
-| Disabled actions stay listed | 3 + 9 Step 3 |
-| Fields always render; off ones collapse into a band | 4 |
-| `Core_AddField` gains `usedBy`; undeclared = package-wide | 2 |
+| `Action \| Availability \| Page code` with dropdown | 3 |
+| Three states; `Off` unrunnable; chain-with-`Off` blocks Finalize (owner's Q5) | 3 |
+| Unrecognised value blocks rather than defaults | 3 (`ParseAvail` → `""`) |
+| Defaults to available → v0.4.0 is a no-op for a current user | 3 + 10 Step 7 |
+| Unavailable actions stay listed | 3 + 10 Step 3 |
+| Fields always render; `Off`-only ones collapse | 5 |
+| `Chains only` keeps its fields in the main list | 5 (`FieldInUse` via `IsRunnable`) + 10 Step 4 |
+| Machine-owned schema marker, validated, fail-closed (panel Q6) | 4 |
+| Every commit compiles (panel Q1) | 6, 7 dead-but-compilable; 8 cutover |
 | Contract additive bump to v1.2.0 | 1 |
-| `PkgFixture`, ~60 no-op actions, 9 categories, never ships, deleted after | 8 + 10 |
+| `PkgFixture`, 75 no-op actions, 9 categories, never ships, deleted after | 9 + 11 |
 
-**Two things the design did not specify, decided here and flagged for the owner:**
+**Ordering, designed out rather than annotated:** two forward references existed in
+the first cut of this revision — `FieldInUse` calling `IsRunnable`, and
+`ReadAvailMap` calling `BlockSchema`. Both are now declared in **Task 3**, the task
+that first needs them, so the tasks run in plain numeric order and **every single
+commit compiles on its own**. Nothing in this plan requires the executor to
+reorder steps; if a task seems to need a procedure from a later task, that is a
+bug in the plan, not an instruction to skip ahead.
 
-1. **The v0.3.0 `_Config` migration.** Inserting `Enabled` moves the page code from
-   column D to E, and an existing `_Config` still has it in D. Undetected, the
-   first rebuild after upgrading throws away the user's whole manual layout. Task 3
-   Step 3 adds a header-row shim and Task 9 Step 7 tests it. §2.4's "no behaviour
-   changes" is true of the contract but not of the sheet geometry.
-2. **What `Enabled = No` means for a chain.** Chosen: it hides the *button*, not the
-   action — so a disabled action is still a legal chain step, and Finalize reports
-   the situation without blocking. This makes "reachable only inside a chain" a
-   supported configuration and keeps `Core_Run` untouched. Written into the
-   contract in Task 1 Step 4; if the owner wants disabling to also break chains,
-   that is a different (and blocking) rule.
+**Placeholder scan:** none. Every code step carries actual VBA or PowerShell. The
+prose-only steps are Task 10's owner checks (manual by nature) and Task 11 Step 5
+(`TODOS.md` content depends on what ships).
 
-**Placeholder scan:** none. Every code step carries the actual VBA or PowerShell.
-The only intentionally prose-only steps are Task 9's owner checks, which are
-manual by nature, and Task 10 Step 5's `TODOS.md` edit, whose content depends on
-what the release actually contains.
-
-**Type/name consistency checked:** `layout` is the dictionary name throughout
-Tasks 5–7; `enab` is the enabled map throughout Tasks 2–4; button arrays are
-5-element everywhere after Task 3 (`e(4)` = category, read only in
-`LabelManualPages`, `BuildAutoLayout`); `RenderTier` takes 8 arguments at all four
-call sites; `HasAdvanced` takes 2 at its single call site; `FieldInUse` /
-`HasAnyTier` / `EnabledFor` / `IsYes` / `HasEnabledColumn` / `CollapseRows` /
-`RenderOffBand` / `SetPageTitle` / `SetColHeader` / `PageButtonCount` /
-`RenderNavRow` / `NavLink` / `BuildAutoLayout` / `CategoryOrder` / `PageTitleFor` /
-`ColHdrFor` / `BuildManualLayout` / `LabelManualPages` / `RenderAllPages` /
-`BuildHomePage` / `HomeLegend` / `HomeLine` are each declared exactly once and none
-collides with an existing procedure name (`build.ps1` would fail the build if one
-did). `IsYes` is deliberately **not** named `IsTrue` — that name exists at
-`Core.bas:1857` with the opposite default.
+**Type/name consistency checked:** `layout` throughout Tasks 6–8; `availMap`
+throughout Tasks 2–5; button arrays are 5-element after Task 3 (`e(4)` = category,
+read in `LabelManualPages`, `BuildAutoLayout`); `RenderTier` takes 8 arguments at
+all four call sites; `HasAdvanced` takes 2 at its single call site. New names —
+`ParseAvail`, `AvailLabel`, `ReadAvailMap`, `AvailFor`, `HasButton`, `IsRunnable`,
+`AvailDropdown`, `BlockSchema`, `ConfigSchemaStatus`, `FieldInUse`, `HasAnyTier`,
+`RenderOffBand`, `CollapseRows`, `SetPageTitle`, `SetColHeader`, `PageButtonCount`,
+`SetupCardGrid`, `CardCol`, `AddBtnInCell`, `FitDescRows`, `RenderNavRow`,
+`NavLink`, `RenderAllPages`, `BuildManualLayout`, `LabelManualPages`,
+`BuildAutoLayout`, `CategoryOrder`, `LabelAutoPages`, `BuildHomePage`,
+`HomeCatalog`, `HomeLegend`, `HomeLine` — are each declared once and none collides
+with an existing procedure (`build.ps1` fails the build if one did). `IsRunnable`
+is deliberately not `IsTrue`, which already exists with different semantics.
