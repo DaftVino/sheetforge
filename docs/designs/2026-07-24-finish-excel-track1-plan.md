@@ -2182,52 +2182,97 @@ error here is exactly what the structural gates cannot see.
 Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 
 - [ ] `Macros Home` exists and is the first tab.
-- [ ] **The merge works.** One category row/column reads `Clean & Standardize`
-      with **8** buttons — `PkgClean`'s 3 and the fixture's 5, declared from two
-      different modules, on one page column. If they appear as two separate
-      categories, Task 2 Step 3 is defaulting the category wrongly.
+- [ ] **The merge works, and it is the two-column case.** The `Clean & Standardize`
+      category reads **8** buttons — `PkgClean`'s 3 and the fixture's 5, declared
+      from two different modules, merged into one category. Since the per-column
+      cap is **6**, 8 buttons need **two** columns: confirm you see `Clean &
+      Standardize` (6 buttons) immediately followed by `Clean & Standardize
+      (cont. 2)` (2 buttons) — not one 8-tall column, and not two separately
+      titled categories (which would mean Task 2 Step 3 is defaulting the
+      category wrongly).
 - [ ] Categories present: `Import / Export` (5), `Clean & Standardize` (8),
-      `Ingest & Import` (3), `Validate` (8), `Reconcile` (9), `Report` (12),
+      `Ingest & Import` (3), `Validate` (5), `Reconcile` (9), `Report` (14),
       `Export` (4), `Period Close` (6), `Admin & Housekeeping` (2),
-      `Bulk Fixture Set` (26) = **10 categories, 83 buttons**.
+      `Bulk Fixture Set` (26) = **10 categories, 82 buttons**.
+      (Side by side against `PkgFixture.bas`'s own category table: `Ingest &
+      Import` 3, `CLEAN & STANDARDIZE` 5 — merges with `PkgClean`'s 3 to make
+      the 8 above, `Validate` 5, `Reconcile` 9, `Report` 14, `Export` 4,
+      `Period Close` 6, `Admin & Housekeeping` 2, `Bulk Fixture Set` 26 = 74
+      fixture actions; plus the 8 real actions — 5 from `PkgImportExport`, 3
+      from `PkgClean` — = 82.)
 - [ ] **Small categories share pages** — no page has one 3-button category alone
       while a neighbouring page has room.
-- [ ] `Validate` (8) fills two columns — the per-column cap is **6**, not 8 (contract
-      §6 was amended during Task 7; the arithmetic is in the portability note there).
+- [ ] `Validate` (5) fits in a **single** column and shows **no** `(cont.)` suffix
+      — 5 is under the per-column cap of **6** (not 8; contract §6 was amended
+      during Task 7, and the arithmetic is in the portability note there). The
+      two-column case is `Clean & Standardize`, checked above.
 - [ ] `Reconcile` (9) wraps to a second column headed `Reconcile (cont. 2)`.
       **Note the number.** Continuation headers are numbered — `(cont. 2)`, `(cont. 3)` —
       because an unnumbered suffix let one page show two identical headers. A build
       showing a bare `(cont.)` is the *old* behaviour and should be treated as a failure.
 - [ ] `Bulk Fixture Set` (26) spans more than one page.
-- [ ] **No category is split across two tabs unless it needs more than 24 buttons.**
+- [ ] **No category is split across two tabs unless it needs more than 18 buttons**
+      (more columns than a page holds: 3 columns × 6 buttons/column).
 - [ ] Page titles name the categories on that page, joined by `|` when packed —
       no bare `Macros - Page N` anywhere.
 - [ ] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
       9pt. The fixture's help strings are deliberately long; if any is cut off,
       see the AutoFit check immediately below — that is the likely cause.
 - [ ] **THE AUTOFIT CHECK — look for this one deliberately; it is the single most
-      likely thing to be wrong on first open.** `FitDescRows` and `HomeCatalog`
-      are the first `AutoFit` calls this codebase has ever executed (Tasks 6–7
-      were unreachable), and after Task 8 they run with `ScreenUpdating = False`
+      likely thing to be wrong on first open.** `FitDescRows`, `HomeCatalog`, and
+      `RenderPage`'s category-header row AutoFit are the first `AutoFit` calls
+      this build's *packed-page* code path has ever executed (Tasks 6–7 were
+      unreachable), and after Task 8 they run with `ScreenUpdating = False`
       **and** `Calculation = xlCalculationManual` from `Core_SpeedOn`. AutoFit on
       a `WrapText` cell under suppressed screen updating is a well-known spot for
       Excel to hand back a **one-line** height.
-      The card pages are half-protected by the `DESC_MIN_H` floor (24pt).
-      **`Macros Home`'s catalog has no floor at all**, so check it specifically:
-      on `Macros Home`, find the `Suggest Types` row and read column D. Its help
-      text is ~230 characters in a 62-wide column, so it must wrap to **3–4
-      lines**. If it is one line and visibly cut, this is the bug.
+      Note what is and is not new here: AutoFit under suppressed `ScreenUpdating`
+      is **not** new — `Core_BuildSetup` has done exactly this since v0.3.0 and
+      it works. The genuinely new variable this release adds is
+      `Calculation = xlCalculationManual` from `Core_SpeedOn`, now wrapping the
+      panel-build pipeline too.
+      There are **three** AutoFit sites, with different exposure:
+        1. `FitDescRows` (card descriptions) — half-protected by the
+           `DESC_MIN_H` floor (24pt).
+        2. `HomeCatalog` (the button catalog on `Macros Home`) — **no floor at
+           all**. Check: on `Macros Home`, find the `Suggest Import Types` row
+           and read column D. Its help text is **197** characters in a 62-wide
+           column, so it must wrap to multiple lines. If it is one line and
+           visibly cut, this is the bug.
+        3. `RenderPage`'s category-header row (`panel.Rows(CARD_HDR_ROW).AutoFit`)
+           — a `WrapText` cell with **no floor either**, and nobody flagged it
+           before this fix wave. The fixture's most borderline case is the merged
+           category's continuation header, **`Clean & Standardize (cont. 2)`**
+           (29 characters, 11pt bold, in the 30-character-wide card column) — the
+           closest any header comes to wrapping. Check: on `Macros 1`, cell
+           **F3** (the merged category's second column — column D holds the
+           first, un-suffixed `Clean & Standardize` header), confirm **both
+           lines** of the wrapped header are visible, not clipped to one.
+      **The risk is asymmetric — say so, or a passing rebuild reads as broken.**
+      `EnsurePanelSheet` never activates a sheet it is *reusing*; it only
+      activates one it just created via `Worksheets.Add`. On the **first** build
+      ever, `Macros Home` is created (so it's active while its `AutoFit` runs);
+      on **every build after that**, `Macros Home` already exists and reuses the
+      same instance, so its `AutoFit` runs while a *different* sheet (whichever
+      `Macros N` page rendered last) is active. The `Macros N` pages themselves
+      are always freshly created by `Worksheets.Add`, hence always active when
+      their own AutoFit runs. Net: if this bug fires anywhere, it fires **only on
+      `Macros Home`, and only from the second build onward** — a first-build
+      pass here does not clear it, and if it does show up after a *rebuild*, that
+      is expected exposure, not evidence the rebuild broke something new.
       **Fix if confirmed** (not applied pre-emptively, because the workaround
-      costs visible flicker and the bug may not occur): either re-run both
-      AutoFit passes after `Core_SpeedOff`, or bracket each pass with
-      `ScreenUpdating = True` / `= False`. Predicted by the Task 8 review; if the
-      text wraps correctly, tick this and change nothing.
+      costs visible flicker and the bug may not occur): either re-run the
+      affected AutoFit pass(es) after `Core_SpeedOff`, bracket each pass with
+      `ScreenUpdating = True` / `= False`, or — the cheaper one-liner —
+      `Activate` `Macros Home` at the **start** of `BuildHomePage` instead of only
+      at the end. Predicted by the Task 8 review; if the text wraps correctly,
+      tick this and change nothing.
 - [ ] Cards align across all three columns — button tops and description tops line
       up on every row.
 - [ ] `<< Home` is in the same cell on every page and works; `< Previous` /
       `Next >` work and are absent on the first/last page.
 - [ ] No `Macros` tab remains.
-- [ ] Home's action catalog lists all 83 buttons with full descriptions and a
+- [ ] Home's button catalog lists all 82 buttons with full descriptions and a
       working page link each.
 
 - [ ] **Step 3: Fixture pass — the three availability states**
@@ -2245,8 +2290,12 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
       summary, no per-step dialogs.
 - [ ] Build a chain containing `fixture.a1` (which is `Off`): Finalize **BLOCKS**
       with `OFF ACTION IN CHAIN`, naming the chain, and refuses to activate.
-- [ ] Type `maybe` into an Availability cell: Finalize **BLOCKS** with
-      `UNRECOGNISED Availability` and does not activate.
+- [ ] **Paste** (do not type) `maybe` into an Availability cell — `AvailDropdown`
+      validates with `AlertStyle:=xlValidAlertStop`, which hard-refuses a typed
+      invalid entry before it ever reaches the cell, so typing `maybe` cannot
+      exercise this check at all; pasting bypasses cell validation and is the
+      only way to get an unrecognised value into the cell. Finalize **BLOCKS**
+      with `UNRECOGNISED Availability` and does not activate.
 - [ ] Clear an Availability cell entirely: it reads as `Button` and activates.
 
 - [ ] **Step 4: Fixture pass — the collapsed band**
@@ -2265,9 +2314,18 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 
 - [ ] **Step 5: Fixture pass — manual codes, cancel and error paths**
 
-- [ ] `1A` on one action and `2B` on another, rest blank, Finalize: numbered pages
-      appear, uncoded buttons land in page 1's `Unassigned` column, headers read
-      `Column A` / `Column B` / `Unassigned`.
+- [ ] `1A` on one action and `2B` on another, rest blank, Finalize (at fixture
+      scale this leaves roughly 80 buttons uncoded): numbered pages appear;
+      `1A`'s button is on page 1 headed `Column A`, `2B`'s is on page 2 headed
+      `Column B`. **This is NOT a one-column result at this scale.** Every
+      uncoded button starts in page 1's `Unassigned` column, but
+      `SplitTallManualColumns` splits any column over the 6-button cap into
+      further columns before `CapManualColumns` caps every page at 3 columns —
+      so ~80 Unassigned buttons spread across **several pages**, headed
+      `Unassigned`, `Unassigned (cont. 2)`, `Unassigned (cont. 3)`, and so on.
+      This is expected: it is the same overflow machinery a same-code stack past
+      6 buttons already uses, applied to the Unassigned bucket. Do not read
+      several `Unassigned (cont. N)` pages as a bug.
 - [ ] `hide` omits a button while leaving its catalog row.
 - [ ] Clear every code: packed auto-layout returns.
 - [ ] A bad code (`0A`, `A1`, `1`): Finalize blocks with `BAD CODE`.
@@ -2277,16 +2335,27 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 - [ ] Finalize twice in a row: no *"That name is already taken"*, no `Setup (2)`.
 - [ ] **Force the failure path once, deliberately.** This is the only genuinely new
       logic in the cutover, it sits on the live Finalize path, and no amount of code
-      reading can prove it — so break it on purpose. Make the rebuild raise
-      mid-pipeline (hiding `Macros Home` and re-running is the easiest trigger; so is
-      renaming `_Config` after activating). You must get **exactly two dialogs, in
-      this order**: first `Core_BuildControlPanel error: … Your settings are safe`,
-      then `Configuration activated, but rebuilding the Macros pages failed`.
-      Before the cutover this path showed the error and then cheerfully claimed the
-      rebuild had succeeded — on a workbook whose panels were already deleted, so it
-      had no buttons at all. If you see one dialog, or the success wording, the
-      build-success flag is not being read. Then re-run Finalize and confirm the
-      workbook fully recovers.
+      reading can prove it — so break it on purpose. **Trigger: right-click the
+      `Macros Home` tab ▸ Protect Sheet ▸ OK (no password needed), then Finalize.**
+      `DeletePanels` deliberately spares `Macros Home` (it only removes `Macros N`
+      pages), so the rebuild **reuses** the existing, now-protected sheet rather than
+      recreating it — and `EnsurePanelSheet`'s `Cells.Clear` raises a runtime 1004 on
+      a protected sheet, which propagates out of `BuildHomePage` to
+      `Core_BuildControlPanel`'s own error handler. (Two other triggers people reach
+      for do **not** work and verify nothing: hiding `Macros Home` and re-running
+      does not raise — `BuildHomePage` unhides the index before activating it, and
+      writing to a hidden sheet is legal anyway; and renaming `_Config` does not
+      raise either — `CfgSheet()` swallows a missing `_Config` and every consumer is
+      `Nothing`-safe, so the build simply succeeds with defaults.) You must get
+      **exactly two dialogs, in this order**: first `Core_BuildControlPanel error:
+      … Your settings are safe. Click 'Finalize Setup Tab' again to retry the
+      rebuild.`, then `Configuration activated, but rebuilding the Macros pages
+      failed`. Before the cutover this path showed the error and then cheerfully
+      claimed the rebuild had succeeded — on a workbook whose panels were already
+      deleted, so it had no buttons at all. If you see one dialog, or the success
+      wording, the build-success flag is not being read. **Then unprotect `Macros
+      Home`** (right-click ▸ Unprotect Sheet) **and re-run Finalize**, and confirm
+      the workbook fully recovers.
 
 - [ ] **Step 6: Real pass — the shipping bundle**
 
@@ -2320,6 +2389,55 @@ with manual page codes set:
 
 If codes come back blank, `BlockSchema` / `ConfigSchemaStatus` (Task 4) is wrong —
 stop and fix it; do not re-enter the codes by hand.
+
+- [ ] **Step 7b: Previously-unverified behaviour (added in the final-review fix
+      wave)** — shipped but never exercised by the checklist above.
+
+- [ ] **The config-migration recovery states nobody has triggered.**
+      `ConfigSchemaStatus`/`GateConfigMigration` (Task 4) has more outcomes than
+      the "legacy" / "invalid" paths Step 7 above exercises:
+      - `damaged` (the hidden schema marker itself is unparseable or tampered,
+        not a visible page code) — force it by corrupting the marker cell
+        directly, and confirm `ConfirmAndClear`'s guarded rebuild runs (explicit
+        DISCARDED/KEPT wording, defaults to No).
+      - `unknown` (a marker from a newer version than this build understands) —
+        force it by writing a higher schema string into the marker cell, and
+        confirm `Create Setup Tab` **refuses** and tells you to re-import that
+        version's bundle, rather than rebuilding.
+      - the `invalid`-with-**no-Setup-tab** escape hatch (contract §5) — delete
+        the Setup tab, then corrupt a page code in the hidden `_Config` so it
+        cannot be recovered, and confirm you get the non-default confirmation
+        prompt naming what will be discarded, not a silent rebuild.
+      To edit `_Config` directly for any of these: it is `xlSheetVeryHidden`, so
+      it cannot be unhidden from the Excel UI (Format ▸ Sheet ▸ Unhide will not
+      list it) — open the VBA editor (Alt+F11), select the sheet in the
+      Properties window, and set its `Visible` property there.
+- [ ] **Macros Home's own links**, not just the button catalog's. Click `Setup
+      Menu` (goes to the admin tab) and click each page-list row's link in the
+      `PAGE` column (goes to that `Macros N`) — only the catalog's per-button
+      page links have been exercised so far.
+- [ ] **A chain's card vs. its Home catalog row.** Build a chain with enough
+      steps (or long enough captions) to exceed `CHAIN_CARD_STEPS`/
+      `CHAIN_CARD_CHARS`, and confirm: the card on its `Macros N` page is
+      **bounded** — it shows a partial step list ending `+N more - see Macros
+      Home` — while the same chain's row in Home's button catalog shows the
+      **full** recipe, unbounded. Also confirm a `+0 more` tail never appears
+      (that would mean nothing was actually left off but the card claims there
+      is more — a bug, not a valid state).
+- [ ] **The reserved `Chains` category sorts last.** Author a chain before
+      filling in any other category's actions (or simply note when the chain
+      was authored relative to the other actions) and confirm its column still
+      renders after every other category's, regardless of authoring order.
+- [ ] **Shrink-on-rebuild.** Build with the fixture (`dist/MacrosBundle.fixture.bas`),
+      then rebuild the SAME workbook with the real bundle
+      (`dist/MacrosBundle.bas`, fixture removed) and Finalize again. Confirm: no
+      dead links on `Macros Home` pointing at a page that no longer exists, no
+      tall rows left behind from the fixture's longer descriptions, and exactly
+      one `Macros Home` tab (not a `Macros Home (2)`).
+- [ ] **The all-off empty-layout case.** Set every action's Availability to
+      `Off` (no buttons at all) and Finalize. Confirm `Macros Home` still builds
+      and reads `No actions are available as buttons yet.` instead of an error
+      or a blank/broken page list.
 
 - [ ] **Step 8: Record the result**
 
@@ -2373,14 +2491,14 @@ Under `## [Unreleased]`, insert:
 ### Added
 
 - **`Macros Home`** — a generated index tab, always first and always built: one row
-  per page with its button count and a link, a full **action catalog** (every
+  per page with its button count and a link, a full **button catalog** (every
   button, its complete description, and the page it is on), a `Setup Menu` link,
   and a legend explaining page codes and availability.
 - **Capacity-packed auto-layout.** With no page codes filled in, buttons
-  distribute automatically: up to three category-headed columns per page, up to 8
+  distribute automatically: up to three category-headed columns per page, up to 6
   buttons per column, small categories sharing a page, and a category never split
-  across tabs unless it is larger than a whole page. Filling in even one code
-  still hands total control back to the codes.
+  across tabs unless it needs more columns than a page holds (more than 18
+  buttons). Filling in even one code still hands total control back to the codes.
 - **Legible descriptions.** Button pages are now an **unmerged cell-card grid** —
   button anchored to a content cell, its description in the cell beneath, that row
   auto-fitted. Grouped pages previously had no descriptions at all, and merged
