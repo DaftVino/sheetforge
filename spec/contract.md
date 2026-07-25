@@ -345,9 +345,9 @@ predates v1.2.0 is unchanged.
 - **Reference-implementation tolerance (v1.2.0).** The three canonical tokens
   above remain the only NORMATIVE values — a port MAY be strict and accept only
   them. The Excel reference implementation additionally accepts, purely as a
-  convenience for a user typing the obvious thing: `yes` / `y` / `on` / `true` /
-  `1` as `button`; `chain only` / `chains` / `chain` as `chains-only`; and `no` /
-  `n` / `false` / `0` as `off`. A port MAY implement this tolerance but is not
+  convenience for a user typing the obvious thing: `yes` / `y` / `on` / `true`
+  as `button`; `chain only` / `chains` / `chain` / `chains-only` as `chains-only`;
+  and `no` / `n` / `false` as `off`. A port MAY implement this tolerance but is not
   required to; it does not change what gets stored (still one of the three
   canonical tokens) or the blocking behavior for anything outside this list.
 
