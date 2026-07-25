@@ -137,6 +137,68 @@ if ($asciiProblems.Count -gt 0) {
     exit 1
 }
 
+# --- guard: no VBA reserved word used as a Dim/parameter identifier ---
+# Added after `Dim reg As Object, any As Boolean` shipped in a v0.4.0 bundle and
+# failed the owner's Debug > Compile on first import. `Any` is reserved (it
+# appears in `Declare ... As Any`), and the VBE reports the error against the
+# ENCLOSING procedure's declaration line rather than the Dim - so the signature
+# looks like the culprit and the real cause is a line further down.
+#
+# Nothing else here can see this class of defect: the duplicate-name and
+# block-balance checks below are structural, scripts/vba-syntax-check.mjs parses
+# without flagging reserved-word identifiers, and it reads as valid VBA to a
+# human. Excel's own compiler was the only detector, which in this repo means a
+# human's manual import - the most expensive place to find anything.
+#
+# The list is deliberately CONSERVATIVE and EMPIRICAL. It holds only words VBA
+# hard-rejects as an identifier, so a false positive would have to be code
+# nobody would write (`Dim to As Long`). It deliberately OMITS words that are
+# reserved only contextually and demonstrably compile as identifiers in this
+# codebase - `name` (Core_FindCol's parameter) and `base` (MintChainId), both
+# shipped since v0.2.0/v0.3.0. Add a word here when Excel rejects one, not on
+# suspicion: over-broad, this gate fails a build that would have worked.
+$vbaReserved = @(
+    'any','as','byref','byval','call','case','const','declare','dim','do','each','else','elseif',
+    'end','eqv','erase','event','exit','false','for','friend','function','get','global','gosub',
+    'goto','if','imp','implements','in','is','let','like','loop','me','mod','new','next','not',
+    'nothing','null','on','option','optional','or','paramarray','preserve','private','property',
+    'public','put','raiseevent','redim','rem','resume','return','select','set','static','step',
+    'stop','sub','then','to','true','typeof','until','wend','while','with','withevents','xor'
+)
+$resWords = @{}; $vbaReserved | ForEach-Object { $resWords[$_] = $true }
+$reservedProblems = New-Object System.Collections.Generic.List[string]
+foreach ($f in $asciiCandidates) {
+    $leaf = Split-Path $f -Leaf
+    $srcLines = Get-Content -LiteralPath $f
+    for ($i = 0; $i -lt $srcLines.Count; $i++) {
+        $ln = $srcLines[$i]
+        if ($ln -match "^\s*'") { continue }          # comment line
+        $names = @()
+        # Dim / Static declarations: take the identifier before each `As`
+        if ($ln -match '^\s*(?:Dim|Static)\s+(.+)$') {
+            foreach ($part in ($matches[1] -split ',')) {
+                if ($part -match '^\s*([A-Za-z_]\w*)') { $names += $matches[1] }
+            }
+        }
+        # parameter lists on a Sub/Function declaration
+        if ($ln -match '^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?(?:Sub|Function)\s+\w+\s*\((.*)$') {
+            foreach ($part in ($matches[1] -split ',')) {
+                if ($part -match '(?:ByVal\s+|ByRef\s+)?([A-Za-z_]\w*)\s+As\b') { $names += $matches[1] }
+            }
+        }
+        foreach ($nm in $names) {
+            if ($resWords[$nm.ToLower()]) {
+                $reservedProblems.Add("VBA reserved word '$nm' used as an identifier in ${leaf}:$($i + 1) - Excel will refuse to compile this. Rename it. Line: $($ln.Trim())")
+            }
+        }
+    }
+}
+if ($reservedProblems.Count -gt 0) {
+    Write-Host "BUILD FAILED - source validation:" -ForegroundColor Red
+    $reservedProblems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 1
+}
+
 # --- guard: every Sub/Function/Property name must be unique across all modules ---
 # NOTE: Property Get/Let/Set sharing a name would false-positive here; this
 # codebase uses none. Add kind to the key if that changes.
