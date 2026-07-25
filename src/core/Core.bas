@@ -1560,15 +1560,18 @@ Private Function ActionTokenFor(ByVal actionId As String) As String
     Next reg
 End Function
 
-' "Caption [id]" for a hidden entry in ComposeReport, matching the format the
-' OFF/CHAINS ONLY availability lists just above it already use ("caption
-' [id]", built from the registry) - fix round 1, fix 5: the hidden list used
-' to print the bare lowercased map key, e.g. "importexport.suggesttypes",
-' while everything around it names the button too. ActionTokenFor alone only
-' knows registry actions; a hidden CHAIN (chain.*) is not in the registry, so
-' it is resolved against the chains collection ComposeReport already read,
-' falling back to "id [id]" only if neither lookup finds it (should not
-' happen for a live id, but matches ActionTokenFor's own fallback shape).
+' "Caption [id]" for a HIDDEN or UNASSIGNED entry in ComposeReport, matching
+' the format the OFF/CHAINS ONLY availability lists just above them already
+' use ("caption [id]", built from the registry) - fix round 1, fix 5: the
+' hidden list used to print the bare lowercased map key, e.g.
+' "importexport.suggesttypes", while everything around it names the button
+' too; fix round 2, fix 2 closed the same gap in the unassigned list right
+' below it, so one report no longer mixes two formats. ActionTokenFor alone
+' only knows registry actions; a hidden/unassigned CHAIN (chain.*) is not in
+' the registry, so it is resolved against the chains collection ComposeReport
+' already read, falling back to "id [id]" only if neither lookup finds it
+' (should not happen for a live id, but matches ActionTokenFor's own fallback
+' shape).
 Private Function HiddenTokenFor(ByVal id As String, chains As Collection) As String
     Dim ch As Object
     If IsChainId(id) Then
@@ -2124,7 +2127,11 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
         If LCase(code) = "hide" Then
             hidden = hidden & "  - " & HiddenTokenFor(CStr(k), chains) & vbCrLf
         ElseIf Len(code) = 0 Then
-            unassigned = unassigned & "  - " & k & vbCrLf
+            ' Fix round 2, fix 2: was the bare lowercased key - same
+            ' inconsistency fix round 1's fix 5 removed from the HIDDEN list
+            ' just above, now closed here too so both lists in one report
+            ' agree on "caption [id]".
+            unassigned = unassigned & "  - " & HiddenTokenFor(CStr(k), chains) & vbCrLf
         ElseIf Not ParseCode(code, tabNum, colIx, colL) Then
             s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf: structural = structural + 1
         End If
@@ -2516,6 +2523,10 @@ Private Sub BuildAdminPanel()
         .Value = "Setup Menu"
         .Font.Size = 16: .Font.Bold = True: .Font.Color = RGB(31, 78, 121)
     End With
+    ' Fix round 2, fix 1: same reasoning as Macros Home's B2 - EnsurePanelSheet's
+    ' row-height reset pins row 2 at StandardHeight, which does not grow for a
+    ' 16pt title, so set it literally right after the title is written.
+    ws.Rows(2).RowHeight = 21
     With ws.Range("B3")
         .Value = "First-time and re-configuration controls. Right-click this tab -> Hide when you're done."
         .Font.Italic = True
@@ -2754,6 +2765,27 @@ NextSlot:
             .Font.Color = RGB(192, 0, 0)
             .WrapText = True
         End With
+    End If
+    ' Fix round 2, fix 1: the title (col B) and the skipped-column warning
+    ' (col D) share this one physical row, so a single RowHeight governs both.
+    ' EnsurePanelSheet's reset (fix round 1, fix 3) pins every row at
+    ' StandardHeight, which - unlike Excel's implicit grow-to-fit-font on a
+    ' fresh/never-sized row - does NOT grow for a 15pt bold title, so it must
+    ' be set explicitly here, same as the header row just below gets an
+    ' explicit AutoFit. Literal, not AutoFit: a title is one line at a known
+    ' font size, so a literal height is fully deterministic and stays immune
+    ' to the AutoFit-under-ScreenUpdating=False risk already flagged for
+    ' FitDescRows/HomeCatalog. The warning is unreachable by invariant today
+    ' (both filers cap every page at CARD_COLS columns by construction) but
+    ' its message text is effectively fixed-length (only skipped's digit
+    ' count varies), so a generous literal height is exactly as deterministic
+    ' as the title's - sized only after both possibilities are known, which is
+    ' why this runs after the skipped check rather than right after the title
+    ' is written.
+    If skipped > 0 Then
+        panel.Rows(CARD_HDR_ROW - 1).RowHeight = 130   ' room for the wrapped warning sentence
+    Else
+        panel.Rows(CARD_HDR_ROW - 1).RowHeight = 20    ' clears a single 15pt bold title line
     End If
     ' Explicit AutoFit for the header row: it renders correctly on a fresh
     ' sheet only because Excel's implicit auto-height flag is still live.
@@ -3261,6 +3293,11 @@ Private Sub BuildHomePage(layout As Object, ByVal isManual As Boolean)
         .Font.Bold = True
         .Font.Color = RGB(31, 78, 121)
     End With
+    ' Fix round 2, fix 1: EnsurePanelSheet's row-height reset pins row 2 at
+    ' StandardHeight, which does not grow for an 18pt title the way a
+    ' never-explicitly-sized row implicitly would - set literally, right after
+    ' the title is written, so it clears the font instead of clipping it.
+    ws.Rows(2).RowHeight = 23
     With ws.Range("B3")
         .Value = "Pick a page below, or find an action in the catalog. Every page has a  << Home  link back here."
         .Font.Italic = True
