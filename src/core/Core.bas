@@ -81,13 +81,17 @@ Private Const HOME_SHEET As String = "Macros Home"  ' generated index; RESERVED 
 Private Const CARD_COLS   As Long = 3            ' card columns per page -> B, D, F
 Private Const CARD_W      As Double = 30         ' content column width, in characters
 Private Const GUTTER_W    As Double = 3          ' spacer column width, in characters
-Private Const CARD_HDR_ROW As Long = 5           ' category header row; cards start at 6
-Private Const BTN_H      As Double = 26
-Private Const BTN_ROW_H  As Double = 30          ' button row height (BTN_H + padding)
+Private Const CARD_HDR_ROW As Long = 3           ' category header row; cards start at 4
+                                                 ' (rows 2/4 blank chrome spacers were removed -
+                                                 ' fix round 1: title now row 2, header row 3)
+Private Const BTN_H      As Double = 28          ' fix round 1: 26 clipped a 2-line wrapped caption
+Private Const BTN_ROW_H  As Double = 32          ' button row height (BTN_H + padding)
 Private Const DESC_MIN_H As Double = 24          ' floor after AutoFit
-Private Const DESC_MAX_H As Double = 60          ' ceiling: ~5 lines at 9pt in a 30-char column,
-                                                 ' which clears the longest shipped help string
-Private Const AUTO_COL_MAX As Long = 8           ' buttons per card column before a new column
+' No DESC_MAX_H: contract 6 forbids clipping a description, and a manual clamp on
+' an AutoFit row is exactly how Excel clips. AutoFit gets the honest height, full
+' stop - a pathological 20-step chain draws one tall row instead of a silent cut.
+Private Const AUTO_COL_MAX As Long = 6           ' buttons per card column before a new column
+                                                 ' (fix round 1: was 8; 8 only fits full-HD/100%)
 ' BTN_W, ROW_GAP, COL_GAP and HDR_H are no longer used by the card grid, but the
 ' legacy point-positioned RenderPageLegacy (still called by BuildGroupedPanels
 ' until Task 8) references them, so they stay until that builder is deleted.
@@ -1499,18 +1503,25 @@ Private Function ParseStepTokens(ByVal cell As String) As Collection
     Next i
 End Function
 
-' "Import Source Data [importexport.import]" for an action id (falls back to the id).
-Private Function ActionTokenFor(ByVal actionId As String) As String
+' Caption for an action id (falls back to the id itself). Shared registry lookup
+' factored out of ActionTokenFor so a caption-only consumer (StepsInline) doesn't
+' have to strip the " [id]" suffix back off.
+Private Function ActionCaptionFor(ByVal actionId As String) As String
     Dim reg As Object, a As Object
-    ActionTokenFor = actionId & " [" & actionId & "]"
+    ActionCaptionFor = actionId
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
             If LCase(CStr(a("id"))) = LCase(actionId) Then
-                ActionTokenFor = CStr(a("caption")) & " [" & CStr(a("id")) & "]"
+                ActionCaptionFor = CStr(a("caption"))
                 Exit Function
             End If
         Next a
     Next reg
+End Function
+
+' "Import Source Data [importexport.import]" for an action id (falls back to the id).
+Private Function ActionTokenFor(ByVal actionId As String) As String
+    ActionTokenFor = ActionCaptionFor(actionId) & " [" & actionId & "]"
 End Function
 
 Private Function StepsToTokens(steps As Collection) As String
@@ -2329,10 +2340,14 @@ Private Function GatherButtons() As Collection
     Set GatherButtons = out
 End Function
 
+' Chain help text only - fix round 1: was raw action ids ("importexport.updateMaster"),
+' which are long and unbroken and blow past a card's width in a few steps. Captions
+' read as "Clear Sheets > Import Data > Update Master" for a finance user. The
+' Setup-tab authoring format (StepsToTokens, "Label [id]") is untouched.
 Private Function StepsInline(steps As Collection) As String
     Dim s As String, v As Variant
     For Each v In steps
-        s = s & IIf(Len(s) > 0, " > ", "") & CStr(v)
+        s = s & IIf(Len(s) > 0, " > ", "") & ActionCaptionFor(CStr(v))
     Next v
     StepsInline = s
 End Function
@@ -2543,16 +2558,16 @@ Private Sub AddBtnInCell(ws As Worksheet, ByVal nm As String, ByVal cap As Strin
     AddBtn ws, nm, cap, action, anchor.Left, anchor.Top + 1, anchor.Width, BTN_H
 End Sub
 
-' AutoFit each description row, then clamp. AutoFit works here ONLY because
-' nothing on the card grid is merged. The clamp is two-sided: the floor keeps
-' one-line cards from looking broken next to three-line neighbours, and the
-' ceiling stops one runaway string from pushing the page off screen.
+' AutoFit each description row, then floor it. AutoFit works here ONLY because
+' nothing on the card grid is merged. Floor only, no ceiling (fix round 1,
+' contract 6): the floor keeps a one-line card from looking broken next to a
+' three-line neighbour; a ceiling would clip, which is exactly what contract 6
+' forbids for a description.
 Private Sub FitDescRows(ws As Worksheet, ByVal firstDescRow As Long, ByVal lastRow As Long)
     Dim r As Long
     For r = firstDescRow To lastRow Step 2
         ws.Rows(r).AutoFit
         If ws.Rows(r).RowHeight < DESC_MIN_H Then ws.Rows(r).RowHeight = DESC_MIN_H
-        If ws.Rows(r).RowHeight > DESC_MAX_H Then ws.Rows(r).RowHeight = DESC_MAX_H
     Next r
 End Sub
 
@@ -2565,7 +2580,9 @@ Private Function RenderPageLegacy(pages As Object, ByVal tabNum As Long) As Work
     Set panel = EnsurePanelSheet(PANEL_BASE & tabNum, False)
     leftBase = panel.Range("B4").Left: topBase = panel.Range("B4").Top
     AddText panel, leftBase, panel.Range("B2").Top, 400, 24, "Macros - Page " & tabNum, 15, True, RGB(31, 78, 121)
-    Set cols = pages(tabNum)
+    Set cols = pages(tabNum)("cols")   ' fix round 1: AddToPage now files a page dict {title,cols,hdrs},
+                                       ' not the cols dict directly - SortedKeys(pages(tabNum)) here
+                                       ' used to CLng("title") and blew up with runtime error 13
     colKeys = SortedKeys(cols)
     For ci = LBound(colKeys) To UBound(colKeys)
         colIx = colKeys(ci)
@@ -2605,7 +2622,10 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
     Set panel = EnsurePanelSheet(PANEL_BASE & tabNum, False)
     SetupCardGrid panel
     RenderNavRow panel, prevSheet, nextSheet
-    With panel.Cells(3, 2)
+    ' fix round 1: rows 2 and 4 used to be blank chrome spacers; removed, so the
+    ' title now sits directly under the nav row and the category header directly
+    ' under the title (CARD_HDR_ROW moved from 5 to 3 to match).
+    With panel.Cells(CARD_HDR_ROW - 1, 2)
         .Value = CStr(page("title"))
         .Font.Size = 15
         .Font.Bold = True
@@ -2613,7 +2633,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
     End With
 
     colKeys = SortedKeys(cols)
-    lastRow = CARD_HDR_ROW + 1
+    lastRow = CARD_HDR_ROW     ' honest starting point: nothing drawn past the header yet
     slot = 0
     For si = LBound(colKeys) To UBound(colKeys)
         colIx = CLng(colKeys(si))
@@ -2630,6 +2650,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
                 .Font.Size = 11
                 .Font.Color = RGB(54, 32, 100)
                 .Interior.Color = RGB(221, 217, 240)
+                .WrapText = True    ' fix round 1: a long category used to spill into the gutter
             End With
         End If
         For ii = 1 To items.Count
@@ -2645,6 +2666,13 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
                 .Font.Color = RGB(110, 110, 110)
                 .WrapText = True
                 .VerticalAlignment = xlTop
+                ' fix round 1: a faint bottom rule so a button+description pair
+                ' reads as one card instead of a button floating over grey text.
+                With .Borders(xlEdgeBottom)
+                    .LineStyle = xlContinuous
+                    .Weight = xlHairline
+                    .Color = RGB(221, 221, 226)
+                End With
             End With
             If dRow > lastRow Then lastRow = dRow
         Next ii
@@ -2838,6 +2866,12 @@ Private Sub AddBtn(ws As Worksheet, ByVal nm As String, ByVal cap As String, ByV
     btn.OnAction = action
     btn.Font.Size = 11
     btn.Font.Bold = True
+    ' fix round 1: explicit, not relied-on-by-default. The card grid grows
+    ' description rows AFTER buttons are placed, which reflows every button
+    ' below the first pair - that only works because a Forms button anchors and
+    ' resizes with its underlying cells, which is xlMoveAndSize. Make it explicit
+    ' rather than leaving the whole card-grid layout resting on Excel's default.
+    btn.Placement = xlMoveAndSize
 End Sub
 
 '================================================================
