@@ -299,30 +299,113 @@ concrete answer to designing a 60-button layout while only 7 actions exist.
 
 ## 5. Handoff log
 
-### 2026-07-24 — design agreed, plan not yet written
+### 2026-07-24 — design agreed by the owner; no code written yet
 
-**Decided this session.** Sequencing (polish before catalog). Catalog shape (all
-actions individually listed, thin wrappers over private family engines).
-Two-segment ids with a domain vocabulary decoupled from module names. Per-action
-enable with the collapsed-band resolution. Wave 1 = the 7-action ingest→clean
-path. Wave 2 = Validate & Reconcile. Target ~35–40 of 58, verdicts annotated into
-the catalog doc.
+**Branch / commits.** `docs/finish-excel-design` off `main` (`0d0cccd`), one
+commit **`88d7b3f`** — *"docs: design the Finish Excel phase (polish pass, then
+catalog waves)"*. **Not pushed, no PR** (docs-only; nothing to verify in Excel
+yet). `main` remains at v0.3.0 / contract v1.1.0.
 
-**Next.** `writing-plans` for track 1 (`v0.4.0`, Core-only + contract v1.2.0).
-Track 2 gets its own plan per wave.
+**What shipped.** Docs only, no `src/` change: **new** this design doc (16.7KB);
+`docs/macro-catalog-plug-and-play.md` rewritten with a per-item build verdict
+(16.3KB, now the authoritative build queue); `TODOS.md` refreshed — its header
+was stale (claimed v0.2.1 and "pending merge") and its Roadmap replaced by the
+six waves. Test count unchanged: **none, by repo policy** — VBA has no headless
+runner. `build/build.ps1` was not run because no `.bas` file changed.
 
-**Read manifest for the next session.** This design · `spec/contract.md` (v1.1.0,
-to be bumped) · `docs/macro-catalog-plug-and-play.md` (now annotated with build
-verdicts) · `src/core/Core.bas` in slices — `Core_BuildSetup:820`,
-`RenderPlacementBlock:1242`, `ReadCodeMap:1269`, `Core_BuildControlPanel:1517`,
-`GatherButtons:1549`, `BuildSinglePanel:1579`, `BuildGroupedPanels:1636`,
-`RenderPage:1734` · `src/packages/PkgClean.bas` (the package pattern to copy).
+**Decided this session.** Sequencing (polish before catalog, owner's call).
+Catalog shape: every action individually listed, thin public wrappers over
+private package-prefixed family engines. Two-segment action ids whose domain is a
+user-facing vocabulary decoupled from the module. Per-action enable with the
+collapsed-band resolution. Wave 1 = the 7-action ingest→clean path; wave 2 =
+Validate & Reconcile. 34 items across six waves → 35 new actions, ~48 listed
+total; 8 *Later*, 5 *Deferred*, 4 *Declined*.
+
+**Design decisions a next session might "fix" wrongly — DO NOT REVERT:**
+
+- **Setup collapses settings for disabled actions; it does NOT omit them** (§2.3).
+  *Reason:* `Core_BuildSetup` deletes and re-seeds Setup from the **finalized**
+  `_Config`, so omit-unless-enabled costs toggle→Finalize→rebuild→fill→Finalize
+  and discards anything typed but not finalized. This deliberately overrides all
+  three `/deliberate` panelists.
+- **Action ids stay two segments, `<domain>.<operation>`** — do not "improve" to
+  `<domain>.<object>.<operation>`. *Reason:* the user types the id by hand into a
+  Setup cell as `Label [action.id]`; brevity is a correctness property here, not
+  a preference.
+- **The domain is NOT the module name.** *Reason:* encoding the module in a
+  permanent dispatch key makes a future package split a major contract break.
+  This is why new `import.*` actions may live in a different module from
+  `importexport.import` and still share one Home card.
+- **The eight shipped ids are grandfathered literally, including the two
+  camelCase ones** (`importexport.updateMaster`, `importexport.suggestTypes`). Do
+  not normalize their casing, do not split the `importexport` domain, and **do
+  not add an alias table** — an alias creates two permanent names for one action
+  and would have to be ported to Apps Script.
+- **Wave 1 is the coherent ingest→clean path, not a cross-category sampler.**
+  *Reason:* owner's call after the panel split 2-1 the other way; chains make a
+  related wave immediately useful as one button.
+- **No search, and no Recent Actions ever.** *Reason:* Recent Actions needs
+  runtime writes that the next Finalize overwrites — it is architecturally
+  broken, not merely unpolished. Favorites is deferred but remains additive.
+
+**Discovered (empirical — read Core before planning, these changed the design):**
+
+- **`RenderPlacementBlock` (`Core.bas:1242`) is already a per-action catalog
+  row** — it writes `Caption [id]`, the id hidden in `RID_COL`, and one yellow
+  editable cell per action. So per-action Enabled is *one more column on an
+  existing block*, not a new mechanism.
+- **`RenderPage` (`Core.bas:1734`) already draws a page title and column
+  headers**, so design §8's "per-page titles, column headings" are partly built.
+  The real gaps: grouped pages carry **no descriptions at all** (only
+  `BuildSinglePanel:1616` writes them, into column C), titles are meaningless
+  (`"Macros - Page 1"` / `"Column A"`), no legend, no nav, no auto-layout.
+- **`GatherButtons` (`Core.bas:1549`) is the single funnel** for both actions and
+  chains — disabled-action filtering lands in exactly one place.
+- **`Core_BuildSetup` (`Core.bas:825`) deletes and rebuilds the Setup sheet**,
+  re-seeding from the finalized `_Config`. This is the constraint behind §2.3.
+- **`build.ps1` has NO action-id check today** — only duplicate *procedure* names
+  (line 91). Both the duplicate-id and unknown-domain checks are new work.
+- **Shipped action ids, in full:** `importexport.clear`, `importexport.import`,
+  `importexport.updateMaster`, `importexport.export`,
+  `importexport.suggestTypes`, `clean.dupes`, `clean.trim`, `clean.filldown`.
+- **`/deliberate` on this machine (in addition to the known stdin rule):** pass
+  the **full** model id (`gpt-5.6-terra` / `gpt-5.6-sol`); codex prints its answer
+  **twice** in the captured output, so strip the preamble by cutting after the
+  **last** `^codex$` line; `node` importing a script from the `x:` drive needs a
+  `file:///x:/...` URL, not `x:/...`; and **PowerShell here-strings (`@'…'@`)
+  break in the Bash tool** — use a heredoc (this created a stray empty file
+  named `clean`, since removed).
+- **`docs/code-map.md` is still absent** and `Core.bas` is 76.8KB / ~125 procs.
+
+**Still open.** Nothing blocking, and **nothing needs the human right now** — the
+design is owner-approved. The Excel manual-verification gate (import + Debug ▸
+Compile VBAProject + click every action, cancel path and error path) arrives at
+the *end* of the polish implementation and only the owner can run it. Deferred
+non-blocking Minors from the previous phase still sit in
+`.superpowers/sdd/progress.md`.
+
+**Next phase — `writing-plans` for track 1** (`v0.4.0`, Core-only, contract
+bumped to v1.2.0). Track 2 gets its own plan per wave. Consider `/code-map`
+first: the pass touches the Setup renderer, the panel builder and
+`GatherButtons`, all inside a 77KB file.
+
+**Read manifest.** This design (16.7KB, §2 is the whole track-1 spec) ·
+`docs/macro-catalog-plug-and-play.md` (16.3KB, the build queue) ·
+`spec/contract.md` (19.4KB, v1.1.0 → to be bumped to v1.2.0) · `TODOS.md`
+(6.4KB) · `build/build.ps1` (8.1KB, for the new id checks) · `src/core/Core.bas`
+(76.8KB — **read in slices via Grep, never whole**): `Core_AddField:88`,
+`Core_AddAction:125`, `Core_BuildSetup:820`, `RenderTier:923`,
+`RenderPlacementBlock:1242`, `ReadCodeMap:1269`, `Core_FinalizeSetup:1419`,
+`Core_BuildControlPanel:1517`, `GatherButtons:1549`, `BuildSinglePanel:1579`,
+`BuildGroupedPanels:1636`, `AddToPage:1723`, `RenderPage:1734`,
+`DeletePanels:1783` · `src/packages/PkgClean.bas` (6.8KB, the package pattern to
+copy for wave 1).
 
 **Still true and easy to trip over.** No VBA compiler in CI — `build.ps1` checks
 block balance, duplicate proc names and module-level declarations after the first
-procedure; `scripts/vba-syntax-check.mjs` is a parser only. The real gate is a
-human importing the bundle, running Debug ▸ Compile VBAProject, and clicking. The
-do-not-revert lists in
+procedure; `scripts/vba-syntax-check.mjs` is a parser only, missing undefined
+vars and type errors. The real gate is a human importing the bundle, running
+Debug ▸ Compile VBAProject, and clicking. The do-not-revert lists in
 `docs/designs/2026-07-24-compose-your-buttons-plan.md` (§ Handoff log) still
 apply in full — in particular: module-level `Const` stays in the declarations
 section, `_Config` is unhidden before `.Delete`, and admin controls stay on the
