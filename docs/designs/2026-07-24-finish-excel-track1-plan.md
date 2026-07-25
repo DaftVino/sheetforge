@@ -2275,6 +2275,18 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
       `_Config` written.
 - [ ] Answer **No** to `Create Setup Tab`'s rebuild confirmation: Setup untouched.
 - [ ] Finalize twice in a row: no *"That name is already taken"*, no `Setup (2)`.
+- [ ] **Force the failure path once, deliberately.** This is the only genuinely new
+      logic in the cutover, it sits on the live Finalize path, and no amount of code
+      reading can prove it — so break it on purpose. Make the rebuild raise
+      mid-pipeline (hiding `Macros Home` and re-running is the easiest trigger; so is
+      renaming `_Config` after activating). You must get **exactly two dialogs, in
+      this order**: first `Core_BuildControlPanel error: … Your settings are safe`,
+      then `Configuration activated, but rebuilding the Macros pages failed`.
+      Before the cutover this path showed the error and then cheerfully claimed the
+      rebuild had succeeded — on a workbook whose panels were already deleted, so it
+      had no buttons at all. If you see one dialog, or the success wording, the
+      build-success flag is not being read. Then re-run Finalize and confirm the
+      workbook fully recovers.
 
 - [ ] **Step 6: Real pass — the shipping bundle**
 
