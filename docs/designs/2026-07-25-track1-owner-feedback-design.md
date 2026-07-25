@@ -623,3 +623,105 @@ are called out where they apply: the `hide` filter lives in `GatherButtons` and
 nowhere else (3d); nothing on the card grid may be merged (unchanged here);
 and `build.ps1`'s reserved-word list stays conservative and empirical — add a
 word only when Excel rejects one.
+
+---
+
+## Handoff log
+
+### 2026-07-25 — design phase complete, implementation not started
+
+**Branch.** `feat/finish-excel-track1`, **39 commits, NOT pushed, no PR.**
+Nothing merged. `main` is still v0.3.0 / contract v1.1.0. Tasks 1-9 of the
+track-1 plan are built and reviewed; Task 10 is the owner's Excel gate (partly
+run, produced these four items); Task 11 (teardown + ship) is still blocked.
+
+**What shipped this phase.** Design only, no code.
+
+- `docs/designs/2026-07-25-track1-owner-feedback-design.md` (new, this file)
+- `docs/code-map.md` (regenerated - it was **23 source commits stale**, indexed
+  at `4cf1ed7` against a HEAD of `2b4d34c`; now `c404349`, 9 files, 356 symbols)
+- Commit `ed4a5cf`
+
+Test count before and after: **n/a, and not an omission.** This repo has no VBA
+runner and `test-driven-development` is formally off (CLAUDE.md, "Off"). Do not
+propose adding a test suite. Verification is `pwsh build/build.ps1` +
+`node scripts/vba-syntax-check.mjs` (both structural only) plus the owner's
+manual import.
+
+**What the input brief got wrong — do not revert these corrections.**
+
+1. **The message fix is three lines in `PkgClean`, not a sweep of both packages.**
+   The handoff said to sheet-qualify "every message that names a range, across
+   both packages and Core". Verified by grep: `.Address(` appears only at
+   `PkgClean.bas:45`, `:81`, `:112`. Every `PkgImportExport` message already
+   names its configured tab or file explicitly (`mDest`, `mSheet`, `tlist`,
+   `outPath`), and Core has none. **Do not go hunting in `PkgImportExport`** -
+   there is nothing there, and "fixing" a message that already names its tab
+   would make it worse.
+2. **Implementation order is 1 -> 2 -> 4 -> 3, inverting the brief's priority
+   order for items 3 and 4.** Item 3 must write a placed-button count into the
+   completion message and reason about "zero generated pages"; item 4 is what
+   creates both. Doing 3 first means writing and reviewing that code twice.
+   Priority order and build order are different things here.
+3. **`clean_hasheader` is the contract-reserved first use of the `bool` kind.**
+   The brief framed the header question as a plain behaviour choice. It is not:
+   §3 marks `bool` "Reserved: defined but not yet used by any package. Encoding
+   (`yes`/`no` vs `TRUE`/`FALSE`) is fixed on first use and this table updated
+   then", and §10 repeats it. Fixing the encoding is contract-mandated work, not
+   scope creep, and the owner approved the `bool` path over the cheaper `text`
+   one with that cost stated.
+
+**What was discovered — empirical, with the evidence.**
+
+1. **Memoizing `BuildRegistry` is safe: no consumer mutates a returned `reg`.**
+   Every mutation of a `reg` dictionary in `Core.bas` is at lines 146-224, all
+   inside `Core_DeclarePackage` / `Core_AddField` / `Core_AddAction`, which run
+   *during* `TryManifest` inside `BuildRegistry` itself against a dictionary it
+   just created. All thirteen `For Each reg In BuildRegistry()` sites only read.
+   The implementer still re-verifies and **stops if it does not hold** - a cache
+   handed out by reference is exactly the shape where being wrong is silent.
+2. **Relabelling the placement column cannot disarm the migration tamper test.**
+   `AVAIL_HEADER` (`Core.bas:60`) is compared at `Core.bas:1954`. `"Page code"`
+   is only ever *written* - `Core.bas:1656` and `Core.bas:1810` - and never read
+   back. Checked by grep, not assumed.
+3. **...but that caption is written from two independent literals**, the exact
+   coupling the ledger closed for `AVAIL_HEADER` in Task 4. The relabel
+   introduces a `PLACE_HEADER` Const and points both sites at it.
+4. **`Application.InputBox(Type:=8)` was not the bug.** It returns a real
+   `Range` carrying its own parent sheet, and `PkgClean_TrimClean` /
+   `PkgClean_FillDown` address cells only through `rng.Cells(r, c)`, which is
+   parent-correct. Nothing was ever acting on the wrong sheet; the message just
+   could not say which sheet it acted on. The owner's next run confirms or
+   refutes this in one click - **if the sheet-qualified message still names the
+   wrong tab, that is a genuinely new finding and the diagnosis in this document
+   is wrong.**
+
+**What is still open, and what needs a human.**
+
+- **Needs the owner's eyes, cannot be settled from here:** `ANCHOR_BTN_W` at
+  150pt with `Placement = xlMove`. It is a guess about how a button should look
+  sitting next to real data on `MIC`.
+- **Decided but cheap to reverse now, expensive later:** a duplicate target cell
+  blocks Finalize rather than offsetting the second button (§3g). Changing it
+  after the contract clause is written is a spec argument, not a one-line edit.
+- **Blocking Task 11:** all four items, then the re-cut Task 10 checklist, then
+  the owner's manual import of `dist/MacrosBundle.fixture.bas`. That import is
+  the only real gate - this session's own history is the proof, since a
+  `Dim ... any As Boolean` compile error passed four review rounds and both
+  automated gates.
+
+**Next phase.** `writing-plans` over this document, then implement 1 -> 2 -> 4
+-> 3. Read manifest, in order:
+
+| File | Size | Why |
+|---|---|---|
+| `docs/designs/2026-07-25-track1-owner-feedback-design.md` | 32K | this document - the spec; start here |
+| `docs/designs/2026-07-25-track1-owner-feedback-handoff.md` | 16K | the owner's verbatim words and the "do NOT revert" list |
+| `.superpowers/sdd/2026-07-24-finish-excel-track1-plan/progress.md` | 64K | the ledger; records where prior sessions were wrong and corrected |
+| `spec/contract.md` | 36K | normative; §3, §6, §7, §8, §10 all amended by this work |
+| `docs/code-map.md` | 28K | fresh as of `c404349`; grep it for anchors |
+| `src/core/Core.bas` | 176K | **grep, never read whole** (~3300 lines) |
+| `src/packages/PkgClean.bas` | 8K | small enough to read whole; item 1 lives here |
+
+`docs/designs/2026-07-24-finish-excel-track1-plan.md` (124K) is **not** in the
+manifest - read only its Task 10 section, which is the checklist being re-cut.
