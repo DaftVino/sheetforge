@@ -1133,9 +1133,17 @@ Public Sub Core_BuildSetup()
     If Not GateConfigMigration() Then Exit Sub
 
     If Core_SheetExists(SETUP_SHEET) Then
-        If MsgBox("A '" & SETUP_SHEET & "' tab already exists. Rebuild it?" & vbCrLf & _
-                  "(It will be re-seeded from the current/active settings.)", _
-                  vbQuestion + vbYesNo, "Create Setup Tab") = vbNo Then Exit Sub
+        ' Fix wave: "never discard un-finalized typing" is a design principle
+        ' (ConfirmAndClear already honours it with an explicit DISCARDED/KEPT
+        ' breakdown and vbDefaultButton2). This prompt deletes the sheet on Yes,
+        ' so anything typed since the last Finalize is lost - say so plainly and
+        ' default to No instead of Yes.
+        If MsgBox("A '" & SETUP_SHEET & "' tab already exists. Rebuild it?" & vbCrLf & vbCrLf & _
+                  "DISCARDED: anything you have typed on the Setup tab since the last 'Finalize " & _
+                  "Setup Tab' - the rebuild re-seeds from the last ACTIVATED settings, not from " & _
+                  "what is currently on screen." & vbCrLf & _
+                  "KEPT: every setting from your last Finalize.", _
+                  vbQuestion + vbYesNo + vbDefaultButton2, "Create Setup Tab") = vbNo Then Exit Sub
         Application.DisplayAlerts = False
         ThisWorkbook.Worksheets(SETUP_SHEET).Delete
         Application.DisplayAlerts = True
@@ -2177,8 +2185,19 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     ' knows, and the one the user acts on).
     layoutKR = FindKeyRow(ws, LAYOUT_KEY)
     verdict = MarkerVerdict(ws, layoutKR, vDetail)
+    ' "other-major" and "unparseable"/"tampered" share nothing but a header verb -
+    ' their real recoveries are opposite. GateConfigMigration REFUSES on
+    ' "other-major" ("unknown") and tells the user to re-import that version's
+    ' bundle; it lets "unparseable"/"tampered" ("damaged") through to
+    ' ConfirmAndClear's guarded rebuild. Naming "Create Setup Tab" for
+    ' other-major would send the user to a button that then refuses them.
     Select Case verdict
-        Case "other-major", "unparseable"
+        Case "other-major"
+            s = s & vbCrLf & "ACTION CATALOG FORMAT MISMATCH: " & vDetail & " Nothing has been " & _
+                "activated. Re-import that version's MacrosBundle.bas to continue - this build " & _
+                "will not rebuild over a newer saved format." & vbCrLf
+            structural = structural + 1
+        Case "unparseable"
             s = s & vbCrLf & "ACTION CATALOG FORMAT MISMATCH: " & vDetail & " Nothing has been " & _
                 "activated. Click 'Create Setup Tab' to rebuild the Action catalog block." & vbCrLf
             structural = structural + 1
@@ -2218,8 +2237,14 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
         Next stepId
     Next ch
     If nOff > 0 Then
-        s = s & vbCrLf & "OFF (" & nOff & " action(s); no button, cannot run, and their " & _
-            "settings collapse to the bottom of Setup):" & vbCrLf & offList
+        ' Deliberately does NOT claim the settings have already collapsed: that
+        ' only happens for a field that declares usedBy (neither shipped package
+        ' does yet), and only on the NEXT "Create Setup Tab" - Finalize never
+        ' redraws Setup. Overclaiming here would describe a fixture-only feature
+        ' as if it already applied to a real deployment.
+        s = s & vbCrLf & "OFF (" & nOff & " action(s); no button, cannot run. Any field that " & _
+            "declares this action in its usedBy will collapse into the settings band the next " & _
+            "time 'Create Setup Tab' rebuilds Setup):" & vbCrLf & offList
     End If
     If Len(chainOnly) > 0 Then
         s = s & vbCrLf & "CHAINS ONLY (no button; runs only inside a Chain):" & vbCrLf & chainOnly
@@ -2235,8 +2260,12 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     ' messages describe v0.4.0's real behaviour, not the pre-auto-layout
     ' "single Macros tab" default this replaced.
     If AnyPlacementCode(map) Then
-        s = s & vbCrLf & "A layout is ACTIVE - your placement codes control which page and column each button lands on." & vbCrLf
-        If Len(unassigned) > 0 Then s = s & "Unassigned -> page 1's Unassigned column (or a continuation page, if that column is already full):" & vbCrLf & unassigned
+        ' Fix wave: codes choose where a button STARTS, not a guarantee of the
+        ' page/column it ends up on - contract section 6's Column-cap overflow
+        ' clause can still relocate it once a page or column is full.
+        s = s & vbCrLf & "A layout is ACTIVE - your placement codes choose where each button starts, " & _
+            "but a full page or column can still move it to a continuation one." & vbCrLf
+        If Len(unassigned) > 0 Then s = s & "Unassigned -> page 1's Unassigned column (or a continuation page, once the page has no free column slot left):" & vbCrLf & unassigned
     Else
         s = s & vbCrLf & "No placement codes -> categories will be packed onto numbered pages automatically." & vbCrLf
     End If
@@ -2314,7 +2343,11 @@ Public Sub Core_FinalizeSetup()
     Next reg
 
     If warn = 0 Then
-        msg = "All checks passed."
+        ' Scoped deliberately: this only covers the scalar sheet/file field checks
+        ' just above. The compose/placement report appended below can still add
+        ' its own "problem(s) above must be fixed" line beneath this - the two
+        ' must never be allowed to read as one verdict.
+        msg = "Sheet and file checks passed."
     Else
         msg = warn & " item(s) to note:" & vbCrLf & vbCrLf & rpt
     End If
@@ -2427,8 +2460,12 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Exit Sub
 Fail:
     RestoreSpeed
+    ' Matches Core_FinalizeSetup's own wording for the same failure (its only
+    ' caller) - there is no "re-running the build" control, and on a virgin
+    ' build a failure here leaves no 'Setup Menu' tab either, so naming the real
+    ' recovery (Finalize again) instead of a nonexistent one.
     MsgBox "Core_BuildControlPanel error: " & Err.Description & vbCrLf & vbCrLf & _
-           "Your settings are safe; re-running the build will restore the pages.", _
+           "Your settings are safe. Click 'Finalize Setup Tab' again to retry the rebuild.", _
            vbExclamation, "Setup"
 End Sub
 
@@ -2532,7 +2569,13 @@ Private Sub BuildAdminPanel()
     ' for real headroom - a slightly tall title row costs nothing visually.
     ws.Rows(2).RowHeight = 23
     With ws.Range("B3")
-        .Value = "First-time and re-configuration controls. Right-click this tab -> Hide when you're done."
+        ' Fix wave: this is the ONLY sheet-surface route to Create/Finalize now
+        ' that the single "Macros" tab is retired, and Excel raises "Reference
+        ' isn't valid" on a hyperlink to a hidden sheet (Macros Home's own link
+        ' to this tab). Hiding stays fine - it's approved behaviour - but the
+        ' invitation must say how to get back.
+        .Value = "First-time and re-configuration controls. Right-click this tab -> Hide when you're " & _
+                 "done - to come back, right-click any visible tab -> Unhide, or press Alt+F8."
         .Font.Italic = True
     End With
     ws.Rows("5:12").RowHeight = 15
@@ -3188,9 +3231,16 @@ Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
         cat = CStr(order(ci))
         Set items = cats(cat)
         needCols = -Int(-items.Count / AUTO_COL_MAX)        ' ceiling division
-        ' Start a fresh page rather than straddle, unless this category is bigger
-        ' than a whole page (in which case straddling is unavoidable).
-        If needCols <= CARD_COLS And slotsUsed > 0 And slotsUsed + needCols > CARD_COLS Then
+        ' Start a fresh page rather than straddle. Contract section 6 states the
+        ' no-straddle rule unconditionally - it does not carve out an exception
+        ' for a category needing more columns than a page has. A category bigger
+        ' than a whole page still can't avoid straddling SOME page boundary, but
+        ' it should do so at a page it starts fresh on, not one it arrives at
+        ' partially filled: the per-k check inside the loop below (slotsUsed >=
+        ' CARD_COLS) already forces a new page once the current one fills, so
+        ' removing the "needCols <= CARD_COLS" guard here just makes that
+        ' fresh-page start happen up front instead of mid-category.
+        If slotsUsed > 0 And slotsUsed + needCols > CARD_COLS Then
             tabNum = tabNum + 1
             slotsUsed = 0
         End If
@@ -3365,7 +3415,10 @@ Private Function HomeCatalog(ws As Worksheet, ByVal r As Long, layout As Object)
     Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
     Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
     Dim items As Collection, ii As Long, it As Variant, firstRow As Long
-    ws.Cells(r, 2).Value = "ALL ACTIONS"
+    ' Contract's term (section 6): "button catalog", not "all actions" - this
+    ' lists only actions that became buttons (off / chains-only ones are
+    ' absent), and chains, which are not actions, are present.
+    ws.Cells(r, 2).Value = "BUTTON CATALOG"
     ws.Cells(r, 2).Font.Bold = True
     r = r + 1
     ws.Cells(r, 2).Value = "ACTION"
@@ -3424,24 +3477,33 @@ Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons
     ws.Cells(r, 2).Value = "HOW THESE PAGES ARE BUILT"
     ws.Cells(r, 2).Font.Bold = True
     r = r + 1
+    ' Fix wave: two corrections. (1) A Page code chooses where a button STARTS,
+    ' not a guarantee of the page/column it lands on - the column cap (contract
+    ' section 6) can still relocate it. (2) A chain's Page code lives in the
+    ' Chains block, not the action catalog (which enumerates registry actions
+    ' only) - the old wording sent a chain-author to the wrong place.
     If isManual Then
-        r = HomeLine(ws, r, totalButtons & " button(s). Your Page codes control this layout - each button sits where " & _
-                             "the code you set in the action catalog on the Setup tab places it.")
+        r = HomeLine(ws, r, totalButtons & " button(s). Your Page codes choose where each button starts - " & _
+                             "for an action, the code in the action catalog on the Setup tab; for a chain, " & _
+                             "the code in the Chains block. A full page or column can still move a button to " & _
+                             "a continuation one.")
         r = HomeLine(ws, r, "To go back to automatic packing, clear every Page code - with none set, categories " & _
                              "are packed onto pages for you again.")
     Else
         r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to " & _
                              CARD_COLS & " per page.")
-        r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
+        r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' - for an action, in the action " & _
+                             "catalog on the Setup tab; for a chain, in the Chains block:")
     End If
     r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
     ' Fix round 3, fix 3: "hide" places nothing, so it does not switch this
     ' workbook to manual mode by itself - a store with only "hide" codes still
     ' packs automatically (fix round 2's fix 5 / this line used to say ANY code
     ' switches the layout, which was true for "hide" too and is not).
-    r = HomeLine(ws, r, "As soon as ONE placement code (not counting hide) is filled in, the codes control " & _
-                         "everything; a blank-coded button lands in page 1's Unassigned area, or a continuation " & _
-                         "page if that area is already full. hide always omits a button, in either mode.")
+    r = HomeLine(ws, r, "As soon as ONE placement code (not counting hide) is filled in, the codes take " & _
+                         "over; a blank-coded button lands in page 1's Unassigned area, or a continuation " & _
+                         "page once the page has no free column slot left. hide always omits a button, in " & _
+                         "either mode.")
     r = HomeLine(ws, r, "Availability on the Setup tab: 'Button' = shown here. 'Chains only' = no button, but a Chain can run it.")
     r = HomeLine(ws, r, "'Off' = no button and it will not run at all; Finalize refuses to activate a Chain that uses one.")
     HomeLegend = r
