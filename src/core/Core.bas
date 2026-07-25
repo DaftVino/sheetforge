@@ -778,6 +778,7 @@ Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As 
 StepFail:
     RestoreSpeed                       ' fail-safe: never leave Excel frozen
     res("ok") = False
+    res("found") = True                ' a real error, not "action not installed"
     res("errNumber") = Err.Number
     res("errText") = Err.Description
     Set RunAction = res
@@ -947,6 +948,17 @@ Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
     Dim firstFieldRow As Long
     On Error GoTo Fail
+
+    Dim schemaState As String, schemaDetail As String
+    schemaState = ConfigSchemaStatus(schemaDetail)
+    If schemaState = "unknown" Or schemaState = "invalid" Then
+        MsgBox schemaDetail & vbCrLf & vbCrLf & _
+               "Nothing has been changed. Rebuilding the Setup tab now would " & _
+               "discard those saved answers, so it has been stopped." & vbCrLf & vbCrLf & _
+               "Note them down (or restore a backup of this workbook) before " & _
+               "rebuilding.", vbExclamation, "Create Setup Tab"
+        Exit Sub
+    End If
 
     If Core_SheetExists(SETUP_SHEET) Then
         If MsgBox("A '" & SETUP_SHEET & "' tab already exists. Rebuild it?" & vbCrLf & _
@@ -1375,11 +1387,11 @@ Private Function ParseAvail(ByVal v As String) As String
     s = LCase(Trim(v))
     If Len(s) = 0 Then ParseAvail = AVAIL_BUTTON: Exit Function
     Select Case s
-        Case AVAIL_BUTTON, "yes", "y", "on", "true", "1"
+        Case AVAIL_BUTTON, "yes", "y", "on", "true"
             ParseAvail = AVAIL_BUTTON
         Case AVAIL_CHAIN, "chain only", "chains", "chain", "chains-only"
             ParseAvail = AVAIL_CHAIN
-        Case AVAIL_OFF, "no", "n", "false", "0"
+        Case AVAIL_OFF, "no", "n", "false"
             ParseAvail = AVAIL_OFF
         Case Else
             ParseAvail = ""                  ' unrecognised - caller must block
@@ -1512,9 +1524,60 @@ Private Function BlockSchema(ws As Worksheet, ByVal keyRow As Long) As String
     BlockSchema = Trim(CStr(ws.Cells(keyRow, RID_COL).Value))
 End Function
 
-' id(lower) -> code, merging the placement (actions) block and the chains block.
+' Classify the ACTIVATED config before anything destructive touches the Setup
+' sheet. Returns one of:
+'   "none"    - no config yet (a fresh workbook); nothing to lose
+'   "ok"      - written by this version
+'   "legacy"  - pre-v1.2, every recovered page code validates; safe to migrate
+'   "invalid" - pre-v1.2, but a recovered code does not parse; DO NOT rebuild
+'   "unknown" - a marker this build does not recognise (a NEWER version wrote it)
+' detail is filled with a human-readable explanation for the last two.
+Private Function ConfigSchemaStatus(ByRef detail As String) As String
+    Dim ws As Worksheet, kr As Long, ver As String, nk As Long, i As Long
+    Dim id As String, code As String, tn As Long, cx As Long, cl As String
+    detail = ""
+    Set ws = CfgSheet()
+    If ws Is Nothing Then ConfigSchemaStatus = "none": Exit Function
+    kr = FindKeyRow(ws, LAYOUT_KEY)
+    If kr = 0 Then ConfigSchemaStatus = "none": Exit Function
+    ver = BlockSchema(ws, kr)
+    If ver = SCHEMA_VER Then ConfigSchemaStatus = "ok": Exit Function
+    If Len(ver) > 0 Then
+        detail = "The saved configuration was written by a newer version of this " & _
+                 "toolkit (format '" & ver & "'; this build understands '" & SCHEMA_VER & "')."
+        ConfigSchemaStatus = "unknown"
+        Exit Function
+    End If
+    ' Legacy: validate every page code recovered from the OLD column before we let
+    ' anything overwrite the sheet holding them.
+    nk = NextKeyRow(ws, kr)
+    For i = kr + 1 To nk - 1
+        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+        If Len(id) > 0 Then
+            code = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
+            If Len(code) > 0 And LCase(code) <> "hide" Then
+                If Not ParseCode(code, tn, cx, cl) Then
+                    detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
+                End If
+            End If
+        End If
+    Next i
+    If Len(detail) > 0 Then
+        detail = "These saved page codes could not be read from the older " & _
+                 "configuration format:" & vbCrLf & detail
+        ConfigSchemaStatus = "invalid"
+    Else
+        ConfigSchemaStatus = "legacy"
+    End If
+End Function
+
+' id(lower) -> code, merging the action catalog block and the chains block.
+' v0.4.0 inserted Availability between Action and Page code, so a pre-v1.2 block
+' keeps its code one column to the left. Callers that could DESTROY the recovered
+' values (Core_BuildSetup) must consult ConfigSchemaStatus first; this reader is
+' permissive on purpose so the report can describe what it found.
 Private Function ReadCodeMap(ws As Worksheet) As Object
-    Dim map As Object, kr As Long, nk As Long, i As Long, id As String
+    Dim map As Object, kr As Long, nk As Long, i As Long, id As String, codeCol As Long
     Dim chains As Collection, ch As Object
     Set map = CreateObject("Scripting.Dictionary")
     Set ReadCodeMap = map
@@ -1522,10 +1585,16 @@ Private Function ReadCodeMap(ws As Worksheet) As Object
     ' actions
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr > 0 Then
+        If BlockSchema(ws, kr) = SCHEMA_VER Then
+            codeCol = VAL_COL + 2
+        Else
+            codeCol = VAL_COL + 1                ' legacy (v0.3.0) layout
+        End If
         nk = NextKeyRow(ws, kr)
         For i = kr + 1 To nk - 1
             id = Trim(CStr(ws.Cells(i, RID_COL).Value))
-            If Len(id) > 0 Then map(LCase(id)) = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
+            If Len(id) > 0 And LCase(id) <> LCase(SCHEMA_VER) Then _
+                map(LCase(id)) = Trim(CStr(ws.Cells(i, codeCol).Value))
         Next i
     End If
     ' chains
@@ -1651,8 +1720,8 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
         s = s & vbCrLf & "ACTION CATALOG FORMAT MISMATCH: this Setup tab's Action catalog is marked '" & _
             marker & "', but this build expects '" & SCHEMA_VER & "'. Nothing has been activated - " & _
             "saved Availability choices cannot be trusted until the format matches. Click " & _
-            "'Create Setup Tab' to rebuild the Action catalog block and restore the marker, then " & _
-            "re-enter any Availability changes." & vbCrLf
+            "'Create Setup Tab' to rebuild the Action catalog block and restore the marker - your " & _
+            "saved Availability choices are kept." & vbCrLf
         structural = structural + 1
     ElseIf layoutKR > 0 And Len(marker) = 0 Then
         If LCase(Trim(CStr(ws.Cells(layoutKR, VAL_COL + 1).Value))) = "availability" Then
