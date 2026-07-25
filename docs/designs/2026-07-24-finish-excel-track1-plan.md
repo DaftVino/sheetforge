@@ -2216,8 +2216,12 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 - [ ] Page titles name the categories on that page, joined by `|` when packed —
       no bare `Macros - Page N` anywhere.
 - [ ] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
-      9pt. The fixture's help strings are deliberately long; if any is cut off,
-      see the AutoFit check immediately below — that is the likely cause.
+      9pt — **except `Fixture 1 - Ingest & Import`, whose description is
+      deliberately empty** (it is the test that the minimum-height floor holds a
+      card with no text). A single blank card description, and a single blank
+      `WHAT IT DOES` cell on `Macros Home`, are both correct. Every other
+      description must show in full; if one is cut off, see the AutoFit check
+      immediately below — that is the likely cause.
 - [ ] **THE AUTOFIT CHECK — look for this one deliberately; it is the single most
       likely thing to be wrong on first open.** `FitDescRows`, `HomeCatalog`, and
       `RenderPage`'s category-header row AutoFit are the first `AutoFit` calls
@@ -2272,7 +2276,8 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 - [ ] `<< Home` is in the same cell on every page and works; `< Previous` /
       `Next >` work and are absent on the first/last page.
 - [ ] No `Macros` tab remains.
-- [ ] Home's button catalog lists all 82 buttons with full descriptions and a
+- [ ] Home's button catalog lists all 82 buttons with their descriptions (one
+      deliberately blank — see the note above) and a
       working page link each.
 
 - [ ] **Step 3: Fixture pass — the three availability states**
@@ -2404,14 +2409,21 @@ stop and fix it; do not re-enter the codes by hand.
         force it by writing a higher schema string into the marker cell, and
         confirm `Create Setup Tab` **refuses** and tells you to re-import that
         version's bundle, rather than rebuilding.
-      - the `invalid`-with-**no-Setup-tab** escape hatch (contract §5) — delete
-        the Setup tab, then corrupt a page code in the hidden `_Config` so it
-        cannot be recovered, and confirm you get the non-default confirmation
-        prompt naming what will be discarded, not a silent rebuild.
-      To edit `_Config` directly for any of these: it is `xlSheetVeryHidden`, so
-      it cannot be unhidden from the Excel UI (Format ▸ Sheet ▸ Unhide will not
-      list it) — open the VBA editor (Alt+F11), select the sheet in the
-      Properties window, and set its `Visible` property there.
+      - the `invalid`-with-**no-Setup-tab** escape hatch (contract §5) — this one
+        must be done on the **v0.3.0 workbook from Step 7**, whose `_Config` has
+        no format marker. A v0.4.0 `_Config` carries the marker, so it classifies
+        as `ok`, the page-code validation never runs, and `Create Setup Tab`
+        rebuilds silently — which would read as a failure of this check when it is
+        not. On that v0.3.0 workbook: leave the corrupted page code in the OLD
+        code column (column D, not E), delete the Setup tab, then click `Create
+        Setup Tab` and confirm you get the non-default confirmation prompt naming
+        what will be discarded, not a silent rebuild.
+      To edit `_Config` directly for any of these — including Step 7's corrupted
+      page code — it is `xlSheetVeryHidden`, so it **cannot** be unhidden from the
+      Excel UI (Format ▸ Sheet ▸ Unhide will not list it). Open the VBA editor
+      (Alt+F11), select the sheet in the Properties window, and set its `Visible`
+      property there. The format marker is in **column J** of the row whose
+      hidden column A reads `k_core_layout`.
 - [ ] **Macros Home's own links**, not just the button catalog's. Click `Setup
       Menu` (goes to the admin tab) and click each page-list row's link in the
       `PAGE` column (goes to that `Macros N`) — only the catalog's per-button
@@ -2434,10 +2446,12 @@ stop and fix it; do not re-enter the codes by hand.
       dead links on `Macros Home` pointing at a page that no longer exists, no
       tall rows left behind from the fixture's longer descriptions, and exactly
       one `Macros Home` tab (not a `Macros Home (2)`).
-- [ ] **The all-off empty-layout case.** Set every action's Availability to
-      `Off` (no buttons at all) and Finalize. Confirm `Macros Home` still builds
-      and reads `No actions are available as buttons yet.` instead of an error
-      or a blank/broken page list.
+- [ ] **The all-off empty-layout case.** **Delete every chain first** — a
+      surviving chain that references an `Off` action makes Finalize refuse with
+      `OFF ACTION IN CHAIN`, so the empty state is unreachable until the chains
+      are gone. Then set every action's Availability to `Off` (no buttons at all)
+      and Finalize. Confirm `Macros Home` still builds and reads `No actions are
+      available as buttons yet.` instead of an error or a blank/broken page list.
 
 - [ ] **Step 8: Record the result**
 
