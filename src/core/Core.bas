@@ -39,6 +39,23 @@ Private Const MACRO_SHEET    As String = "Macros"
 Private Const ADMIN_SHEET    As String = "Setup Menu"   ' Create/Finalize controls; hideable
 Private Const PACKAGES_SHEET As String = "_Packages"   ' optional enable/disable layer
 
+Private Const CHAIN_CAT      As String = "Chains"      ' reserved display category for chain buttons
+
+' ---- per-action availability (contract v1.2.0) ----
+' Stored in the action catalog block as the display label ("Button" / "Chains
+' only" / "Off") and parsed to these tokens. Blank means never set and reads as
+' Button, which is what makes v0.4.0 a no-op for a v0.3.0 deployment.
+Private Const AVAIL_BUTTON   As String = "button"
+Private Const AVAIL_CHAIN    As String = "chains only"
+Private Const AVAIL_OFF      As String = "off"
+
+' Config-format marker, written into the hidden RID column of the action catalog's
+' key row - a machine-owned cell, not a visible header. A display label is
+' presentation, is user-editable, and must never decide whether saved config is
+' preserved or discarded (contract section 5). Task 4 builds the migration on it;
+' it is declared and read here because ReadAvailMap needs it.
+Private Const SCHEMA_VER     As String = "1.2"
+
 ' ---- grouped control-panel geometry (ported from MacroLayout; Task 9) ----
 Private Const PANEL_BASE As String = "Macros "   ' grouped output tabs: "Macros 1", "Macros 2"...
 Private Const BTN_W   As Double = 210
@@ -185,6 +202,31 @@ Private Function FindField(reg As Object, ByVal key As String) As Object
             End If
         End If
     Next f
+End Function
+
+' Does this field belong to the user's working area, given the availability map?
+' True when the field is package-wide (no usedBy) or when at least ONE action it
+' names is not Off - a "Chains only" action still runs, so it still needs its
+' settings. False means "relegate to the collapsed band" - never "omit":
+' Core_BuildSetup deletes and re-seeds Setup from the FINALIZED _Config, so
+' omitting a field would cost toggle -> Finalize -> rebuild -> fill -> Finalize
+' and would discard anything typed but not yet finalized (design section 2.3).
+' An unknown id counts as in-use, so a typo in usedBy cannot hide a field forever.
+Private Function FieldInUse(f As Object, availMap As Object) As Boolean
+    Dim ids() As String, i As Long, one As String
+    FieldInUse = True
+    If f Is Nothing Then Exit Function
+    If Not f.Exists("usedBy") Then Exit Function
+    If Len(Trim(CStr(f("usedBy")))) = 0 Then Exit Function
+    ids = Split(CStr(f("usedBy")), ",")
+    For i = LBound(ids) To UBound(ids)
+        one = LCase(Trim(ids(i)))
+        If Len(one) > 0 Then
+            If Not availMap.Exists(one) Then Exit Function     ' unknown id -> in use
+            If IsRunnable(availMap, one) Then Exit Function    ' one runnable is enough
+        End If
+    Next i
+    FieldInUse = False
 End Function
 
 '================================================================
@@ -675,6 +717,19 @@ Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As 
     res("errText") = ""
     res("reported") = False
 
+    ' Defence in depth: Finalize blocks a chain that references an Off action, so
+    ' this should be unreachable through a validated config. It exists because
+    ' "switched off but it ran anyway" is the one failure mode of this feature
+    ' that a finance user cannot recover from.
+    If Not IsRunnable(ReadAvailMap(CfgSheet()), actionId) Then
+        res("found") = True
+        res("ok") = False
+        res("errNumber") = 0
+        res("errText") = "Action '" & actionId & "' is switched Off on the Setup tab."
+        Set RunAction = res
+        Exit Function
+    End If
+
     On Error GoTo StepFail
     Set reg = FindActionOwner(actionId, entry)
     If reg Is Nothing Then
@@ -739,10 +794,28 @@ Private Function CtxNum(ctx As Object, ByVal k As String) As Long
     If ctx.Exists(k) Then CtxNum = CLng(ctx(k))
 End Function
 
-' Button dispatcher. Every button's OnAction is  'Core_Run "<actionId>"'
+' The single public dispatch entry. Resolves an action id or a reserved chain.* id.
+' A DIRECT invocation of anything not available as a button is refused here: with
+' the button gone the only ways to arrive are a stale shape or Alt+F8, and neither
+' should be able to run something the user switched off. Chain steps do not pass
+' through here - Core_RunChain calls RunAction, which independently refuses Off.
 Public Sub Core_Run(ByVal actionId As String)
-    Dim res As Object
+    Dim res As Object, availMap As Object, t As String
     If IsChainId(actionId) Then Core_RunChain actionId: Exit Sub
+    Set availMap = ReadAvailMap(CfgSheet())
+    t = AvailFor(availMap, actionId)
+    If t <> AVAIL_BUTTON Then
+        If t = AVAIL_CHAIN Then
+            MsgBox "'" & actionId & "' is set to 'Chains only' on the Setup tab, so it " & _
+                   "runs only as a step inside a Chain." & vbCrLf & vbCrLf & _
+                   "Change its Availability to 'Button' to run it on its own.", _
+                   vbInformation, "Not available on its own"
+        Else
+            MsgBox "'" & actionId & "' is switched Off on the Setup tab." & vbCrLf & vbCrLf & _
+                   "Change its Availability to run it.", vbExclamation, "Action is off"
+        End If
+        Exit Sub
+    End If
     Set res = RunAction(actionId, False)
     If Not res("found") And res("errNumber") = 0 Then
         MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
@@ -1258,32 +1331,139 @@ Private Function ReadChains(ws As Worksheet) As Collection
     Next i
 End Function
 
-' One row per registry action: hidden id in RID_COL, "caption [id]" (grey) in C,
-' a yellow Page-code cell in D. Prior codes are preserved from CfgSheet() by id.
+' Parse an Availability cell to one of the three tokens.
+'   ""      -> AVAIL_BUTTON  (never set; a pre-v0.4.0 config reads as today)
+'   invalid -> ""            (the CALLER must block Finalize)
+' It must never fall back to Button on an unrecognised string: a user who typed
+' "of" meaning "off" would otherwise be handed a live destructive button.
+' Yes/No are accepted as synonyms so a user upgrading from a two-value habit, or
+' one who types the obvious thing, is understood rather than blocked.
+Private Function ParseAvail(ByVal v As String) As String
+    Dim s As String
+    s = LCase(Trim(v))
+    If Len(s) = 0 Then ParseAvail = AVAIL_BUTTON: Exit Function
+    Select Case s
+        Case AVAIL_BUTTON, "yes", "y", "on", "true", "1"
+            ParseAvail = AVAIL_BUTTON
+        Case AVAIL_CHAIN, "chain only", "chains", "chain", "chains-only"
+            ParseAvail = AVAIL_CHAIN
+        Case AVAIL_OFF, "no", "n", "false", "0"
+            ParseAvail = AVAIL_OFF
+        Case Else
+            ParseAvail = ""                  ' unrecognised - caller must block
+    End Select
+End Function
+
+' The display label written into the cell for a token.
+Private Function AvailLabel(ByVal token As String) As String
+    Select Case token
+        Case AVAIL_CHAIN: AvailLabel = "Chains only"
+        Case AVAIL_OFF:   AvailLabel = "Off"
+        Case Else:        AvailLabel = "Button"
+    End Select
+End Function
+
+' id(lower) -> availability token, from the action catalog block. An id with no
+' row is simply absent, and AvailFor treats absence as Button - so a v0.3.0
+' _Config (which has no Availability column at all) reads as everything on.
+' An unrecognised cell is stored as "" so ComposeReport can block on it.
+Private Function ReadAvailMap(ws As Worksheet) As Object
+    Dim map As Object, kr As Long, nk As Long, i As Long, id As String
+    Set map = CreateObject("Scripting.Dictionary")
+    Set ReadAvailMap = map
+    If ws Is Nothing Then Exit Function
+    kr = FindKeyRow(ws, LAYOUT_KEY)
+    If kr = 0 Then Exit Function
+    If BlockSchema(ws, kr) <> SCHEMA_VER Then Exit Function   ' pre-v1.2 block: all Button
+    nk = NextKeyRow(ws, kr)
+    For i = kr + 1 To nk - 1
+        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+        If Len(id) > 0 Then map(LCase(id)) = ParseAvail(CStr(ws.Cells(i, VAL_COL + 1).Value))
+    Next i
+End Function
+
+' Button unless the map says otherwise. Absence means Button, deliberately: an
+' unconfigured or pre-v1.2 deployment must show every button.
+Private Function AvailFor(availMap As Object, ByVal id As String) As String
+    AvailFor = AVAIL_BUTTON
+    If availMap Is Nothing Then Exit Function
+    If availMap.Exists(LCase(id)) Then AvailFor = CStr(availMap(LCase(id)))
+End Function
+
+' Fail closed on both: an invalid token ("") draws no button and does not run.
+Private Function HasButton(availMap As Object, ByVal id As String) As Boolean
+    HasButton = (AvailFor(availMap, id) = AVAIL_BUTTON)
+End Function
+
+Private Function IsRunnable(availMap As Object, ByVal id As String) As Boolean
+    Dim t As String
+    t = AvailFor(availMap, id)
+    IsRunnable = (t = AVAIL_BUTTON Or t = AVAIL_CHAIN)
+End Function
+
+' A validated dropdown removes free-typing from a three-value column. Wrapped in
+' On Error Resume Next because validation can be refused (a protected sheet, some
+' locales) and a refused dropdown must not abort the build - ParseAvail still
+' guards the value, and Finalize still blocks on anything unrecognised.
+Private Sub AvailDropdown(cell As Range)
+    On Error Resume Next
+    cell.Validation.Delete
+    cell.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+                        Operator:=xlBetween, Formula1:="Button,Chains only,Off"
+    cell.Validation.IgnoreBlank = True
+    cell.Validation.InCellDropdown = True
+    On Error GoTo 0
+End Sub
+
+' One row per registry action: hidden id in RID_COL, "caption [id]" (grey) in C, a
+' yellow Availability cell with a validated dropdown in D, a yellow Page-code cell
+' in E. Prior answers are preserved from CfgSheet() by id. Unavailable actions STAY
+' listed here - that is the owner's hard requirement: turning a button off must
+' never make the action undiscoverable.
 Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
-    Dim prior As Object, reg As Object, a As Object, id As String
-    r = BlockIntro(ws, r, "Actions on pages  -  where each action button goes", _
-                   "Page code: number = page, letters = column (e.g. 1A). Blank = page 1. " & _
-                   "Type  hide  to leave a button off entirely.")
+    Dim prior As Object, priorAvail As Object, reg As Object, a As Object, id As String
+    r = BlockIntro(ws, r, "Action catalog  -  what each action is available as, and where it goes", _
+                   "Availability: 'Button' shows a button; 'Chains only' hides the button but a " & _
+                   "Chain can still run it; 'Off' hides it and stops it running anywhere. " & _
+                   "Page code: leave every code blank for the automatic layout; fill in even one " & _
+                   "and codes take over - number = page, letters = column (e.g. 1A). " & _
+                   "Type  hide  to leave one button off a manual layout.")
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
-    ws.Cells(r, VAL_COL + 1).Value = "Page code"
-    ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 1)).Font.Bold = True
+    ws.Cells(r, VAL_COL + 1).Value = "Availability"
+    ws.Cells(r, VAL_COL + 2).Value = "Page code"
+    ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
+    ' The machine-owned schema marker, in the hidden id column of the key row -
+    ' NOT in the visible header. See Task 4 / contract section 5.
+    ws.Cells(r, RID_COL).Value = SCHEMA_VER
     r = r + 1
 
     Set prior = ReadCodeMap(CfgSheet())            ' preserve prior codes by id
+    Set priorAvail = ReadAvailMap(CfgSheet())      ' preserve prior availability by id
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
             id = CStr(a("id"))
             ws.Cells(r, VAL_COL).Value = CStr(a("caption")) & " [" & id & "]"
             ws.Cells(r, VAL_COL).Font.Color = RGB(90, 90, 90)
             ws.Cells(r, RID_COL).Value = id
-            If prior.Exists(LCase(id)) Then ws.Cells(r, VAL_COL + 1).Value = prior(LCase(id))
+            ws.Cells(r, VAL_COL + 1).Value = AvailLabel(AvailFor(priorAvail, id))
+            If prior.Exists(LCase(id)) Then ws.Cells(r, VAL_COL + 2).Value = prior(LCase(id))
             Yellow ws.Cells(r, VAL_COL + 1)
+            Yellow ws.Cells(r, VAL_COL + 2)
+            AvailDropdown ws.Cells(r, VAL_COL + 1)
             r = r + 1
         Next a
     Next reg
     RenderPlacementBlock = r
+End Function
+
+' The config-format marker for the action catalog block, or "" when absent
+' (meaning the block predates v1.2.0 and its page code is one column to the left).
+' Deliberately NOT read from the visible header: RID_COL is hidden, is already how
+' this codebase carries identity, and is copied into _Config with everything else.
+Private Function BlockSchema(ws As Worksheet, ByVal keyRow As Long) As String
+    If ws Is Nothing Or keyRow < 1 Then Exit Function
+    BlockSchema = Trim(CStr(ws.Cells(keyRow, RID_COL).Value))
 End Function
 
 ' id(lower) -> code, merging the placement (actions) block and the chains block.
@@ -1342,6 +1522,8 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     Dim map As Object, k As Variant, unassigned As String, hidden As String
     Dim regX As Object, aX As Object
     Dim ch2 As Object, actIds As Object, seenIds As Object, cid As String
+    Dim availMap As Object, offList As String, badAvail As String
+    Dim chainOnly As String, nOff As Long, t As String
     Set ids = ActionIdSet()                        ' lowercased set of valid action ids
     Set chains = ReadChains(ws)
 
@@ -1405,6 +1587,47 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
             seenIds(LCase(cid)) = True
         End If
     Next ch2
+
+    ' Availability. An unrecognised cell and an Off action used by a chain are both
+    ' STRUCTURAL - they block activation. "Chains only" is reported for confidence,
+    ' not as a problem: it is an authored state, not an accident.
+    Set availMap = ReadAvailMap(ws)
+    For Each regX In BuildRegistry()
+        For Each aX In regX("actions")
+            t = AvailFor(availMap, CStr(aX("id")))
+            If Len(t) = 0 Then
+                badAvail = badAvail & "  - " & CStr(aX("id")) & vbCrLf
+                structural = structural + 1
+            ElseIf t = AVAIL_OFF Then
+                nOff = nOff + 1
+                offList = offList & "  - " & CStr(aX("caption")) & " [" & CStr(aX("id")) & "]" & vbCrLf
+            ElseIf t = AVAIL_CHAIN Then
+                chainOnly = chainOnly & "  - " & CStr(aX("caption")) & " [" & CStr(aX("id")) & "]" & vbCrLf
+            End If
+        Next aX
+    Next regX
+    If Len(badAvail) > 0 Then
+        s = s & vbCrLf & "UNRECOGNISED Availability (use Button, Chains only, or Off):" & _
+            vbCrLf & badAvail
+    End If
+    For Each ch In chains
+        For Each stepId In ch("steps")
+            If ids.Exists(LCase(CStr(stepId))) Then
+                If AvailFor(availMap, CStr(stepId)) = AVAIL_OFF Then
+                    s = s & "OFF ACTION IN CHAIN: '" & CStr(ch("label")) & "' uses " & _
+                        CStr(stepId) & ", which is switched Off." & vbCrLf
+                    structural = structural + 1
+                End If
+            End If
+        Next stepId
+    Next ch
+    If nOff > 0 Then
+        s = s & vbCrLf & "OFF (" & nOff & " action(s); no button, cannot run, and their " & _
+            "settings collapse to the bottom of Setup):" & vbCrLf & offList
+    End If
+    If Len(chainOnly) > 0 Then
+        s = s & vbCrLf & "CHAINS ONLY (no button; runs only inside a Chain):" & vbCrLf & chainOnly
+    End If
 
     If AnyCode(map) Then
         s = s & vbCrLf & "A layout is ACTIVE (numbered pages will be built)." & vbCrLf
@@ -1565,15 +1788,21 @@ Private Sub DeleteLegacyPanel()
     On Error GoTo 0
 End Sub
 
-' Each item: Array(id, caption, onAction, help). Actions from the registry,
-' chains from activated config. Admin buttons are added by the callers.
+' Each item: Array(id, caption, onAction, help, category). Actions from the
+' registry, chains from activated config. This is the SINGLE funnel for both, so
+' the availability filter lives here and nowhere else. Admin buttons are never in
+' this list - they live on the Setup Menu tab.
 Private Function GatherButtons() As Collection
     Dim out As New Collection, reg As Object, a As Object, chains As Collection, ch As Object
-    Dim onAct As String
+    Dim onAct As String, availMap As Object
+    Set availMap = ReadAvailMap(CfgSheet())
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
-            onAct = "'Core_Run " & Chr(34) & CStr(a("id")) & Chr(34) & "'"
-            out.Add Array(CStr(a("id")), CStr(a("caption")), onAct, CStr(a("help")))
+            If HasButton(availMap, CStr(a("id"))) Then
+                onAct = "'Core_Run " & Chr(34) & CStr(a("id")) & Chr(34) & "'"
+                out.Add Array(CStr(a("id")), CStr(a("caption")), onAct, _
+                              CStr(a("help")), CStr(a("category")))
+            End If
         Next a
     Next reg
     Set chains = ReadChains(CfgSheet())
@@ -1581,7 +1810,7 @@ Private Function GatherButtons() As Collection
         If Len(CStr(ch("id"))) > 0 Then
             onAct = "'Core_Run " & Chr(34) & CStr(ch("id")) & Chr(34) & "'"
             out.Add Array(CStr(ch("id")), CStr(ch("label")), onAct, _
-                          "Chain: " & StepsInline(ch("steps")))
+                          "Chain: " & StepsInline(ch("steps")), CHAIN_CAT)
         End If
     Next ch
     Set GatherButtons = out
