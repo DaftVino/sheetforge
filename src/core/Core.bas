@@ -944,133 +944,140 @@ End Function
 '================================================================
 ' 5. SETUP RENDERER  (builds the Setup sheet FROM the manifests)
 '================================================================
+
+' Clears the Action catalog block's cells in _Config so a rebuild's prior-value
+' reads (ReadCodeMap/ReadAvailMap) find nothing for the cleared rows, instead
+' of carrying an unreadable value forward unchanged. idsToClear Is Nothing
+' clears the WHOLE block (marker, every id, every Availability/Page-code
+' cell) - nothing in it can be trusted. A Dictionary clears only the
+' Page-code cell of a row whose lower-cased id is a key in it; every other
+' row is untouched - used when exactly which values are bad is known.
+Private Sub ClearCatalogBlock(cfgWs As Worksheet, idsToClear As Object)
+    Dim cKr As Long, cNk As Long, ci As Long, cid As String
+    If cfgWs Is Nothing Then Exit Sub
+    cKr = FindKeyRow(cfgWs, LAYOUT_KEY)
+    If cKr = 0 Then Exit Sub
+    cNk = NextKeyRow(cfgWs, cKr)
+    If idsToClear Is Nothing Then
+        cfgWs.Range(cfgWs.Cells(cKr, RID_COL), cfgWs.Cells(cNk - 1, RID_COL)).ClearContents
+        cfgWs.Range(cfgWs.Cells(cKr, VAL_COL + 1), cfgWs.Cells(cNk - 1, VAL_COL + 2)).ClearContents
+    Else
+        For ci = cKr + 1 To cNk - 1
+            cid = LCase(Trim(CStr(cfgWs.Cells(ci, RID_COL).Value)))
+            If Len(cid) > 0 Then
+                If idsToClear.Exists(cid) Then cfgWs.Cells(ci, VAL_COL + 1).ClearContents
+            End If
+        Next ci
+    End If
+End Sub
+
+' The one guarded-rebuild confirmation, shared by "invalid" and "damaged" -
+' they used to differ only in clear scope and wording, and that duplication is
+' exactly where divergent disclosures crept in. The Off-gating disclosure is
+' UNCONDITIONAL, not just for a full clear: a targeted clear still touches
+' VAL_COL + 1, which IS the Availability column in a genuine v1.2+ block, so a
+' doubly-tampered store (marker missing AND the header renamed, landing on
+' "invalid" instead of "damaged") could still have live Off state in the very
+' cells being cleared - "invalid never touches Availability" was a
+' prediction, not a fact, so the disclosure no longer depends on it.
+' Returns True if the user confirmed (clear, and any Setup-tab delete, already
+' done); False if they declined (nothing touched). On True with the tab
+' having existed, THIS function deletes it, so Core_BuildSetup's own "tab
+' already exists, rebuild it?" prompt never fires twice over one choice.
+Private Function ConfirmAndClear(ByVal problem As String, ByVal discarded As String, _
+                                  idsToClear As Object) As Boolean
+    Dim setupPresent As Boolean, msg As String
+    setupPresent = Core_SheetExists(SETUP_SHEET)
+    msg = problem & vbCrLf & vbCrLf & _
+        "The only way forward is to rebuild the Action catalog." & vbCrLf & vbCrLf & _
+        "DISCARDED: " & discarded & vbCrLf & _
+        "This takes effect the moment you click Yes, BEFORE the rebuild finishes: any " & _
+        "action you had switched Off will be able to run again immediately, and will stay " & _
+        "that way until you switch it Off again and click Finalize Setup Tab." & vbCrLf & _
+        "KEPT: every other saved setting in this workbook."
+    If setupPresent Then
+        msg = msg & vbCrLf & vbCrLf & _
+            "The current Setup tab will also be rebuilt, since its saved answers cannot be " & _
+            "verified either."
+    End If
+    msg = msg & vbCrLf & vbCrLf & "Rebuild the Setup tab now?"
+    If MsgBox(msg, vbExclamation + vbYesNo + vbDefaultButton2, _
+              "Create Setup Tab - saved configuration unreadable") = vbNo Then
+        MsgBox "Nothing has been changed.", vbInformation, "Create Setup Tab"
+        ConfirmAndClear = False
+        Exit Function
+    End If
+    ClearCatalogBlock CfgSheet(), idsToClear
+    If setupPresent Then
+        Application.DisplayAlerts = False
+        ThisWorkbook.Worksheets(SETUP_SHEET).Delete
+        Application.DisplayAlerts = True
+    End If
+    ConfirmAndClear = True
+End Function
+
+' The fail-closed config migration gate (contract section 5), extracted whole
+' out of Core_BuildSetup - a renderer has no business owning the recovery
+' policy. True = safe to proceed (no problem, or the user just confirmed a
+' guarded rebuild - clear and any Setup-tab delete already done). False = the
+' user has already been told why nothing can proceed, or declined; workbook
+' untouched either way. schemaState's meaning is ConfigSchemaStatus's to
+' document; the one thing worth repeating here is WHY "invalid" and "damaged"
+' get different treatment even though both are unreadable: "invalid"'s bad
+' value is a VISIBLE, user-editable Page-code cell that ComposeReport does not
+' block on, so fixing it on the Setup tab genuinely works when the tab exists.
+' "damaged"'s bad value is the HIDDEN marker cell itself, which the user
+' cannot see or edit, and which - since _Config is a straight ws.Copy of the
+' Setup tab - the live Setup tab almost always carries too, tripping
+' ComposeReport's own check. "Fix it on the Setup tab" is never a real
+' instruction for "damaged", so it always gets the guarded rebuild instead,
+' tab present or not.
+Private Function GateConfigMigration() As Boolean
+    Dim schemaState As String, schemaDetail As String, schemaBadIds As Object
+    schemaState = ConfigSchemaStatus(schemaDetail, schemaBadIds)
+
+    Select Case schemaState
+        Case "none", "ok", "legacy"
+            GateConfigMigration = True
+
+        Case "unknown"
+            MsgBox schemaDetail & vbCrLf & vbCrLf & _
+                   "To carry on, import that version's MacrosBundle.bas again. Your settings " & _
+                   "are safe in the meantime - nothing has been changed.", _
+                   vbExclamation, "Create Setup Tab"
+            GateConfigMigration = False
+
+        Case "invalid"
+            If Core_SheetExists(SETUP_SHEET) Then
+                MsgBox schemaDetail & vbCrLf & vbCrLf & _
+                       "The Setup tab is still open with your other answers on it. Correct " & _
+                       "the page code(s) named above there, then click 'Finalize Setup Tab'. " & _
+                       "Nothing has been changed." & vbCrLf & vbCrLf & _
+                       "This is the faster fix. If you delete the Setup tab instead, 'Create " & _
+                       "Setup Tab' can still recover: it will clear just the unreadable " & _
+                       "code(s) and rebuild around them, keeping everything else - but " & _
+                       "correcting the cell(s) here directly avoids that extra step.", _
+                       vbExclamation, "Create Setup Tab"
+                GateConfigMigration = False
+            Else
+                GateConfigMigration = ConfirmAndClear(schemaDetail, _
+                    "the page code(s) named above (those actions return to automatic " & _
+                    "placement); every other saved page code is kept.", schemaBadIds)
+            End If
+
+        Case "damaged"
+            GateConfigMigration = ConfirmAndClear(schemaDetail, _
+                "every saved page-code and Availability choice in the Action catalog (every " & _
+                "action returns as a plain Button with automatic placement).", Nothing)
+    End Select
+End Function
+
 Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
     Dim firstFieldRow As Long
     On Error GoTo Fail
 
-    ' Fail-closed config migration gate (contract section 5). The right next
-    ' step differs by status AND, for the two unreadable statuses, by whether
-    ' the visible Setup tab still exists:
-    '   "unknown" - a genuinely different build wrote this; only reimporting
-    '               that build's MacrosBundle.bas can read it, so say that
-    '               plainly. _Config is xlSheetVeryHidden, so "note it down" is
-    '               never an option for any of these three - there is nothing
-    '               the user can see to note.
-    '   "invalid" - the bad value is VISIBLE and user-editable (the marker is
-    '               absent, so ComposeReport does not block Finalize on it) -
-    '               if the Setup tab exists, fixing it there and Finalizing
-    '               genuinely works, so point at that; only falls back to a
-    '               guarded rebuild when there is no Setup tab left to fix by
-    '               hand, and even then clears ONLY the rows that do not parse.
-    '   "damaged" - the bad value is a HIDDEN, machine-owned cell the user
-    '               cannot see or edit, and (being a straight ws.Copy of the
-    '               Setup tab) the live Setup tab almost always carries the
-    '               identical bad marker, which ComposeReport's OWN marker
-    '               check also blocks - so "fix it on the Setup tab, then
-    '               Finalize" is not a real instruction here even when the tab
-    '               exists (it is a closed loop: rebuild says fix the tab,
-    '               Finalize refuses the tab and says rebuild). Always offers
-    '               the guarded rebuild instead, tab present or not.
-    Dim schemaState As String, schemaDetail As String, schemaBadIds As Object
-    schemaState = ConfigSchemaStatus(schemaDetail, schemaBadIds)
-
-    If schemaState = "unknown" Then
-        MsgBox schemaDetail & vbCrLf & vbCrLf & _
-               "To carry on, import that version's MacrosBundle.bas again. Your settings " & _
-               "are safe in the meantime - nothing has been changed.", _
-               vbExclamation, "Create Setup Tab"
-        Exit Sub
-    End If
-
-    Dim rebuildMsg As String, cfgWs As Worksheet, cKr As Long, cNk As Long
-    Dim ci As Long, cid As String, setupPresent As Boolean
-
-    If schemaState = "invalid" Then
-        If Core_SheetExists(SETUP_SHEET) Then
-            MsgBox schemaDetail & vbCrLf & vbCrLf & _
-                   "The Setup tab is still open with your other answers on it. Correct the " & _
-                   "page code(s) named above there, then click 'Finalize Setup Tab'. Nothing " & _
-                   "has been changed." & vbCrLf & vbCrLf & _
-                   "Do NOT delete the Setup tab - without it, there is no way to finish this " & _
-                   "without technical help.", vbExclamation, "Create Setup Tab"
-            Exit Sub
-        End If
-        ' No Setup tab left to fix by hand. Unlike "damaged", exactly which
-        ' values are unreadable is known (schemaBadIds - the same scan
-        ' schemaDetail's list came from), so only those are cleared; every
-        ' other saved page code survives untouched.
-        rebuildMsg = schemaDetail & vbCrLf & vbCrLf & _
-            "There is no Setup tab left to fix by hand. The page code(s) listed above " & _
-            "cannot be read and will be cleared - those actions return to automatic " & _
-            "placement. Every other saved page code, and every other saved setting in " & _
-            "this workbook, is kept." & vbCrLf & vbCrLf & _
-            "Clear the unreadable code(s) and rebuild the Setup tab now?"
-        If MsgBox(rebuildMsg, vbExclamation + vbYesNo + vbDefaultButton2, _
-                  "Create Setup Tab - saved configuration unreadable") = vbNo Then
-            MsgBox "Nothing has been changed.", vbInformation, "Create Setup Tab"
-            Exit Sub
-        End If
-        Set cfgWs = CfgSheet()
-        If Not cfgWs Is Nothing Then
-            cKr = FindKeyRow(cfgWs, LAYOUT_KEY)
-            If cKr > 0 Then
-                cNk = NextKeyRow(cfgWs, cKr)
-                For ci = cKr + 1 To cNk - 1
-                    cid = LCase(Trim(CStr(cfgWs.Cells(ci, RID_COL).Value)))
-                    If Len(cid) > 0 Then
-                        If schemaBadIds.Exists(cid) Then _
-                            cfgWs.Cells(ci, VAL_COL + 1).ClearContents  ' legacy code col; bad rows only
-                    End If
-                Next ci
-            End If
-        End If
-        ' Fall through and rebuild: ReadCodeMap now finds a blank code for each
-        ' cleared id and every other id's code exactly as it was, as promised.
-
-    ElseIf schemaState = "damaged" Then
-        ' Always the guarded rebuild, tab present or not - see the block
-        ' comment above for why "fix it on the Setup tab" is never a real
-        ' option for this status.
-        setupPresent = Core_SheetExists(SETUP_SHEET)
-        rebuildMsg = schemaDetail & vbCrLf & vbCrLf & _
-            "The only way forward is to rebuild the Action catalog from scratch." & _
-            vbCrLf & vbCrLf & _
-            "DISCARDED: every saved page-code and Availability choice in the Action " & _
-            "catalog (every action returns as a plain Button with automatic placement). " & _
-            "This takes effect the moment you click Yes, BEFORE the rebuild finishes: any " & _
-            "action you had switched Off will be able to run again immediately, and will " & _
-            "stay that way until you switch it Off again and click Finalize Setup Tab." & _
-            vbCrLf & "KEPT: every other saved setting in this workbook."
-        If setupPresent Then
-            rebuildMsg = rebuildMsg & vbCrLf & vbCrLf & _
-                "The current Setup tab will also be rebuilt - its saved marker cannot be " & _
-                "verified either."
-        End If
-        rebuildMsg = rebuildMsg & vbCrLf & vbCrLf & "Rebuild the Setup tab now?"
-        If MsgBox(rebuildMsg, vbExclamation + vbYesNo + vbDefaultButton2, _
-                  "Create Setup Tab - saved configuration unreadable") = vbNo Then
-            MsgBox "Nothing has been changed.", vbInformation, "Create Setup Tab"
-            Exit Sub
-        End If
-        ' Yes: a "damaged" store cannot be trusted AT ALL (that is what makes it
-        ' "damaged" rather than "invalid"), so - unlike "invalid" above - the
-        ' whole block is blanked, not just specific rows. A bare fall-through
-        ' would otherwise carry the unreadable marker/ids forward unchanged, or
-        ' (for the no-marker-but-Availability-header flavour) misread
-        ' Availability LABELS as page codes - exactly the bug Step 1 of this
-        ' task fixed, reintroduced here if left alone.
-        Set cfgWs = CfgSheet()
-        If Not cfgWs Is Nothing Then
-            cKr = FindKeyRow(cfgWs, LAYOUT_KEY)
-            If cKr > 0 Then
-                cNk = NextKeyRow(cfgWs, cKr)
-                cfgWs.Range(cfgWs.Cells(cKr, RID_COL), cfgWs.Cells(cNk - 1, RID_COL)).ClearContents
-                cfgWs.Range(cfgWs.Cells(cKr, VAL_COL + 1), cfgWs.Cells(cNk - 1, VAL_COL + 2)).ClearContents
-            End If
-        End If
-        ' Fall through and rebuild.
-    End If
+    If Not GateConfigMigration() Then Exit Sub
 
     If Core_SheetExists(SETUP_SHEET) Then
         If MsgBox("A '" & SETUP_SHEET & "' tab already exists. Rebuild it?" & vbCrLf & _
@@ -1523,25 +1530,16 @@ End Function
 ' row is simply absent, and AvailFor treats absence as Button - so a v0.3.0
 ' _Config (which has no Availability column at all) reads as everything on.
 ' An unrecognised cell is stored as "" so ComposeReport can block on it.
+' Column layout comes from MarkerVerdict, not a decision made here - see its
+' comment for why anything but "absent" reads the v1.2+ columns.
 Private Function ReadAvailMap(ws As Worksheet) As Object
-    Dim map As Object, kr As Long, nk As Long, i As Long, id As String
+    Dim map As Object, kr As Long, nk As Long, i As Long, id As String, detail As String
     Set map = CreateObject("Scripting.Dictionary")
     Set ReadAvailMap = map
     If ws Is Nothing Then Exit Function
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr = 0 Then Exit Function
-    ' Presence test, not equality: the Availability column arrived AT v1.2 and
-    ' removing it later would invalidate stored config, which contract section 10's
-    ' two-axis rule classifies as breaking and therefore a future major bump - so
-    ' "a marker is present" (any non-empty value) implies "the Availability column
-    ' exists at VAL_COL + 1", even for a marker newer than this build recognises.
-    ' A marker absent altogether means a genuine pre-v1.2 block: read as all Button
-    ' (contract section 5, "absent is not invalid"). ComposeReport separately blocks
-    ' Finalize when the marker is present but not exactly SCHEMA_VER - this reader
-    ' only needs to know whether the column exists, not whether ITS build understands
-    ' the exact version, so a value it does not recognise still fails closed through
-    ' ParseAvail returning "" rather than being silently treated as absent.
-    If Len(BlockSchema(ws, kr)) = 0 Then Exit Function   ' no marker: pre-v1.2 block, all Button
+    If MarkerVerdict(ws, kr, detail) = "absent" Then Exit Function   ' pre-v1.2 block: all Button
     nk = NextKeyRow(ws, kr)
     For i = kr + 1 To nk - 1
         id = Trim(CStr(ws.Cells(i, RID_COL).Value))
@@ -1707,25 +1705,76 @@ Private Function CurrentSchemaMajor() As Long
     CurrentSchemaMajor = m
 End Function
 
+' THE single place that decides what an action-catalog marker means. Every
+' caller that used to make its own marker decision (ReadAvailMap, ReadCodeMap,
+' ConfigSchemaStatus, ComposeReport) now calls this instead of re-deriving the
+' same verdict, so Finalize and a rebuild can never disagree about the same
+' marker - there is exactly one place left that decides. Returns exactly one of:
+'   "absent"      - no marker at all: a genuine pre-v1.2 block (contract
+'                    section 5, "absent is not invalid"). The Availability
+'                    column does not exist, and the code lives one column to
+'                    the left of where a v1.2+ block keeps it.
+'   "same-major"  - marker present, same major version as SCHEMA_VER (whatever
+'                    the minor): the columns are exactly where a v1.2+ block
+'                    keeps them, so it is fully readable.
+'   "other-major" - marker present, parses, but a genuinely different major
+'                    version: a real different build wrote this.
+'   "unparseable" - marker present but does not parse as a version at all:
+'                    corruption, not version skew.
+'   "tampered"    - marker ABSENT, but the visible header at VAL_COL + 1
+'                    already reads "Availability" - that column only exists in
+'                    a v1.2+ block, so the marker was removed or edited by
+'                    hand rather than never having existed.
+' For a reader (ReadAvailMap/ReadCodeMap), only "absent" vs "anything else"
+' matters: "absent" means legacy columns, every other verdict means the v1.2+
+' column layout is where this block actually put its data - even "tampered"
+' and "unparseable", because the DATA is still very likely in the v1.2+
+' columns; only the marker cell itself is untrustworthy. The gates
+' (ConfigSchemaStatus/ComposeReport) are the ones that care about the full
+' verdict and refuse to ACTIVATE on anything but "absent"/"same-major".
+' detail is filled with a plain factual explanation for every verdict except
+' "absent"/"same-major" - callers append their own call to action.
+Private Function MarkerVerdict(ws As Worksheet, ByVal keyRow As Long, ByRef detail As String) As String
+    Dim marker As String, mMajor As Long
+    detail = ""
+    If ws Is Nothing Or keyRow < 1 Then MarkerVerdict = "absent": Exit Function
+    marker = BlockSchema(ws, keyRow)
+    If Len(marker) = 0 Then
+        If LCase(Trim(CStr(ws.Cells(keyRow, VAL_COL + 1).Value))) = "availability" Then
+            detail = "The hidden format marker for the Action catalog block is missing, even " & _
+                     "though its layout looks like this version's, so saved Availability " & _
+                     "choices cannot be trusted."
+            MarkerVerdict = "tampered"
+        Else
+            MarkerVerdict = "absent"
+        End If
+        Exit Function
+    End If
+    If Not SchemaMajor(marker, mMajor) Then
+        detail = "This workbook's saved configuration format stamp ('" & marker & "') does not " & _
+                 "look like a version number, so it cannot be trusted."
+        MarkerVerdict = "unparseable"
+        Exit Function
+    End If
+    If mMajor = CurrentSchemaMajor() Then
+        MarkerVerdict = "same-major"
+    Else
+        detail = "This workbook's saved configuration was written by a different version of " & _
+                 "this toolkit (format '" & marker & "'; this build understands '" & SCHEMA_VER & "')."
+        MarkerVerdict = "other-major"
+    End If
+End Function
+
 ' Classify the ACTIVATED config before anything destructive touches the Setup
-' sheet. Returns one of:
+' sheet - MarkerVerdict's verdicts, translated to this module's action
+' vocabulary, plus the one thing MarkerVerdict cannot tell on its own: whether
+' an "absent" marker's recovered legacy page codes actually parse. Returns:
 '   "none"    - no config yet (a fresh workbook); nothing to lose
-'   "ok"      - marker's major version matches this build's (older/equal/newer
-'               minor all count - see SchemaMajor); the layout invariant
-'               ReadCodeMap/ReadAvailMap rely on holds, so it is readable
-'   "legacy"  - marker absent, every recovered page code validates; safe to migrate
-'   "invalid" - marker absent, but a recovered code does not parse; Core_BuildSetup
-'               does not rebuild blind - it offers a guided or guarded recovery
-'   "unknown" - a marker with a genuinely different major version: a real
-'               different build wrote this, and reimporting THAT build's
-'               MacrosBundle.bas is the fix - guessing at its layout is not
-'   "damaged" - a marker is present but does not parse as a version at all, OR
-'               the marker is ABSENT while the visible header already says
-'               "Availability" (contract section 5: this is a v1.2-shaped block
-'               whose stamp was removed or edited by hand - tampering, not a
-'               genuine pre-v1.2 block). There is no "correct build" to
-'               reimport for this one; it gets the same guarded rebuild
-'               Core_BuildSetup offers "invalid".
+'   "ok"      - MarkerVerdict "same-major": readable as-is
+'   "legacy"  - MarkerVerdict "absent", every recovered page code validates
+'   "invalid" - MarkerVerdict "absent", but a recovered code does not parse
+'   "unknown" - MarkerVerdict "other-major"
+'   "damaged" - MarkerVerdict "unparseable" or "tampered"
 ' detail is filled with a human-readable explanation for every status except
 ' "none"/"ok"/"legacy". badIds is ALWAYS set to a (possibly empty) Dictionary;
 ' for "invalid" it holds the lower-cased ids whose recovered code failed
@@ -1733,99 +1782,70 @@ End Function
 ' clear ONLY the unreadable rows (not the whole block) has a single source of
 ' truth instead of re-parsing detail's text.
 Private Function ConfigSchemaStatus(ByRef detail As String, ByRef badIds As Object) As String
-    Dim ws As Worksheet, kr As Long, ver As String, nk As Long, i As Long
+    Dim ws As Worksheet, kr As Long, nk As Long, i As Long
     Dim id As String, code As String, tn As Long, cx As Long, cl As String
-    Dim verMajor As Long, curMajor As Long
+    Dim verdict As String
     detail = ""
     Set badIds = CreateObject("Scripting.Dictionary")
     Set ws = CfgSheet()
     If ws Is Nothing Then ConfigSchemaStatus = "none": Exit Function
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr = 0 Then ConfigSchemaStatus = "none": Exit Function
-    ver = BlockSchema(ws, kr)
 
-    If Len(ver) = 0 Then
-        ' No marker. Ordinarily a genuine pre-v1.2 block (contract section 5,
-        ' "absent is not invalid") - but if the visible header already reads
-        ' "Availability", that column only exists in a v1.2-shaped block, so the
-        ' marker was removed/damaged rather than never having existed. Mirrors
-        ' the equivalent check ComposeReport makes on the live Setup sheet.
-        If LCase(Trim(CStr(ws.Cells(kr, VAL_COL + 1).Value))) = "availability" Then
-            detail = "This workbook's saved configuration format stamp is missing, " & _
-                     "even though its layout looks like this version's. It cannot be " & _
-                     "safely told apart from a genuinely older format, so it cannot be " & _
-                     "trusted."
+    verdict = MarkerVerdict(ws, kr, detail)
+    Select Case verdict
+        Case "same-major"
+            ConfigSchemaStatus = "ok"
+        Case "other-major"
+            ConfigSchemaStatus = "unknown"
+        Case "unparseable", "tampered"
             ConfigSchemaStatus = "damaged"
-            Exit Function
-        End If
-        ' Legacy: validate every page code recovered from the OLD column before we
-        ' let anything overwrite the sheet holding them.
-        nk = NextKeyRow(ws, kr)
-        For i = kr + 1 To nk - 1
-            id = Trim(CStr(ws.Cells(i, RID_COL).Value))
-            If Len(id) > 0 Then
-                code = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
-                If Len(code) > 0 And LCase(code) <> "hide" Then
-                    If Not ParseCode(code, tn, cx, cl) Then
-                        detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
-                        badIds(LCase(id)) = True
+        Case "absent"
+            ' Legacy: validate every page code recovered from the OLD column
+            ' before letting anything overwrite the sheet holding them.
+            nk = NextKeyRow(ws, kr)
+            For i = kr + 1 To nk - 1
+                id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+                If Len(id) > 0 Then
+                    code = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
+                    If Len(code) > 0 And LCase(code) <> "hide" Then
+                        If Not ParseCode(code, tn, cx, cl) Then
+                            detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
+                            badIds(LCase(id)) = True
+                        End If
                     End If
                 End If
+            Next i
+            If Len(detail) > 0 Then
+                detail = "These saved page codes could not be read from the older " & _
+                         "configuration format:" & vbCrLf & detail
+                ConfigSchemaStatus = "invalid"
+            Else
+                ConfigSchemaStatus = "legacy"
             End If
-        Next i
-        If Len(detail) > 0 Then
-            detail = "These saved page codes could not be read from the older " & _
-                     "configuration format:" & vbCrLf & detail
-            ConfigSchemaStatus = "invalid"
-        Else
-            ConfigSchemaStatus = "legacy"
-        End If
-        Exit Function
-    End If
-
-    ' Marker present. curMajor comes from CurrentSchemaMajor(), which raises
-    ' loudly instead of silently comparing against 0 if SCHEMA_VER itself ever
-    ' fails to parse (a bug in this build, not a workbook problem).
-    curMajor = CurrentSchemaMajor()
-    If SchemaMajor(ver, verMajor) Then
-        If verMajor = curMajor Then
-            ConfigSchemaStatus = "ok"
-        Else
-            detail = "The saved configuration was written by a different version of " & _
-                     "this toolkit (format '" & ver & "'; this build understands '" & _
-                     SCHEMA_VER & "')."
-            ConfigSchemaStatus = "unknown"
-        End If
-    Else
-        detail = "This workbook's saved configuration format stamp ('" & ver & "') does " & _
-                 "not look like a version number, so it cannot be trusted."
-        ConfigSchemaStatus = "damaged"
-    End If
+    End Select
 End Function
 
 ' id(lower) -> code, merging the action catalog block and the chains block.
-' v0.4.0 inserted Availability between Action and Page code, so a pre-v1.2 block
-' keeps its code one column to the left. Uses the SAME presence test as
-' ReadAvailMap, not an equality test against SCHEMA_VER: per ReadAvailMap's
-' invariant comment, any marker present (any value, matching or not) means the
-' Availability column exists at VAL_COL + 1, so the code sits one column
-' further right; only a genuinely ABSENT marker means the pre-v1.2 layout.
-' Callers that could DESTROY the recovered values (Core_BuildSetup) must
-' consult ConfigSchemaStatus first; this reader is permissive on purpose so
-' the report can describe what it found.
+' v0.4.0 inserted Availability between Action and Page code, so a pre-v1.2
+' block keeps its code one column to the left. Column layout comes from
+' MarkerVerdict, not a decision made here - see its comment for why anything
+' but "absent" reads the v1.2+ columns. Callers that could DESTROY the
+' recovered values (Core_BuildSetup) must consult ConfigSchemaStatus first;
+' this reader is permissive on purpose so the report can describe what it found.
 Private Function ReadCodeMap(ws As Worksheet) As Object
     Dim map As Object, kr As Long, nk As Long, i As Long, id As String, codeCol As Long
-    Dim chains As Collection, ch As Object
+    Dim chains As Collection, ch As Object, detail As String
     Set map = CreateObject("Scripting.Dictionary")
     Set ReadCodeMap = map
     If ws Is Nothing Then Exit Function
     ' actions
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr > 0 Then
-        If Len(BlockSchema(ws, kr)) > 0 Then
-            codeCol = VAL_COL + 2
-        Else
+        If MarkerVerdict(ws, kr, detail) = "absent" Then
             codeCol = VAL_COL + 1                ' legacy (pre-v1.2) layout
+        Else
+            codeCol = VAL_COL + 2
         End If
         nk = NextKeyRow(ws, kr)
         For i = kr + 1 To nk - 1
@@ -1875,7 +1895,7 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     Dim ch2 As Object, actIds As Object, seenIds As Object, cid As String
     Dim availMap As Object, offList As String, badAvail As String
     Dim chainOnly As String, nOff As Long, t As String
-    Dim layoutKR As Long, marker As String, markerMajor As Long
+    Dim layoutKR As Long, verdict As String, vDetail As String
     Set ids = ActionIdSet()                        ' lowercased set of valid action ids
     Set chains = ReadChains(ws)
 
@@ -1944,41 +1964,26 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     ' STRUCTURAL - they block activation. "Chains only" is reported for confidence,
     ' not as a problem: it is an authored state, not an accident.
     '
-    ' Format-marker integrity, contract section 5's fail-closed requirement. A marker
-    ' with a genuinely different MAJOR version (or one that does not parse as a
-    ' version at all), or a header that says "Availability" with no marker behind
-    ' it (a deleted/tampered hidden column), must both block Finalize - ReadAvailMap's
-    ' presence test alone is not enough, because on a bad-but-present marker it still
-    ' reads the column (so a mismatched future format is not silently skipped as "all
-    ' Button" the way an absent marker is).
-    '
-    ' Same-major is deliberately NOT blocked here, even when the marker does not
-    ' match SCHEMA_VER exactly: after the major-version ladder (see SchemaMajor),
-    ' a same-major marker means the columns are exactly where this build expects
-    ' them, so the values below are read correctly - refusing to activate a
-    ' same-major config (e.g. a v1.2 Setup tab under a v1.3 build) would treat an
-    ' additive minor bump as breaking, contradicting contract section 10, AND its
-    ' prescribed fix ("click Create Setup Tab") would re-seed the Setup tab from
-    ' _Config and silently discard anything typed since the last Finalize - the
-    ' exact class of harm this task exists to prevent.
+    ' Format-marker integrity, contract section 5's fail-closed requirement -
+    ' delegated entirely to MarkerVerdict (see its comment) so this can never
+    ' disagree with what a rebuild would decide about the same marker. Only
+    ' "same-major"/"absent" pass; every other verdict blocks Finalize. This
+    ' function's job is to report the problem and name the button that fixes
+    ' it - NOT to predict what that rebuild will or will not preserve, which
+    ' belongs to the rebuild's own confirmation (the one place that actually
+    ' knows, and the one the user acts on).
     layoutKR = FindKeyRow(ws, LAYOUT_KEY)
-    marker = BlockSchema(ws, layoutKR)
-    If Len(marker) > 0 And (Not SchemaMajor(marker, markerMajor) Or markerMajor <> CurrentSchemaMajor()) Then
-        s = s & vbCrLf & "ACTION CATALOG FORMAT MISMATCH: this Setup tab's Action catalog is marked '" & _
-            marker & "', but this build expects '" & SCHEMA_VER & "'. Nothing has been activated - " & _
-            "saved Availability choices cannot be trusted until the format matches. Click " & _
-            "'Create Setup Tab' to rebuild the Action catalog block and restore the marker - your " & _
-            "saved Availability choices are kept." & vbCrLf
-        structural = structural + 1
-    ElseIf layoutKR > 0 And Len(marker) = 0 Then
-        If LCase(Trim(CStr(ws.Cells(layoutKR, VAL_COL + 1).Value))) = "availability" Then
-            s = s & vbCrLf & "ACTION CATALOG FORMAT MARKER MISSING: the hidden marker for the Action " & _
-                "catalog block has been removed or altered, so saved on/off choices cannot be " & _
-                "trusted. Nothing has been activated. Click 'Create Setup Tab' to rebuild the " & _
-                "Action catalog block and restore the marker." & vbCrLf
+    verdict = MarkerVerdict(ws, layoutKR, vDetail)
+    Select Case verdict
+        Case "other-major", "unparseable"
+            s = s & vbCrLf & "ACTION CATALOG FORMAT MISMATCH: " & vDetail & " Nothing has been " & _
+                "activated. Click 'Create Setup Tab' to rebuild the Action catalog block." & vbCrLf
             structural = structural + 1
-        End If
-    End If
+        Case "tampered"
+            s = s & vbCrLf & "ACTION CATALOG FORMAT MARKER MISSING: " & vDetail & " Nothing has " & _
+                "been activated. Click 'Create Setup Tab' to rebuild the Action catalog block." & vbCrLf
+            structural = structural + 1
+    End Select
     Set availMap = ReadAvailMap(ws)
     For Each regX In BuildRegistry()
         For Each aX In regX("actions")
