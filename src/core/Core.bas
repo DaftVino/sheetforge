@@ -127,6 +127,17 @@ Private mSaveEvents  As Boolean
 Private mSaveAlerts  As Boolean
 Private mSaveCalc    As XlCalculation
 
+' Fix round 1, fix 2: Core_BuildControlPanel's own Fail: handler shows its
+' error and then returns NORMALLY (a Sub can't propagate an error out), so a
+' caller has no way to tell success from failure by the call alone.
+' Core_FinalizeSetup needs to, because it shows its own unconditional
+' "activated and rebuilt" message right after calling it. Reset to False at
+' the very top of every Core_BuildControlPanel call (not just on entry to the
+' module) so a stale True from a PRIOR successful call can never leak into a
+' later call that fails before reaching its own success line - and only set
+' True once the whole pipeline (through BuildHomePage) has actually finished.
+Private mLastBuildOk As Boolean
+
 '================================================================
 ' 1. MANIFEST-BUILDING API  (called inside Pkg<Name>_Manifest reg)
 '================================================================
@@ -1549,6 +1560,30 @@ Private Function ActionTokenFor(ByVal actionId As String) As String
     Next reg
 End Function
 
+' "Caption [id]" for a hidden entry in ComposeReport, matching the format the
+' OFF/CHAINS ONLY availability lists just above it already use ("caption
+' [id]", built from the registry) - fix round 1, fix 5: the hidden list used
+' to print the bare lowercased map key, e.g. "importexport.suggesttypes",
+' while everything around it names the button too. ActionTokenFor alone only
+' knows registry actions; a hidden CHAIN (chain.*) is not in the registry, so
+' it is resolved against the chains collection ComposeReport already read,
+' falling back to "id [id]" only if neither lookup finds it (should not
+' happen for a live id, but matches ActionTokenFor's own fallback shape).
+Private Function HiddenTokenFor(ByVal id As String, chains As Collection) As String
+    Dim ch As Object
+    If IsChainId(id) Then
+        HiddenTokenFor = id & " [" & id & "]"
+        For Each ch In chains
+            If LCase(CStr(ch("id"))) = LCase(id) Then
+                HiddenTokenFor = CStr(ch("label")) & " [" & CStr(ch("id")) & "]"
+                Exit Function
+            End If
+        Next ch
+    Else
+        HiddenTokenFor = ActionTokenFor(id)
+    End If
+End Function
+
 Private Function StepsToTokens(steps As Collection) As String
     Dim s As String, v As Variant
     For Each v In steps
@@ -2087,7 +2122,7 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     For Each k In map.Keys
         code = CStr(map(k))
         If LCase(code) = "hide" Then
-            hidden = hidden & "  - " & k & vbCrLf
+            hidden = hidden & "  - " & HiddenTokenFor(CStr(k), chains) & vbCrLf
         ElseIf Len(code) = 0 Then
             unassigned = unassigned & "  - " & k & vbCrLf
         ElseIf Not ParseCode(code, tabNum, colIx, colL) Then
@@ -2316,9 +2351,23 @@ Public Sub Core_FinalizeSetup()
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     Core_BuildControlPanel True        ' rebuild the Macros pages so chains/placement appear now
-    MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
-           "The Macros pages and 'Macros Home' index have been rebuilt to match your Setup answers.", _
-           vbInformation, "Finalize Setup Tab"
+    ' Fix round 1, fix 2: Core_BuildControlPanel cannot raise past its own Fail:
+    ' handler (it shows its own error and returns normally), so without this
+    ' check the message below would unconditionally claim success even when the
+    ' rebuild just failed - right after the panels were already deleted, i.e.
+    ' on a workbook with no buttons at all. mLastBuildOk is set True only once
+    ' the whole rebuild pipeline finishes; it is reset False at the top of
+    ' every Core_BuildControlPanel call, so it can never be stale here.
+    If mLastBuildOk Then
+        MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
+               "The Macros pages and 'Macros Home' index have been rebuilt to match your Setup answers.", _
+               vbInformation, "Finalize Setup Tab"
+    Else
+        MsgBox "Configuration activated, but rebuilding the Macros pages failed - see the error " & _
+               "shown just now." & vbCrLf & vbCrLf & _
+               "Your Setup answers were saved. Click 'Finalize Setup Tab' again to retry the rebuild.", _
+               vbExclamation, "Finalize Setup Tab"
+    End If
     Exit Sub
 Fail:
     Application.DisplayAlerts = True
@@ -2338,6 +2387,7 @@ End Sub
 ' rebuilds the panel itself and shows its own combined message).
 Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object, layout As Object, manual As Boolean
+    mLastBuildOk = False    ' reset FIRST, every call - see the flag's own declaration comment
     On Error GoTo Fail
     Core_SpeedOn
     Set codeMap = ReadCodeMap(CfgSheet())   ' read ONCE: GatherButtons' hide filter and the
@@ -2360,6 +2410,7 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     RenderAllPages layout
     BuildAdminPanel                         ' Create/Finalize controls on their own hideable tab
     BuildHomePage layout, manual            ' LAST: activates Macros Home and selects A1
+    mLastBuildOk = True     ' the whole pipeline finished - only set here, never in Fail:
     Core_SpeedOff
     If Not silent Then _
         MsgBox "Built " & layout.Count & " macro page(s) with " & buttons.Count & _
@@ -2368,7 +2419,9 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Exit Sub
 Fail:
     RestoreSpeed
-    MsgBox "Core_BuildControlPanel error: " & Err.Description, vbExclamation, "Setup"
+    MsgBox "Core_BuildControlPanel error: " & Err.Description & vbCrLf & vbCrLf & _
+           "Your settings are safe; re-running the build will restore the pages.", _
+           vbExclamation, "Setup"
 End Sub
 
 ' Drop the pre-v0.4.0 single "Macros" tab. Called unconditionally by
@@ -2478,7 +2531,7 @@ Private Sub BuildAdminPanel()
     topPos = topPos + 45
     AddBtn ws, "btnFinalizeSetup", "Finalize Setup Tab", "Core_FinalizeSetup", leftPos, topPos, 220, 32
     With ws.Range(ws.Cells(8, 3), ws.Cells(9, 3))
-        .Merge: .Value = "Validates your Setup answers, activates them, and rebuilds the Macros tab."
+        .Merge: .Value = "Validates your Setup answers, activates them, and rebuilds the Macros pages and 'Macros Home' index."
         .Font.Size = 10: .WrapText = True: .VerticalAlignment = xlCenter
     End With
 End Sub
@@ -2505,6 +2558,17 @@ Private Function EnsurePanelSheet(ByVal nm As String, ByVal atFront As Boolean) 
     ' accumulates one hyperlink per catalogued button - cheap insurance before a
     ' human imports this.
     ws.Hyperlinks.Delete
+    ' Fix round 1, fix 3: Cells.Clear does not touch row height, so a row a
+    ' PRIOR build's AutoFit made tall (a long description, a long chain
+    ' recipe) stays that tall even after every value on it is cleared.
+    ' Nothing downstream resets it wholesale - RenderPage only sets the button
+    ' rows it draws and AutoFits only the description rows it uses; HomeCatalog
+    ' AutoFits only the rows it writes - so a page or Home that shrinks on
+    ' rebuild (fewer buttons, shorter descriptions) keeps the taller rows left
+    ' behind by the bigger build. Reset to the sheet's standard height here,
+    ' before anything else sizes a specific row, so every subsequent
+    ' RowHeight/AutoFit call in this build starts from a clean sheet.
+    ws.Cells.RowHeight = ws.StandardHeight
     ws.Tab.Color = RGB(31, 78, 121)
     ws.Cells.Interior.Color = RGB(255, 255, 255)
     ws.Columns("A").ColumnWidth = 2
@@ -3237,6 +3301,12 @@ Private Sub BuildHomePage(layout As Object, ByVal isManual As Boolean)
     r = r + 1
     r = HomeLegend(ws, r, totalButtons, isManual)
 
+    ' Fix round 1, fix 4: Activate raises 1004 on a hidden sheet, and hiding a
+    ' generated tab is a supported habit here - BuildAdminPanel explicitly
+    ' invites the user to hide Setup Menu, so a user hiding Macros Home too is
+    ' not misuse. Unhide before activating; a rebuild should always be able to
+    ' bring the user back to the index, hidden or not.
+    ws.Visible = xlSheetVisible
     ws.Activate                     ' Range.Select needs its sheet active
     ws.Range("A1").Select
 End Sub
@@ -3315,7 +3385,8 @@ Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons
         r = HomeLine(ws, r, "To go back to automatic packing, clear every Page code - with none set, categories " & _
                              "are packed onto pages for you again.")
     Else
-        r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to 3 per page.")
+        r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to " & _
+                             CARD_COLS & " per page.")
         r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
     End If
     r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
