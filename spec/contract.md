@@ -279,7 +279,14 @@ single default button page is built (legacy behavior; **superseded for the
 uncoded case by Auto-layout (v1.2.0) below** — a store with no codes now packs
 into capacity-bound pages, not one page; see that paragraph). If any code is present, a
 layout is active: numbered pages are built; a blank-coded button goes to page 1
-(the default page)'s **Unassigned** area; the explicit code **`hide`** omits a button.
+(the default page)'s **Unassigned** area — **unless page 1 already holds the
+same per-page column cap that Auto-layout uses below (three columns), in which
+case the Unassigned area moves to a continuation page** instead of a column the
+engine would otherwise fail to draw — the same reason a category does not
+straddle in Auto-layout. This is engine presentation under §10's two-axis rule
+(additive: no stored `key`, id, kind, encoding, or semantics changes), so it is
+folded into this v1.2.0 freeze rather than bumping the contract version. The
+explicit code **`hide`** omits a button.
 Same-code buttons stack in authoring order. Core's own admin controls are never
 user-placeable.
 
