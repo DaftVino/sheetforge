@@ -20,18 +20,33 @@ Option Explicit
 ' brief's original 8/9/12/26 - see task-9-report.md for the worked-out paging
 ' prediction against these exact numbers plus the two real categories.
 '
-' Note "Clean & Standardize" below: it deliberately COLLIDES with PkgClean's
-' display name, so two different modules feed one category. That is not a
-' mistake - it is the one test that two packages can feed a single category,
-' the whole point of decoupling category from module, and it must be
-' verified, not assumed. Bonus: because PkgClean already contributes 3 items,
-' this fixture's 5 pushes the MERGED category to 8 items - past AUTO_COL_MAX,
-' so the collision also exercises a wrap caused by two packages combining,
-' not just a same-package category that happens to be large.
+' Note "CLEAN & STANDARDIZE" below: it deliberately COLLIDES with PkgClean's
+' "Clean & Standardize" display name, so two different modules feed one
+' category. That is not a mistake - it is the one test that two packages can
+' feed a single category, the whole point of decoupling category from module,
+' and it must be verified, not assumed. The case difference is ALSO
+' deliberate (fix round 1): the categories Dictionary in BuildAutoLayout is
+' set vbTextCompare specifically so two packages spelling a category with
+' different casing still merge, and a byte-identical spelling would have
+' passed that test even under a plain binary compare, proving nothing about
+' the case-insensitive path. Bonus: because PkgClean already contributes 3
+' items, this fixture's 5 pushes the MERGED category to 8 items - past
+' AUTO_COL_MAX, so the collision also exercises a wrap caused by two packages
+' combining, not just a same-package category that happens to be large. The
+' merged column's header still reads "Clean & Standardize" once (the
+' first-seen casing, from PkgClean, which probes before PkgFixture) - not
+' twice under two different spellings.
 '
 ' Every action binds to the SAME entry point. Nothing in the contract requires
 ' a distinct sub per action - the ctx carries actionId - so 74 actions cost
 ' one sub.
+'
+' Help-string lengths (fix round 1) deliberately vary instead of sharing one
+' boilerplate sentence: action 1 is empty (tests the card grid's height floor
+' and the index catalog's un-floored AutoFit on the very first card), and the
+' rest cycle through short / typical-sentence / long-paragraph bands so a
+' single Excel session shows several different description heights on several
+' different pages, not just one. See FixtureHelpText below.
 '
 ' Excluded from the default bundle by build/build.ps1; build it deliberately with
 '   pwsh build/build.ps1 -Packages PkgImportExport,PkgClean,PkgFixture -Out dist/MacrosBundle.fixture.bas
@@ -49,7 +64,7 @@ Public Sub PkgFixture_Manifest(reg As Object)
     ' names the packing case this category's size is chosen to exercise -
     ' see task-9-report.md for the full page-by-page prediction.
     cats(1) = "Ingest & Import":      counts(1) = 3    ' part-full column (1 col, 3/6)
-    cats(2) = "Clean & Standardize":  counts(2) = 5    ' collides with PkgClean (3) -> merged 8, wraps to 2 cols
+    cats(2) = "CLEAN & STANDARDIZE":  counts(2) = 5    ' collides (case-insensitively) with PkgClean's "Clean & Standardize" (3) -> merged 8, wraps to 2 cols
     cats(3) = "Validate":             counts(3) = 5    ' small, packs onto a page with others
     cats(4) = "Reconcile":            counts(4) = 9    ' wrap to a second (partial) column: 6 + 3
     cats(5) = "Report":               counts(5) = 14   ' needs a full CARD_COLS (3) columns: 6 + 6 + 2
@@ -63,11 +78,7 @@ Public Sub PkgFixture_Manifest(reg As Object)
         For k = 1 To counts(ci)
             n = n + 1
             Core_AddAction reg, "fixture.a" & n, "Fixture " & n & " - " & cats(ci), _
-                           "PkgFixture_Noop", _
-                           "No-op fixture action " & n & " in category " & cats(ci) & _
-                           ". This sentence is deliberately long enough to test that a " & _
-                           "card description wraps and auto-fits instead of clipping.", _
-                           cats(ci)
+                           "PkgFixture_Noop", FixtureHelpText(n, cats(ci)), cats(ci)
         Next k
     Next ci
 
@@ -105,3 +116,37 @@ End Sub
 Public Sub PkgFixture_Noop(ctx As Object)
     Core_Done ctx, "Fixture action ran: " & CStr(ctx("actionId")), "Fixture"
 End Sub
+
+' Fix round 1: one shared boilerplate sentence left the card grid's
+' AutoFit-with-a-floor behavior (and HomeCatalog's un-floored AutoFit)
+' exercised at exactly one description length. Action 1 is the sole
+' deliberately-empty description (a bare card row must still hold its floor
+' height; the catalog row must still line up, not collapse). Every other
+' action cycles through three bands - short, a typical one-line sentence, and
+' a long multi-sentence paragraph meant to wrap several lines in a narrow
+' card column - so several different pages show several different heights in
+' one session instead of one uniform block.
+Private Function FixtureHelpText(ByVal n As Long, ByVal catName As String) As String
+    Dim bandIx As Long
+    If n = 1 Then
+        FixtureHelpText = ""             ' the one deliberately-empty description
+        Exit Function
+    End If
+    bandIx = (n - 2) Mod 3
+    Select Case bandIx
+        Case 0                            ' short: a few words
+            FixtureHelpText = "No-op fixture action " & n & "."
+        Case 1                            ' typical: one plain sentence
+            FixtureHelpText = "No-op fixture action " & n & " in category " & catName & _
+                               " - exists only to exercise the layout, not to do real work."
+        Case Else                         ' long: several sentences, meant to wrap 4-5 lines
+            FixtureHelpText = "No-op fixture action " & n & " in category " & catName & _
+                               ". This description is deliberately long, spanning several " & _
+                               "sentences instead of one, so the card grid's autofit-with-a-floor " & _
+                               "behavior gets exercised at real length instead of just a single " & _
+                               "one-liner: on a card page this should wrap across several lines " & _
+                               "without ever clipping, and on the Macros Home catalog page - which " & _
+                               "has no per-row height floor - it should also wrap cleanly rather " & _
+                               "than collapsing or overlapping the row beneath it."
+    End Select
+End Function

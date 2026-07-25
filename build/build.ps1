@@ -53,6 +53,19 @@ param(
     [string]$ModuleName = 'MacrosBundle'
 )
 
+# `-Packages A,B,C` only auto-splits into an array when PowerShell's OWN parser
+# evaluates the call (e.g. from inside another .ps1, or dot/&-invoked in a live
+# session). `pwsh <script> -Packages A,B,C` from any OTHER shell - a bash
+# prompt, or even a fresh `pwsh.exe` launched from a Windows shortcut - hands
+# the child process raw OS argv, so "A,B,C" arrives as ONE string bound to the
+# first array element; there is no invocation shell where the comma form is
+# guaranteed to work without this. Split it ourselves instead of trusting the
+# caller's shell: safe under this repo's Pkg<Name>.bas PascalCase naming rule,
+# since no real package name can itself contain a comma.
+if ($Packages) {
+    $Packages = $Packages | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
+}
+
 $ErrorActionPreference = 'Stop'
 $nl = "`r`n"
 
