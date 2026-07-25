@@ -274,7 +274,9 @@ prompts (e.g. a range picker) and error dialogs are not suppressible.
 
 **Grouping / layout (v1.1.0):** each button (action or chain) may carry a
 **placement code** `<page-number><column-letters>` (e.g. `1A` = page 1, column A;
-`12AB` = page 12, column "AB"), or the explicit code **`hide`**, which omits a
+`12AB` = page 12, column "AB") — bounded to **at most seven digits and three
+letters** (v1.2.0, normative; matches Excel's own column-letter grammar, whose
+last real column is `XFD`) — or the explicit code **`hide`**, which omits a
 button and — normative, v1.2.0 — is **not** a placement: it does not count
 toward "any code is present" below in either direction. Semantics: if NO
 button anywhere has a **placement** code (no codes at all, or `hide` codes
@@ -340,6 +342,14 @@ predates v1.2.0 is unchanged.
   `Chains only` / `Off` (space, not hyphen, and title case) as its dropdown and
   stored values. A conforming reader MUST accept either spelling of the middle
   state (`chains-only` and `chains only`, case-insensitive) as equivalent.
+- **Reference-implementation tolerance (v1.2.0).** The three canonical tokens
+  above remain the only NORMATIVE values — a port MAY be strict and accept only
+  them. The Excel reference implementation additionally accepts, purely as a
+  convenience for a user typing the obvious thing: `yes` / `y` / `on` / `true` /
+  `1` as `button`; `chain only` / `chains` / `chain` as `chains-only`; and `no` /
+  `n` / `false` / `0` as `off`. A port MAY implement this tolerance but is not
+  required to; it does not change what gets stored (still one of the three
+  canonical tokens) or the blocking behavior for anything outside this list.
 
 **Auto-layout (v1.2.0) — supersedes the "no codes" clause of the v1.1.0 grouping
 rule above.** When **no** button carries a placement code, the engine distributes
@@ -416,6 +426,12 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
 - **Reserved:** the display category `Chains` (engine-generated, holds chain
   buttons) and, in the Excel reference implementation, the sheet name
   `Macros Home`. A platform substitutes its own index surface name.
+- **Reserved (v1.2.0):** in the Excel reference implementation, the sheet name
+  `Macros` (the pre-v0.4.0 single default page, retired) and every `Macros <n>`
+  (the generated page tabs) — the engine deletes these unconditionally with
+  alerts suppressed on every rebuild, so a package or a user relying on one of
+  these names for anything else loses it silently. A platform reserves the
+  equivalent generated-page names on its own surface.
 - Reference-implementation binding names (`Pkg<Name>_<Verb>` entry points,
   `Pkg<Name>_Manifest`, `Core_*` API) are an Excel/VBA detail, not part of the
   portable contract.
