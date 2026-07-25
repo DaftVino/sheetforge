@@ -1728,7 +1728,7 @@ Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
                 SetColHeader layout, tabNum, slotsUsed, cat
                 firstColOfCat = False
             Else
-                SetColHeader layout, tabNum, slotsUsed, cat & " (cont.)"
+                SetColHeader layout, tabNum, slotsUsed, cat & " (cont.)"   ' SUPERSEDED: Task 7 numbers these — see the note below
             End If
         Next k
     Next ci
@@ -1763,7 +1763,7 @@ Private Sub LabelAutoPages(layout As Object)
         Set seen = CreateObject("Scripting.Dictionary")
         title = ""
         For Each hk In hdrs.Keys
-            one = Replace(CStr(hdrs(hk)), " (cont.)", "")
+            one = Replace(CStr(hdrs(hk)), " (cont.)", "")   ' SUPERSEDED: matches on " (cont." now — numbered suffixes
             If Not seen.Exists(LCase(one)) Then
                 seen(LCase(one)) = True
                 title = title & IIf(Len(title) > 0, "   |   ", "") & one
@@ -2192,8 +2192,12 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
       `Bulk Fixture Set` (26) = **10 categories, 83 buttons**.
 - [ ] **Small categories share pages** — no page has one 3-button category alone
       while a neighbouring page has room.
-- [ ] `Validate` (8) fills exactly one column with no `(cont.)`.
-- [ ] `Reconcile` (9) wraps to a second column headed `Reconcile (cont.)`.
+- [ ] `Validate` (8) fills two columns — the per-column cap is **6**, not 8 (contract
+      §6 was amended during Task 7; the arithmetic is in the portability note there).
+- [ ] `Reconcile` (9) wraps to a second column headed `Reconcile (cont. 2)`.
+      **Note the number.** Continuation headers are numbered — `(cont. 2)`, `(cont. 3)` —
+      because an unnumbered suffix let one page show two identical headers. A build
+      showing a bare `(cont.)` is the *old* behaviour and should be treated as a failure.
 - [ ] `Bulk Fixture Set` (26) spans more than one page.
 - [ ] **No category is split across two tabs unless it needs more than 24 buttons.**
 - [ ] Page titles name the categories on that page, joined by `|` when packed —
