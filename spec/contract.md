@@ -215,6 +215,15 @@ conflict — an unknown marker, or a recovered value that does not validate — 
 abort the rebuild with a report and leave the existing surface untouched. Silently
 rebuilding with blanks is non-conforming.
 
+**Escape hatch when there is no surface left (v1.2.0).** The abort above assumes
+the engine's authoring surface (the Setup grid) still exists for the user to
+correct by hand or retreat to. If it does not, so a conflict would otherwise
+dead-end the workbook with no path forward, an implementation MAY proceed with
+the rebuild anyway — but only after an explicit, non-default confirmation that
+names exactly what will be discarded and what is preserved, and only on an
+affirmative response to it. Proceeding without that confirmation remains
+non-conforming.
+
 **Absent is not invalid.** An attribute or column introduced after the stored
 marker's version (for example `availability`, §6, in a store marked pre-v1.2.0)
 simply does not exist in that store — there is no value to validate, so its
