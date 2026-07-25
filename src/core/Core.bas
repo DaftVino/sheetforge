@@ -1337,14 +1337,18 @@ End Function
 ' nothing was relegated and no band was drawn.
 Private Function RenderOffBand(ws As Worksheet, ByVal r As Long, availMap As Object, _
                                ByRef bandFirst As Long, ByRef bandLast As Long) As Long
-    Dim reg As Object, any As Boolean
+    ' anyOff, NOT "any": Any is a VBA reserved word (it appears in Declare ... As
+    ' Any), so "Dim any As Boolean" is a compile error the VBE reports against this
+    ' procedure's declaration line. Neither build.ps1's structural checks nor the
+    ' syntax parser can see it - it was found by the owner's Debug > Compile.
+    Dim reg As Object, anyOff As Boolean
     bandFirst = 0
     bandLast = 0
     RenderOffBand = r
     For Each reg In BuildRegistry()
-        If HasAnyTier(reg, availMap, False) Then any = True
+        If HasAnyTier(reg, availMap, False) Then anyOff = True
     Next reg
-    If Not any Then Exit Function              ' nothing off: draw no band at all
+    If Not anyOff Then Exit Function           ' nothing off: draw no band at all
 
     r = SectionHeader(ws, r, "SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON")
     r = TintRow(ws, r, "These belong to actions set to 'Off' in the action catalog above. " & _
