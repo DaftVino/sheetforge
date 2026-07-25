@@ -81,6 +81,10 @@ field is the following record:
   row outlining). A platform that cannot collapse MUST still render the band,
   visibly and last. Omitting the fields is non-conforming — it would force a
   second activate cycle and discard un-activated input.
+- **Precedence over tier (v1.2.0).** `usedBy`-relegation and `tier` (§4) are
+  evaluated independently, but off-ness wins: a field relegated to the off band
+  goes there regardless of its `tier`, and the `advanced` band (§4) contains
+  only fields that are still in use. A field never renders in both bands.
 
 ---
 
@@ -132,6 +136,10 @@ Every field carries a `tier`:
 trims the tier and treats anything other than `advanced` as `simple`.
 
 `section` fields belong to the `simple` pass for placement purposes.
+
+**Interaction with `usedBy` (v1.2.0):** a field relegated to the off band (§2)
+is placed there regardless of its `tier` — off-ness takes precedence, so this
+`advanced` band contains only fields that are still in use.
 
 ---
 
@@ -207,6 +215,15 @@ conflict — an unknown marker, or a recovered value that does not validate — 
 abort the rebuild with a report and leave the existing surface untouched. Silently
 rebuilding with blanks is non-conforming.
 
+**Absent is not invalid.** An attribute or column introduced after the stored
+marker's version (for example `availability`, §6, in a store marked pre-v1.2.0)
+simply does not exist in that store — there is no value to validate, so its
+absence is not a conflict, and the reader takes the documented default (`button`
+for `availability`). Fail-closed applies only to a value that IS present but
+unreadable or fails its grammar, and to a marker the reader does not recognise at
+all — never to a column this document added after the store was last written.
+This is what lets §10 promise that v1.0.0/v1.1.0 configs remain valid.
+
 ---
 
 ## 6. Action contract
@@ -247,7 +264,9 @@ prompts (e.g. a range picker) and error dialogs are not suppressible.
 **Grouping / layout (v1.1.0):** each button (action or chain) may carry a
 **placement code** `<page-number><column-letters>` (e.g. `1A` = page 1, column A;
 `12AB` = page 12, column "AB"). Semantics: if NO button anywhere has a code, a
-single default button page is built (legacy behavior). If any code is present, a
+single default button page is built (legacy behavior; **superseded for the
+uncoded case by Auto-layout (v1.2.0) below** — a store with no codes now packs
+into capacity-bound pages, not one page; see that paragraph). If any code is present, a
 layout is active: numbered pages are built; a blank-coded button goes to page 1
 (the default page)'s **Unassigned** area; the explicit code **`hide`** omits a button.
 Same-code buttons stack in authoring order. Core's own admin controls are never
@@ -295,19 +314,38 @@ buttons automatically. A page is a **capacity unit, not a category unit**:
   grouping that putting it in one place buys;
 - a category larger than a whole page continues onto further pages.
 
+**Ordering (v1.2.0, normative):** categories are packed in **first-appearance
+order** — the order in which each category's first action is encountered while
+the engine walks its package registry (§1), and, within one package's manifest,
+that manifest's `actions[]` declaration order (§6). The reserved `Chains`
+category (§7) is always placed last, regardless of when its chains were
+authored. Two conforming implementations given identical config MUST therefore
+produce identical layouts.
+
 The v1.1.0 behaviour — a single default button page holding everything — is
 withdrawn: it does not survive contact with a large catalog, which is what this
 version exists to support. **When any code is present the v1.1.0 rule is unchanged**
 and codes remain a complete override.
 
+**Portability note:** the *packing rule* is normative — fill a column, then a
+column-slot on the page, then start a new page; never straddle a category
+across pages unless it exceeds a whole page — and so is the ordering above. The
+specific capacities (three columns, eight buttons) are the reference
+implementation's values, sized for one screen of Excel; a platform with
+different real estate MAY choose its own capacities but MUST apply the same
+rule and the same ordering.
+
 **Generated index (v1.2.0):** the engine **always** generates an index surface,
 even for a single page, so the workbook has one shape at every scale. It lists one
-entry per built page with its title, its button count and a link; a full **action
-catalog** (caption, description, and the page each button is on); a link to the
-admin surface; and a legend explaining the placement code and availability. Every
-built page carries a persistent link back to the index and links to its
-previous/next page. Reference implementation: a `Macros Home` sheet; that name is
-**reserved** (§7).
+entry per built page with its title, its button count and a link; a **button
+catalog** (caption, description, and the page each button is on) covering every
+action whose `availability` placed it as a button — an action that is `off` or
+`chains-only` has no button and no page, so it does not appear in this catalog;
+it remains listed on the authoring surface (§6, per-action availability), which
+is where it stays discoverable; a link to the admin surface; and a legend
+explaining the placement code and availability. Every built page carries a
+persistent link back to the index and links to its previous/next page. Reference
+implementation: a `Macros Home` sheet; that name is **reserved** (§7).
 
 **Description legibility (v1.2.0, normative for grid platforms):** an action's
 `help` text is displayed with its button and MUST NOT be clipped. Reference
@@ -438,6 +476,14 @@ port realizes them per platform rather than re-deriving them:
 - **Breaking** changes — renaming or removing a `key` or action `id`; changing a
   field's kind, a value's encoding, or an action's semantics — bump the
   **major** version.
+- **Two axes (v1.2.0, normative).** The above categories apply to **stored
+  configuration**: a `key`, an action `id`, a field's `kind`, a value's
+  encoding, or an action's own behaviour becoming invalid or reinterpreted is
+  **breaking**. Changes to **engine presentation** — how the engine lays out,
+  groups, titles, or navigates the surfaces it generates from a valid config —
+  are **additive**, because every existing config keeps its meaning and keeps
+  working unchanged. A platform implementing an older minor version will render
+  those surfaces differently; that is expected and is not a compatibility break.
 - The contract is the source of truth going forward: the reference VBA build and
   every port MUST conform. A discovered divergence is reconciled **in favor of
   this document**.
@@ -450,13 +496,13 @@ port realizes them per platform rather than re-deriving them:
 - **v1.2.0 (additive):** adds the optional action `category` attribute, the
   optional field `usedBy` attribute, the three-state deployment-level
   `availability` flag, the capacity-packed auto-layout rule for uncoded buttons,
-  the always-generated index surface with its navigation and action catalog, the
+  the always-generated index surface with its navigation and button catalog, the
   no-clipping rule for descriptions, the config schema marker with fail-closed
   migration, and the reserved `Chains` category + `Macros Home` name. No `key`,
   action `id`, kind, value encoding, or **action** semantics changed, so
   v1.0.0/v1.1.0 configs remain valid and read as all-actions-`button`. The one
   *behaviour* replaced is engine layout for the uncoded case (single page →
-  capacity-packed pages), which §10 does not classify as breaking: it renames
-  nothing and re-encodes nothing. Owner-approved; see the Provenance section of
-  `docs/designs/2026-07-24-finish-excel-track1-plan.md` for the three contested
-  calls and who lost them.
+  capacity-packed pages) — engine presentation under the two-axis rule above,
+  not stored-config compatibility, so it stays additive. Owner-approved; see
+  the Provenance section of `docs/designs/2026-07-24-finish-excel-track1-plan.md`
+  for the three contested calls and who lost them.
