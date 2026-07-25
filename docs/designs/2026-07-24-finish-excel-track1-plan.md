@@ -2204,7 +2204,24 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
       no bare `Macros - Page N` anywhere.
 - [ ] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
       9pt. The fixture's help strings are deliberately long; if any is cut off,
-      `FitDescRows` or `DESC_MAX_H` is wrong.
+      see the AutoFit check immediately below — that is the likely cause.
+- [ ] **THE AUTOFIT CHECK — look for this one deliberately; it is the single most
+      likely thing to be wrong on first open.** `FitDescRows` and `HomeCatalog`
+      are the first `AutoFit` calls this codebase has ever executed (Tasks 6–7
+      were unreachable), and after Task 8 they run with `ScreenUpdating = False`
+      **and** `Calculation = xlCalculationManual` from `Core_SpeedOn`. AutoFit on
+      a `WrapText` cell under suppressed screen updating is a well-known spot for
+      Excel to hand back a **one-line** height.
+      The card pages are half-protected by the `DESC_MIN_H` floor (24pt).
+      **`Macros Home`'s catalog has no floor at all**, so check it specifically:
+      on `Macros Home`, find the `Suggest Types` row and read column D. Its help
+      text is ~230 characters in a 62-wide column, so it must wrap to **3–4
+      lines**. If it is one line and visibly cut, this is the bug.
+      **Fix if confirmed** (not applied pre-emptively, because the workaround
+      costs visible flicker and the bug may not occur): either re-run both
+      AutoFit passes after `Core_SpeedOff`, or bracket each pass with
+      `ScreenUpdating = True` / `= False`. Predicted by the Task 8 review; if the
+      text wraps correctly, tick this and change nothing.
 - [ ] Cards align across all three columns — button tops and description tops line
       up on every row.
 - [ ] `<< Home` is in the same cell on every page and works; `< Previous` /
