@@ -279,16 +279,28 @@ single default button page is built (legacy behavior; **superseded for the
 uncoded case by Auto-layout (v1.2.0) below** — a store with no codes now packs
 into capacity-bound pages, not one page; see that paragraph). If any code is present, a
 layout is active: numbered pages are built; a blank-coded button goes to page 1
-(the default page)'s **Unassigned** area — **unless page 1 already holds the
-same per-page column cap that Auto-layout uses below (three columns), in which
-case the Unassigned area moves to a continuation page** instead of a column the
-engine would otherwise fail to draw — the same reason a category does not
-straddle in Auto-layout. This is engine presentation under §10's two-axis rule
-(additive: no stored `key`, id, kind, encoding, or semantics changes), so it is
-folded into this v1.2.0 freeze rather than bumping the contract version. The
-explicit code **`hide`** omits a button.
-Same-code buttons stack in authoring order. Core's own admin controls are never
-user-placeable.
+(the default page)'s **Unassigned** area. The explicit code **`hide`** omits a
+button. Same-code buttons stack in authoring order. Core's own admin controls
+are never user-placeable.
+
+**Column-cap overflow (v1.2.0).** A rendered page draws at most the same three
+columns Auto-layout is capped at below, and a column draws at most the same six
+buttons a same-code stack is capped at there too — regardless of whether that
+column was reached by an explicit placement code or by the blank-coded
+Unassigned fallback above, and regardless of which page number a code names.
+This is a capacity fact about the renderer, not a grouping judgement like Auto-
+layout's no-straddle rule: the reference renderer has exactly three column
+slots per page and six button rows per column, and a fourth column or a
+seventh same-code button is something it cannot draw, not something it
+chooses not to draw. When either cap would be exceeded, the excess moves to a
+continuation page instead of going undrawn: a `1D` typed on a page that already
+holds coded columns `1A`/`1B`/`1C` renders on the next available page, not the
+page its code names; an Unassigned column that would be a page's fourth does
+the same; and a same-code stack past six buttons continues in a further
+column, on a continuation page if the page it started on is already at the
+column cap. This is engine presentation under §10's two-axis rule (additive:
+no stored `key`, id, kind, encoding, or semantics changes), so it is folded
+into this v1.2.0 freeze rather than bumping the contract version.
 
 **Per-action availability (v1.2.0):** each action carries a deployment-level
 `availability`, authored on the same engine-owned surface as the placement code
@@ -351,7 +363,12 @@ produce identical layouts.
 The v1.1.0 behaviour — a single default button page holding everything — is
 withdrawn: it does not survive contact with a large catalog, which is what this
 version exists to support. **When any code is present the v1.1.0 rule is unchanged**
-and codes remain a complete override.
+and codes remain a complete override — of **which column** a button belongs
+to. They are not, per the Column-cap overflow clause above (v1.2.0), a
+guarantee that a column renders on the exact page number its code names: a
+page's three-column and a column's six-button capacity are fixed regardless of
+what any code says, so a column or button-stack that would exceed either still
+moves to a continuation page.
 
 **Portability note:** the *packing rule* is normative — fill a column, then a
 column-slot on the page, then start a new page; never straddle a category
@@ -524,13 +541,19 @@ port realizes them per platform rather than re-deriving them:
 - **v1.2.0 (additive):** adds the optional action `category` attribute, the
   optional field `usedBy` attribute, the three-state deployment-level
   `availability` flag, the capacity-packed auto-layout rule for uncoded buttons,
-  the always-generated index surface with its navigation and button catalog, the
+  the column-cap overflow clause for coded layouts (a page's three-column and a
+  column's six-button capacity bind a coded layout too, so an over-capacity
+  column or button-stack moves to a continuation page rather than a page number
+  or column a code names being silently unrenderable), the always-generated
+  index surface with its navigation and button catalog, the
   no-clipping rule for descriptions, the config schema marker with fail-closed
   migration, and the reserved `Chains` category + `Macros Home` name. No `key`,
   action `id`, kind, value encoding, or **action** semantics changed, so
-  v1.0.0/v1.1.0 configs remain valid and read as all-actions-`button`. The one
-  *behaviour* replaced is engine layout for the uncoded case (single page →
-  capacity-packed pages) — engine presentation under the two-axis rule above,
-  not stored-config compatibility, so it stays additive. Owner-approved; see
+  v1.0.0/v1.1.0 configs remain valid and read as all-actions-`button`. The
+  *behaviours* replaced are engine layout for the uncoded case (single page →
+  capacity-packed pages) and, for the coded case, an over-capacity column now
+  overflowing instead of being silently undrawn — both engine presentation
+  under the two-axis rule above, not stored-config compatibility, so both stay
+  additive. Owner-approved; see
   the Provenance section of `docs/designs/2026-07-24-finish-excel-track1-plan.md`
   for the three contested calls and who lost them.
