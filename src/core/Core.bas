@@ -71,10 +71,27 @@ Private Const AVAIL_HEADER   As String = "Availability"
 ' byte-for-byte regardless of the workbook's locale.
 Private Const SCHEMA_VER     As String = "v1.2"
 
-' ---- grouped control-panel geometry (ported from MacroLayout; Task 9) ----
+' ---- button page geometry (v0.4.0: an unmerged CELL-CARD grid) ----
+' Cards live in worksheet columns B, D and F, with C and E as narrow gutters.
+' NOTHING on this grid may be merged: Excel's AutoFit ignores merged cells (which
+' is why the Setup band rows have to estimate their height instead), and AutoFit
+' on the description rows is the entire reason a description cannot clip.
 Private Const PANEL_BASE As String = "Macros "   ' grouped output tabs: "Macros 1", "Macros 2"...
+Private Const HOME_SHEET As String = "Macros Home"  ' generated index; RESERVED name (contract 7)
+Private Const CARD_COLS   As Long = 3            ' card columns per page -> B, D, F
+Private Const CARD_W      As Double = 30         ' content column width, in characters
+Private Const GUTTER_W    As Double = 3          ' spacer column width, in characters
+Private Const CARD_HDR_ROW As Long = 5           ' category header row; cards start at 6
+Private Const BTN_H      As Double = 26
+Private Const BTN_ROW_H  As Double = 30          ' button row height (BTN_H + padding)
+Private Const DESC_MIN_H As Double = 24          ' floor after AutoFit
+Private Const DESC_MAX_H As Double = 60          ' ceiling: ~5 lines at 9pt in a 30-char column,
+                                                 ' which clears the longest shipped help string
+Private Const AUTO_COL_MAX As Long = 8           ' buttons per card column before a new column
+' BTN_W, ROW_GAP, COL_GAP and HDR_H are no longer used by the card grid, but the
+' legacy point-positioned RenderPageLegacy (still called by BuildGroupedPanels
+' until Task 8) references them, so they stay until that builder is deleted.
 Private Const BTN_W   As Double = 210
-Private Const BTN_H   As Double = 30
 Private Const ROW_GAP As Double = 8
 Private Const COL_GAP As Double = 24
 Private Const HDR_H   As Double = 22
@@ -2403,7 +2420,7 @@ NextBtn:
     Dim tabKeys As Variant, ti As Long, firstPanel As Worksheet, panel As Worksheet
     tabKeys = SortedKeys(pages)
     For ti = LBound(tabKeys) To UBound(tabKeys)
-        Set panel = RenderPage(pages, CLng(tabKeys(ti)))
+        Set panel = RenderPageLegacy(pages, CLng(tabKeys(ti)))
         If firstPanel Is Nothing Then Set firstPanel = panel
     Next ti
     If Not firstPanel Is Nothing Then firstPanel.Activate
@@ -2465,19 +2482,83 @@ Private Function EnsurePanelSheet(ByVal nm As String, ByVal atFront As Boolean) 
     Set EnsurePanelSheet = ws
 End Function
 
-' Insert one button-array into the nested pages dictionary: tabNum -> (colIx -> Collection).
-Private Sub AddToPage(pages As Object, ByVal tabNum As Long, ByVal colIx As Long, ByVal btn As Variant)
-    Dim cols As Object, items As Collection
-    If Not pages.Exists(tabNum) Then pages.Add tabNum, CreateObject("Scripting.Dictionary")
-    Set cols = pages(tabNum)
+' The layout structure every panel builder fills and RenderPage consumes:
+'   layout(tabNum)("title")        page title             (String)
+'   layout(tabNum)("cols")(colIx)  buttons in that column (Collection of Arrays)
+'   layout(tabNum)("hdrs")(colIx)  that column's header   (String)
+' A page is created lazily by the first button filed onto it, so callers must file
+' a button BEFORE setting its title or column header.
+Private Sub AddToPage(layout As Object, ByVal tabNum As Long, ByVal colIx As Long, ByVal btn As Variant)
+    Dim page As Object, cols As Object, items As Collection
+    If Not layout.Exists(tabNum) Then
+        Set page = CreateObject("Scripting.Dictionary")
+        page.Add "title", PANEL_BASE & "- Page " & tabNum
+        page.Add "cols", CreateObject("Scripting.Dictionary")
+        page.Add "hdrs", CreateObject("Scripting.Dictionary")
+        layout.Add tabNum, page
+    End If
+    Set page = layout(tabNum)
+    Set cols = page("cols")
     If Not cols.Exists(colIx) Then cols.Add colIx, New Collection
     Set items = cols(colIx)
-    items.Add btn                 ' btn = Array(id, caption, onAction, help)
+    items.Add btn                 ' btn = Array(id, caption, onAction, help, category)
+End Sub
+
+' No-ops when the page does not exist yet - file a button first (see AddToPage).
+Private Sub SetPageTitle(layout As Object, ByVal tabNum As Long, ByVal title As String)
+    If layout.Exists(tabNum) Then layout(tabNum)("title") = title
+End Sub
+
+Private Sub SetColHeader(layout As Object, ByVal tabNum As Long, ByVal colIx As Long, ByVal hdr As String)
+    If layout.Exists(tabNum) Then layout(tabNum)("hdrs")(colIx) = hdr
+End Sub
+
+Private Function PageButtonCount(page As Object) As Long
+    Dim cols As Object, k As Variant
+    Set cols = page("cols")
+    For Each k In cols.Keys
+        PageButtonCount = PageButtonCount + cols(k).Count
+    Next k
+End Function
+
+' B/D/F carry content, C/E are gutters. Column A stays narrow as a margin.
+Private Sub SetupCardGrid(ws As Worksheet)
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = CARD_W
+    ws.Columns("C").ColumnWidth = GUTTER_W
+    ws.Columns("D").ColumnWidth = CARD_W
+    ws.Columns("E").ColumnWidth = GUTTER_W
+    ws.Columns("F").ColumnWidth = CARD_W
+End Sub
+
+' Card content columns are B, D, F -> 2, 4, 6. slot is 1-based; 0 means off-grid.
+Private Function CardCol(ByVal slot As Long) As Long
+    If slot < 1 Or slot > CARD_COLS Then Exit Function
+    CardCol = slot * 2
+End Function
+
+' Anchor a button to a cell so it lines up with the description directly beneath.
+Private Sub AddBtnInCell(ws As Worksheet, ByVal nm As String, ByVal cap As String, _
+                         ByVal action As String, anchor As Range)
+    AddBtn ws, nm, cap, action, anchor.Left, anchor.Top + 1, anchor.Width, BTN_H
+End Sub
+
+' AutoFit each description row, then clamp. AutoFit works here ONLY because
+' nothing on the card grid is merged. The clamp is two-sided: the floor keeps
+' one-line cards from looking broken next to three-line neighbours, and the
+' ceiling stops one runaway string from pushing the page off screen.
+Private Sub FitDescRows(ws As Worksheet, ByVal firstDescRow As Long, ByVal lastRow As Long)
+    Dim r As Long
+    For r = firstDescRow To lastRow Step 2
+        ws.Rows(r).AutoFit
+        If ws.Rows(r).RowHeight < DESC_MIN_H Then ws.Rows(r).RowHeight = DESC_MIN_H
+        If ws.Rows(r).RowHeight > DESC_MAX_H Then ws.Rows(r).RowHeight = DESC_MAX_H
+    Next r
 End Sub
 
 ' Draw one "Macros N" page: title, per-column headers (Setup/Unassigned/Column X),
 ' and the stacked buttons. Columns 9998 = "Setup", 9999 = "Unassigned".
-Private Function RenderPage(pages As Object, ByVal tabNum As Long) As Worksheet
+Private Function RenderPageLegacy(pages As Object, ByVal tabNum As Long) As Worksheet
     Dim panel As Worksheet, cols As Object, colKeys As Variant, ci As Long
     Dim colIx As Long, items As Collection, ii As Long, it As Variant
     Dim leftBase As Double, topBase As Double, colLeft As Double, topPos As Double, hdr As String
@@ -2506,8 +2587,174 @@ Private Function RenderPage(pages As Object, ByVal tabNum As Long) As Worksheet
         Next ii
     Next ci
     panel.Range("A1").Select
+    Set RenderPageLegacy = panel
+End Function
+
+' Draw one "Macros N" page as an unmerged card grid: nav row, page title, one
+' category-headed card column per layout column, each button followed by its
+' description in the cell below it.
+Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
+                            ByVal prevSheet As String, ByVal nextSheet As String) As Worksheet
+    Dim panel As Worksheet, page As Object, cols As Object, hdrs As Object
+    Dim colKeys As Variant, si As Long, slot As Long, colIx As Long
+    Dim items As Collection, ii As Long, it As Variant
+    Dim cc As Long, bRow As Long, dRow As Long, lastRow As Long, hdr As String
+    Set page = layout(tabNum)
+    Set cols = page("cols")
+    Set hdrs = page("hdrs")
+    Set panel = EnsurePanelSheet(PANEL_BASE & tabNum, False)
+    SetupCardGrid panel
+    RenderNavRow panel, prevSheet, nextSheet
+    With panel.Cells(3, 2)
+        .Value = CStr(page("title"))
+        .Font.Size = 15
+        .Font.Bold = True
+        .Font.Color = RGB(31, 78, 121)
+    End With
+
+    colKeys = SortedKeys(cols)
+    lastRow = CARD_HDR_ROW + 1
+    slot = 0
+    For si = LBound(colKeys) To UBound(colKeys)
+        colIx = CLng(colKeys(si))
+        slot = slot + 1
+        cc = CardCol(slot)
+        If cc = 0 Then GoTo NextSlot        ' more columns than card slots: never draw off-grid
+        Set items = cols(colIx)
+        hdr = ""
+        If hdrs.Exists(colIx) Then hdr = CStr(hdrs(colIx))
+        If Len(hdr) > 0 Then
+            With panel.Cells(CARD_HDR_ROW, cc)
+                .Value = hdr
+                .Font.Bold = True
+                .Font.Size = 11
+                .Font.Color = RGB(54, 32, 100)
+                .Interior.Color = RGB(221, 217, 240)
+            End With
+        End If
+        For ii = 1 To items.Count
+            it = items(ii)
+            bRow = CARD_HDR_ROW + 1 + (ii - 1) * 2
+            dRow = bRow + 1
+            panel.Rows(bRow).RowHeight = BTN_ROW_H
+            AddBtnInCell panel, "b" & tabNum & "_" & colIx & "_" & ii, _
+                         CStr(it(1)), CStr(it(2)), panel.Cells(bRow, cc)
+            With panel.Cells(dRow, cc)
+                .Value = CStr(it(3))
+                .Font.Size = 9
+                .Font.Color = RGB(110, 110, 110)
+                .WrapText = True
+                .VerticalAlignment = xlTop
+            End With
+            If dRow > lastRow Then lastRow = dRow
+        Next ii
+NextSlot:
+    Next si
+    FitDescRows panel, CARD_HDR_ROW + 2, lastRow
     Set RenderPage = panel
 End Function
+
+' Row 1: a persistent Home link in a fixed position on every page, plus Previous /
+' Next. Cells rather than shapes, because a cell hyperlink needs no shape
+' bookkeeping and EnsurePanelSheet's Cells.Clear removes it cleanly on rebuild.
+' ASCII arrows only - build.ps1 writes UTF-8 with no BOM on the assumption that
+' the SOURCE is ASCII, so a literal arrow glyph in the .bas is an import hazard.
+Private Sub RenderNavRow(ws As Worksheet, ByVal prevSheet As String, ByVal nextSheet As String)
+    NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
+    If Len(prevSheet) > 0 Then NavLink ws.Cells(1, 4), "< Previous", prevSheet
+    If Len(nextSheet) > 0 Then NavLink ws.Cells(1, 6), "Next >", nextSheet
+    ws.Rows(1).RowHeight = 18
+End Sub
+
+' One in-workbook hyperlink cell. The SubAddress sheet name is always quoted,
+' because "Macros Home" and "Setup Menu" both contain a space.
+Private Sub NavLink(cell As Range, ByVal caption As String, ByVal sheetName As String)
+    cell.Parent.Hyperlinks.Add Anchor:=cell, Address:="", _
+                               SubAddress:="'" & sheetName & "'!A1", _
+                               TextToDisplay:=caption
+    cell.Font.Size = 10
+    cell.Font.Bold = True
+End Sub
+
+' Render every page in page order, threading each one's Previous/Next sheet names
+' so the nav row is drawn in the same pass.
+Private Sub RenderAllPages(layout As Object)
+    Dim tabKeys As Variant, ti As Long, prevNm As String, nextNm As String
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        prevNm = ""
+        nextNm = ""
+        If ti > LBound(tabKeys) Then prevNm = PANEL_BASE & CLng(tabKeys(ti - 1))
+        If ti < UBound(tabKeys) Then nextNm = PANEL_BASE & CLng(tabKeys(ti + 1))
+        RenderPage layout, CLng(tabKeys(ti)), prevNm, nextNm
+    Next ti
+End Sub
+
+' Manual layout: file each button onto a "Macros N" page by its code. Blank code
+' -> page 1 Unassigned column (9999); "hide" -> omitted; unparseable -> Unassigned
+' (already blocked at Finalize). Files only - rendering is RenderAllPages.
+Private Sub BuildManualLayout(buttons As Collection, codeMap As Object, layout As Object)
+    Dim e As Variant, id As String, code As String
+    Dim tabNum As Long, colIx As Long, colL As String, unassigned As New Collection
+    For Each e In buttons
+        id = LCase(CStr(e(0)))
+        code = ""
+        If codeMap.Exists(id) Then code = Trim(CStr(codeMap(id)))
+        If LCase(code) = "hide" Then GoTo NextBtn
+        If Len(code) = 0 Then
+            unassigned.Add e
+        ElseIf ParseCode(code, tabNum, colIx, colL) Then
+            AddToPage layout, tabNum, colIx, e
+        Else
+            unassigned.Add e            ' unparseable degrades to Unassigned
+        End If
+NextBtn:
+    Next e
+    For Each e In unassigned
+        AddToPage layout, 1, 9999, e     ' blank-coded buttons go to page 1's Unassigned column
+    Next e
+End Sub
+
+' Title and head a hand-built layout. Column headers keep the code-based names the
+' user chose. A page is titled by category only when EVERY button on it agrees - a
+' hand-built page may deliberately mix categories, and guessing a title for a
+' mixed page would be worse than the generic one.
+Private Sub LabelManualPages(layout As Object)
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
+    Dim items As Collection, ii As Long, it As Variant
+    Dim cat As String, one As String, mixed As Boolean
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set cols = page("cols")
+        cat = ""
+        mixed = False
+        colKeys = SortedKeys(cols)
+        For ci = LBound(colKeys) To UBound(colKeys)
+            colIx = CLng(colKeys(ci))
+            If colIx = 9998 Then
+                SetColHeader layout, tabNum, colIx, "Setup"
+            ElseIf colIx = 9999 Then
+                SetColHeader layout, tabNum, colIx, "Unassigned"
+            Else
+                SetColHeader layout, tabNum, colIx, "Column " & IndexToCol(colIx)
+            End If
+            Set items = cols(colIx)
+            For ii = 1 To items.Count
+                it = items(ii)
+                one = CStr(it(4))
+                If Len(cat) = 0 Then
+                    cat = one
+                ElseIf LCase(cat) <> LCase(one) Then
+                    mixed = True
+                End If
+            Next ii
+        Next ci
+        If Not mixed And Len(cat) > 0 Then SetPageTitle layout, tabNum, cat
+    Next ti
+End Sub
 
 ' Frameless textbox label (ported from MacroLayout ML_AddText).
 Private Function AddText(ws As Worksheet, ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
