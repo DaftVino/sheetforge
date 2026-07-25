@@ -695,6 +695,7 @@ Private Function CoreCandidates() As Collection
     Dim c As New Collection
     c.Add "ImportExport"            ' probes PkgImportExport_Manifest
     c.Add "Clean"                   ' probes PkgClean_Manifest
+    c.Add "Fixture"                 ' TEMPORARY (v0.4.0 verification) - remove with PkgFixture
     Set CoreCandidates = c
 End Function
 
@@ -2526,7 +2527,10 @@ Private Sub BuildAdminPanel()
     ' Fix round 2, fix 1: same reasoning as Macros Home's B2 - EnsurePanelSheet's
     ' row-height reset pins row 2 at StandardHeight, which does not grow for a
     ' 16pt title, so set it literally right after the title is written.
-    ws.Rows(2).RowHeight = 21
+    ' Correction (Task 9): 21pt gave a 16pt font ~1pt of headroom on paper but a
+    ' reviewer's arithmetic showed that is too tight in practice; bumped to 23
+    ' for real headroom - a slightly tall title row costs nothing visually.
+    ws.Rows(2).RowHeight = 23
     With ws.Range("B3")
         .Value = "First-time and re-configuration controls. Right-click this tab -> Hide when you're done."
         .Font.Italic = True
@@ -2785,7 +2789,9 @@ NextSlot:
     If skipped > 0 Then
         panel.Rows(CARD_HDR_ROW - 1).RowHeight = 130   ' room for the wrapped warning sentence
     Else
-        panel.Rows(CARD_HDR_ROW - 1).RowHeight = 20    ' clears a single 15pt bold title line
+        ' Correction (Task 9): 20 left a 15pt bold title with no real headroom;
+        ' bumped to 22 so it reliably clears instead of clipping.
+        panel.Rows(CARD_HDR_ROW - 1).RowHeight = 22    ' clears a single 15pt bold title line
     End If
     ' Explicit AutoFit for the header row: it renders correctly on a fresh
     ' sheet only because Excel's implicit auto-height flag is still live.
@@ -3297,7 +3303,9 @@ Private Sub BuildHomePage(layout As Object, ByVal isManual As Boolean)
     ' StandardHeight, which does not grow for an 18pt title the way a
     ' never-explicitly-sized row implicitly would - set literally, right after
     ' the title is written, so it clears the font instead of clipping it.
-    ws.Rows(2).RowHeight = 23
+    ' Correction (Task 9): 23 was possibly already short for an 18pt title
+    ' (needs ~23.25); bumped to 25 for real headroom.
+    ws.Rows(2).RowHeight = 25
     With ws.Range("B3")
         .Value = "Pick a page below, or find an action in the catalog. Every page has a  << Home  link back here."
         .Font.Italic = True
