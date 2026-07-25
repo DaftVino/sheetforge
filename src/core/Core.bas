@@ -78,26 +78,32 @@ Public Sub Core_DeclarePackage(reg As Object, ByVal id As String, _
 End Sub
 
 Public Sub Core_AddSection(reg As Object, ByVal title As String)
-    reg("fields").Add NewField("", title, "section", "", "simple", "")
+    reg("fields").Add NewField("", title, "section", "", "simple", "", "")
 End Sub
 
 ' tier is "simple" (default) or "advanced". Advanced fields are grouped under an
 ' "ADVANCED - most users can leave these as-is" band so regular users can stop
 ' after the simple fields. help is an optional plain-language note shown in grey
-' under the field (pass via help:= to skip tier).
+' under the field (pass via help:= to skip tier). usedBy is an optional
+' comma-separated list of action ids this field configures; a field whose every
+' named action is Off moves into the collapsed band at the bottom of Setup (never
+' omitted - see Core_BuildSetup). A "Chains only" action still runs, so it still
+' keeps its fields in the working area.
 Public Sub Core_AddField(reg As Object, ByVal key As String, ByVal label As String, _
                          ByVal kind As String, ByVal dflt As String, _
                          Optional ByVal tier As String = "simple", _
-                         Optional ByVal help As String = "")
-    reg("fields").Add NewField(key, label, kind, dflt, tier, help)
+                         Optional ByVal help As String = "", _
+                         Optional ByVal usedBy As String = "")
+    reg("fields").Add NewField(key, label, kind, dflt, tier, help, usedBy)
 End Sub
 
 Public Sub Core_AddList(reg As Object, ByVal key As String, _
                         ByVal label As String, ByVal colHeader As String, _
                         Optional ByVal tier As String = "simple", _
-                        Optional ByVal help As String = "")
+                        Optional ByVal help As String = "", _
+                        Optional ByVal usedBy As String = "")
     Dim f As Object
-    Set f = NewField(key, label, "list", "", tier, help)
+    Set f = NewField(key, label, "list", "", tier, help, usedBy)
     f("headers") = colHeader
     reg("fields").Add f
 End Sub
@@ -107,9 +113,10 @@ End Sub
 Public Sub Core_AddTable(reg As Object, ByVal key As String, _
                          ByVal label As String, ByVal colHeaders As String, _
                          Optional ByVal tier As String = "simple", _
-                         Optional ByVal help As String = "")
+                         Optional ByVal help As String = "", _
+                         Optional ByVal usedBy As String = "")
     Dim f As Object
-    Set f = NewField(key, label, "table", "", tier, help)
+    Set f = NewField(key, label, "table", "", tier, help, usedBy)
     f("headers") = colHeaders
     reg("fields").Add f
 End Sub
@@ -122,20 +129,31 @@ Public Sub Core_AddDefault(reg As Object, ByVal key As String, ByVal rowCsv As S
     If Not f Is Nothing Then f("defaults").Add rowCsv
 End Sub
 
+' category is the DISPLAY grouping used by the generated index and by the column
+' headers on a button page. It defaults to the package's display name, so an
+' action that declares nothing keeps today's grouping. It is deliberately
+' decoupled from the module: two packages may feed one category, and one package
+' may span several, so a future package split never moves a button in the user's
+' mental model.
 Public Sub Core_AddAction(reg As Object, ByVal actionId As String, ByVal caption As String, _
-                          ByVal entryPoint As String, ByVal help As String)
-    Dim a As Object
+                          ByVal entryPoint As String, ByVal help As String, _
+                          Optional ByVal category As String = "")
+    Dim a As Object, cat As String
     Set a = CreateObject("Scripting.Dictionary")
     a.Add "id", actionId
     a.Add "caption", caption
     a.Add "entry", entryPoint
     a.Add "help", help
+    cat = Trim(category)
+    If Len(cat) = 0 Then cat = CStr(reg("name"))
+    a.Add "category", cat
     reg("actions").Add a
 End Sub
 
 Private Function NewField(ByVal key As String, ByVal label As String, _
                           ByVal kind As String, ByVal dflt As String, _
-                          ByVal tier As String, ByVal help As String) As Object
+                          ByVal tier As String, ByVal help As String, _
+                          ByVal usedBy As String) As Object
     Dim f As Object
     Set f = CreateObject("Scripting.Dictionary")
     f.Add "key", key
@@ -145,6 +163,9 @@ Private Function NewField(ByVal key As String, ByVal label As String, _
     f.Add "headers", ""
     f.Add "defaults", New Collection
     f.Add "help", help
+    ' Comma-separated action ids this field configures; "" = package-wide (always
+    ' shown). Stored lowercased so FieldInUse can compare without re-normalizing.
+    f.Add "usedBy", LCase(Trim(usedBy))
     ' Normalize the tier so an unknown or mis-cased value degrades to "simple"
     ' (still shown) rather than matching neither render pass and vanishing.
     Dim t As String
