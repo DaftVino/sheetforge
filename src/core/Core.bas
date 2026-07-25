@@ -949,15 +949,83 @@ Public Sub Core_BuildSetup()
     Dim firstFieldRow As Long
     On Error GoTo Fail
 
+    ' Fail-closed config migration gate (contract section 5). Three distinct
+    ' outcomes, each with its own real recovery - a shared "note it down" message
+    ' cannot serve all of them because _Config is xlSheetVeryHidden (nothing to
+    ' note down) and because the right next step differs by status:
+    '   "unknown" - a genuinely different build wrote this; only reimporting that
+    '               build's MacrosBundle.bas can read it, so say that plainly.
+    '   "invalid"/"damaged" - unreadable, but recoverable IN this build: if the
+    '               Setup tab is still there, point at it directly; if it is not,
+    '               fall through to a guarded, explicit rebuild confirmation
+    '               (fix 3) rather than dead-ending forever.
     Dim schemaState As String, schemaDetail As String
     schemaState = ConfigSchemaStatus(schemaDetail)
-    If schemaState = "unknown" Or schemaState = "invalid" Then
+
+    If schemaState = "unknown" Then
         MsgBox schemaDetail & vbCrLf & vbCrLf & _
-               "Nothing has been changed. Rebuilding the Setup tab now would " & _
-               "discard those saved answers, so it has been stopped." & vbCrLf & vbCrLf & _
-               "Note them down (or restore a backup of this workbook) before " & _
-               "rebuilding.", vbExclamation, "Create Setup Tab"
+               "To carry on, import that version's MacrosBundle.bas again. Your settings " & _
+               "are safe in the meantime - nothing has been changed.", _
+               vbExclamation, "Create Setup Tab"
         Exit Sub
+    End If
+
+    If schemaState = "invalid" Or schemaState = "damaged" Then
+        If Core_SheetExists(SETUP_SHEET) Then
+            MsgBox schemaDetail & vbCrLf & vbCrLf & _
+                   "The Setup tab is still open with your other answers on it. Review and " & _
+                   "correct the Action catalog's Availability and Page code entries there " & _
+                   "(described above), then click 'Finalize Setup Tab'. Nothing has been " & _
+                   "changed." & vbCrLf & vbCrLf & _
+                   "Do NOT delete the Setup tab - without it, there is no way to finish this " & _
+                   "without technical help.", vbExclamation, "Create Setup Tab"
+            Exit Sub
+        Else
+            ' No Setup tab left to fix by hand, and Finalize refuses to run without
+            ' one - so refusing here too would dead-end the workbook forever with no
+            ' UI path out (the underlying data lives on a very-hidden sheet). Contract
+            ' section 5 allows a destructive rebuild in this specific corner as long
+            ' as it is never silent, so offer one real, defaulted-to-No choice that
+            ' names exactly what is lost and what survives.
+            Dim rebuildMsg As String
+            rebuildMsg = schemaDetail & vbCrLf & vbCrLf & _
+                "There is no Setup tab left to fix by hand, so the only way forward is " & _
+                "to rebuild the Action catalog from scratch." & vbCrLf & vbCrLf & _
+                "DISCARDED: the saved page-code and Availability choices described above " & _
+                "(every action returns as a plain Button with automatic placement)." & _
+                vbCrLf & "KEPT: every other saved setting in this workbook." & vbCrLf & vbCrLf & _
+                "Rebuild the Setup tab now?"
+            If MsgBox(rebuildMsg, vbExclamation + vbYesNo + vbDefaultButton2, _
+                      "Create Setup Tab - saved configuration unreadable") = vbNo Then
+                MsgBox "Nothing has been changed.", vbInformation, "Create Setup Tab"
+                Exit Sub
+            End If
+            ' Yes: actually make the promise above true. A bare fall-through would
+            ' rebuild by calling RenderPlacementBlock, which reads prior values via
+            ' ReadCodeMap/ReadAvailMap - and those are deliberately permissive, so
+            ' they would carry the SAME unreadable strings forward unchanged rather
+            ' than resetting them (an "invalid" legacy code is copied as-is; a
+            ' "damaged" store with no marker is read as legacy and would copy its
+            ' Availability LABELS into the new Page-code column - exactly the bug
+            ' Step 1 of this task fixed, reintroduced here if left alone). Blank the
+            ' unreadable block in _Config itself so the prior-value reads genuinely
+            ' find nothing, matching "DISCARDED" above. Only this one block is
+            ' touched - every other saved setting in _Config is untouched, matching
+            ' "KEPT" above.
+            Dim cfgWs As Worksheet, cKr As Long, cNk As Long
+            Set cfgWs = CfgSheet()
+            If Not cfgWs Is Nothing Then
+                cKr = FindKeyRow(cfgWs, LAYOUT_KEY)
+                If cKr > 0 Then
+                    cNk = NextKeyRow(cfgWs, cKr)
+                    cfgWs.Range(cfgWs.Cells(cKr, RID_COL), cfgWs.Cells(cNk - 1, RID_COL)).ClearContents
+                    cfgWs.Range(cfgWs.Cells(cKr, VAL_COL + 1), cfgWs.Cells(cNk - 1, VAL_COL + 2)).ClearContents
+                End If
+            End If
+            ' Fall through and rebuild: ReadCodeMap/ReadAvailMap now see an absent
+            ' marker and no ids in the block, so every action seeds as Button with
+            ' no code, exactly as promised.
+        End If
     End If
 
     If Core_SheetExists(SETUP_SHEET) Then
@@ -1524,58 +1592,140 @@ Private Function BlockSchema(ws As Worksheet, ByVal keyRow As Long) As String
     BlockSchema = Trim(CStr(ws.Cells(keyRow, RID_COL).Value))
 End Function
 
+' Extracts the major version number from a schema marker of the form
+' "v<major>.<minor>" (e.g. "v1.2" -> 1). ALSO accepts a bare "<major>.<minor>"
+' with no "v" - the marker the interim da5de80 build wrote, before the "v"
+' prefix (and the NumberFormat "@" guard added in 8b00a79) existed: a General-
+' formatted cell coerced that bare text into the NUMBER 1.2, which reads back
+' through CStr as "1.2" on an en-US locale. That data is genuinely v1.2-shaped -
+' only its stamp is missing the "v" - so it is deliberately understood here
+' rather than rejected as damaged.
+' Returns False for anything that fits neither pattern: a present marker that
+' is not a version number at all is corruption, and callers must not guess a
+' major version for it (contract section 5 - fail closed, do not guess).
+Private Function SchemaMajor(ByVal marker As String, ByRef major As Long) As Boolean
+    Dim s As String, dot As Long, digits As String, minorPart As String, i As Long, ch As String
+    major = 0
+    s = Trim(marker)
+    If Len(s) = 0 Then Exit Function
+    If LCase(Left(s, 1)) = "v" Then s = Mid(s, 2)     ' normal form; bare form skips this
+    dot = InStr(s, ".")
+    If dot < 2 Then Exit Function                     ' need >=1 digit before the dot
+    digits = Left(s, dot - 1)
+    minorPart = Mid(s, dot + 1)
+    If Len(minorPart) = 0 Then Exit Function
+    For i = 1 To Len(digits)
+        ch = Mid(digits, i, 1)
+        If ch < "0" Or ch > "9" Then Exit Function
+    Next i
+    For i = 1 To Len(minorPart)
+        ch = Mid(minorPart, i, 1)
+        If ch < "0" Or ch > "9" Then Exit Function
+    Next i
+    major = CLng(digits)
+    SchemaMajor = True
+End Function
+
 ' Classify the ACTIVATED config before anything destructive touches the Setup
 ' sheet. Returns one of:
 '   "none"    - no config yet (a fresh workbook); nothing to lose
-'   "ok"      - written by this version
-'   "legacy"  - pre-v1.2, every recovered page code validates; safe to migrate
-'   "invalid" - pre-v1.2, but a recovered code does not parse; DO NOT rebuild
-'   "unknown" - a marker this build does not recognise (a NEWER version wrote it)
-' detail is filled with a human-readable explanation for the last two.
+'   "ok"      - marker's major version matches this build's (older/equal/newer
+'               minor all count - see SchemaMajor); the layout invariant
+'               ReadCodeMap/ReadAvailMap rely on holds, so it is readable
+'   "legacy"  - marker absent, every recovered page code validates; safe to migrate
+'   "invalid" - marker absent, but a recovered code does not parse; Core_BuildSetup
+'               does not rebuild blind - it offers a guided or guarded recovery
+'   "unknown" - a marker with a genuinely different major version: a real
+'               different build wrote this, and reimporting THAT build's
+'               MacrosBundle.bas is the fix - guessing at its layout is not
+'   "damaged" - a marker is present but does not parse as a version at all, OR
+'               the marker is ABSENT while the visible header already says
+'               "Availability" (contract section 5: this is a v1.2-shaped block
+'               whose stamp was removed or edited by hand - tampering, not a
+'               genuine pre-v1.2 block). There is no "correct build" to
+'               reimport for this one; it gets the same guarded rebuild
+'               Core_BuildSetup offers "invalid".
+' detail is filled with a human-readable explanation for every status except
+' "none"/"ok"/"legacy".
 Private Function ConfigSchemaStatus(ByRef detail As String) As String
     Dim ws As Worksheet, kr As Long, ver As String, nk As Long, i As Long
     Dim id As String, code As String, tn As Long, cx As Long, cl As String
+    Dim verMajor As Long, curMajor As Long
     detail = ""
     Set ws = CfgSheet()
     If ws Is Nothing Then ConfigSchemaStatus = "none": Exit Function
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr = 0 Then ConfigSchemaStatus = "none": Exit Function
     ver = BlockSchema(ws, kr)
-    If ver = SCHEMA_VER Then ConfigSchemaStatus = "ok": Exit Function
-    If Len(ver) > 0 Then
-        detail = "The saved configuration was written by a newer version of this " & _
-                 "toolkit (format '" & ver & "'; this build understands '" & SCHEMA_VER & "')."
-        ConfigSchemaStatus = "unknown"
-        Exit Function
-    End If
-    ' Legacy: validate every page code recovered from the OLD column before we let
-    ' anything overwrite the sheet holding them.
-    nk = NextKeyRow(ws, kr)
-    For i = kr + 1 To nk - 1
-        id = Trim(CStr(ws.Cells(i, RID_COL).Value))
-        If Len(id) > 0 Then
-            code = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
-            If Len(code) > 0 And LCase(code) <> "hide" Then
-                If Not ParseCode(code, tn, cx, cl) Then
-                    detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
+
+    If Len(ver) = 0 Then
+        ' No marker. Ordinarily a genuine pre-v1.2 block (contract section 5,
+        ' "absent is not invalid") - but if the visible header already reads
+        ' "Availability", that column only exists in a v1.2-shaped block, so the
+        ' marker was removed/damaged rather than never having existed. Mirrors
+        ' the equivalent check ComposeReport makes on the live Setup sheet.
+        If LCase(Trim(CStr(ws.Cells(kr, VAL_COL + 1).Value))) = "availability" Then
+            detail = "This workbook's saved configuration format stamp is missing, " & _
+                     "even though its layout looks like this version's. It cannot be " & _
+                     "safely told apart from a genuinely older format, so it cannot be " & _
+                     "trusted."
+            ConfigSchemaStatus = "damaged"
+            Exit Function
+        End If
+        ' Legacy: validate every page code recovered from the OLD column before we
+        ' let anything overwrite the sheet holding them.
+        nk = NextKeyRow(ws, kr)
+        For i = kr + 1 To nk - 1
+            id = Trim(CStr(ws.Cells(i, RID_COL).Value))
+            If Len(id) > 0 Then
+                code = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
+                If Len(code) > 0 And LCase(code) <> "hide" Then
+                    If Not ParseCode(code, tn, cx, cl) Then
+                        detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
+                    End If
                 End If
             End If
+        Next i
+        If Len(detail) > 0 Then
+            detail = "These saved page codes could not be read from the older " & _
+                     "configuration format:" & vbCrLf & detail
+            ConfigSchemaStatus = "invalid"
+        Else
+            ConfigSchemaStatus = "legacy"
         End If
-    Next i
-    If Len(detail) > 0 Then
-        detail = "These saved page codes could not be read from the older " & _
-                 "configuration format:" & vbCrLf & detail
-        ConfigSchemaStatus = "invalid"
+        Exit Function
+    End If
+
+    ' Marker present. SchemaMajor(SCHEMA_VER, ...) cannot fail - SCHEMA_VER is our
+    ' own constant - but curMajor is resolved through the same function as ver's,
+    ' rather than hardcoded, so this stays correct across a future SCHEMA_VER bump.
+    SchemaMajor SCHEMA_VER, curMajor
+    If SchemaMajor(ver, verMajor) Then
+        If verMajor = curMajor Then
+            ConfigSchemaStatus = "ok"
+        Else
+            detail = "The saved configuration was written by a different version of " & _
+                     "this toolkit (format '" & ver & "'; this build understands '" & _
+                     SCHEMA_VER & "')."
+            ConfigSchemaStatus = "unknown"
+        End If
     Else
-        ConfigSchemaStatus = "legacy"
+        detail = "This workbook's saved configuration format stamp ('" & ver & "') does " & _
+                 "not look like a version number, so it cannot be trusted."
+        ConfigSchemaStatus = "damaged"
     End If
 End Function
 
 ' id(lower) -> code, merging the action catalog block and the chains block.
 ' v0.4.0 inserted Availability between Action and Page code, so a pre-v1.2 block
-' keeps its code one column to the left. Callers that could DESTROY the recovered
-' values (Core_BuildSetup) must consult ConfigSchemaStatus first; this reader is
-' permissive on purpose so the report can describe what it found.
+' keeps its code one column to the left. Uses the SAME presence test as
+' ReadAvailMap, not an equality test against SCHEMA_VER: per ReadAvailMap's
+' invariant comment, any marker present (any value, matching or not) means the
+' Availability column exists at VAL_COL + 1, so the code sits one column
+' further right; only a genuinely ABSENT marker means the pre-v1.2 layout.
+' Callers that could DESTROY the recovered values (Core_BuildSetup) must
+' consult ConfigSchemaStatus first; this reader is permissive on purpose so
+' the report can describe what it found.
 Private Function ReadCodeMap(ws As Worksheet) As Object
     Dim map As Object, kr As Long, nk As Long, i As Long, id As String, codeCol As Long
     Dim chains As Collection, ch As Object
@@ -1585,16 +1735,15 @@ Private Function ReadCodeMap(ws As Worksheet) As Object
     ' actions
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr > 0 Then
-        If BlockSchema(ws, kr) = SCHEMA_VER Then
+        If Len(BlockSchema(ws, kr)) > 0 Then
             codeCol = VAL_COL + 2
         Else
-            codeCol = VAL_COL + 1                ' legacy (v0.3.0) layout
+            codeCol = VAL_COL + 1                ' legacy (pre-v1.2) layout
         End If
         nk = NextKeyRow(ws, kr)
         For i = kr + 1 To nk - 1
             id = Trim(CStr(ws.Cells(i, RID_COL).Value))
-            If Len(id) > 0 And LCase(id) <> LCase(SCHEMA_VER) Then _
-                map(LCase(id)) = Trim(CStr(ws.Cells(i, codeCol).Value))
+            If Len(id) > 0 Then map(LCase(id)) = Trim(CStr(ws.Cells(i, codeCol).Value))
         Next i
     End If
     ' chains
