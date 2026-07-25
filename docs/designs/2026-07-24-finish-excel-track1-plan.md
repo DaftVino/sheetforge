@@ -921,10 +921,20 @@ git commit -m "feat(core): three-state per-action availability (Button / Chains 
 
 ### Task 4: Fail-closed config migration
 
-The data-safety task, and its own reviewable unit: a reviewer could reject this
-while approving Task 3. Inserting `Availability` moved the page code from column D
-to column E. A v0.3.0 `_Config` still has it in D, and getting this wrong silently
+The data-safety task. Inserting `Availability` moved the page code from column D to
+column E. A v0.3.0 `_Config` still has it in D, and getting this wrong silently
 destroys a user's hand-built layout.
+
+> **Tasks 3 and 4 are one functionally verifiable unit — do NOT import to Excel
+> between them.** Task 3 moves the page code to column E but leaves `ReadCodeMap`
+> reading column D, so on a Task-3-only build `ComposeReport` reads the literal
+> `"Button"` as every action's page code, `ParseCode` rejects it, and **Finalize
+> refuses to activate with one `BAD CODE` per action and no way for the user to fix
+> it.** Both commits compile — the plan's compile-every-commit rule holds — but
+> Task 3 alone is not *runnable*, and an earlier draft of this plan wrongly claimed
+> a reviewer could reject Task 4 while approving Task 3. Step 1 below is what makes
+> Task 3 work at all. (Found by the Task 3 code review, not by the build: no
+> structural gate can see a column-index mismatch.)
 
 **Files:**
 - Modify: `src/core/Core.bas:36-57` (declarations — `SCHEMA_VER`)
