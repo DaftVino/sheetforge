@@ -110,14 +110,6 @@ Private Const CHAIN_CARD_CHARS As Long = 120     ' composed-text length cap befo
 ' 3-letter code, max 18278) collides with it; SplitTallManualColumns itself
 ' guards the multiply against Long overflow for anything larger.
 Private Const VSPLIT_MULT As Long = 100000
-' BTN_W, ROW_GAP, COL_GAP and HDR_H are no longer used by the card grid, but the
-' legacy point-positioned RenderPageLegacy (still called by BuildGroupedPanels
-' until Task 8) references them, so they stay until that builder is deleted.
-Private Const BTN_W   As Double = 210
-Private Const ROW_GAP As Double = 8
-Private Const COL_GAP As Double = 24
-Private Const HDR_H   As Double = 22
-
 ' ---- Setup / _Config layout ----
 Private Const KEY_COL   As Long = 1       ' column A: machine keys (hidden)
 Private Const VAL_COL   As Long = 3       ' column C: scalar value / list value / 1st table col
@@ -1491,7 +1483,8 @@ End Function
 Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     r = SectionHeader(ws, r, "COMPOSE YOUR BUTTONS")
     r = TintRow(ws, r, "Build multi-step buttons (Chains) and arrange buttons " & _
-                "onto pages (Page code). Leave everything blank to keep one Macros tab.", _
+                "onto pages (Page code). Leave every code blank for the automatic, " & _
+                "category-packed layout.", _
                 10, False, True, RGB(90, 90, 90))
     r = r + 1
     r = RenderChainsBlock(ws, r)
@@ -2194,10 +2187,10 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     ' layout-activating code - the exact bug fix round 2's fix 5 exists to
     ' prevent, just at a different call site. A hide-only store would have shown
     ' "A layout is ACTIVE" here while the engine actually runs auto-layout.
-    ' AnyPlacementCode agrees with what BuildAutoLayout/BuildManualLayout (once
-    ' Task 8 wires them in) will actually do. Both messages rewritten to
-    ' describe v0.4.0's real behaviour, not the pre-auto-layout "single Macros
-    ' tab" default this replaced.
+    ' AnyPlacementCode agrees with what Core_BuildControlPanel's
+    ' BuildAutoLayout/BuildManualLayout choice (Task 8) actually does. Both
+    ' messages describe v0.4.0's real behaviour, not the pre-auto-layout
+    ' "single Macros tab" default this replaced.
     If AnyPlacementCode(map) Then
         s = s & vbCrLf & "A layout is ACTIVE - your placement codes control which page and column each button lands on." & vbCrLf
         If Len(unassigned) > 0 Then s = s & "Unassigned -> page 1's Unassigned column (or a continuation page, if that column is already full):" & vbCrLf & unassigned
@@ -2221,25 +2214,16 @@ Private Function ActionIdSet() As Object
     Set ActionIdSet = d
 End Function
 
-Private Function AnyCode(map As Object) As Boolean
-    Dim k As Variant
-    For Each k In map.Keys
-        If Len(Trim(CStr(map(k)))) > 0 Then AnyCode = True: Exit Function
-    Next k
-End Function
-
-' Fix round 2, fix 5: NOT the same question as AnyCode. AnyCode answers "is
-' there any non-blank cell at all", which is True for a SINGLE "hide" entry
-' with every other code left blank - a user who hides one button would then
-' flip the whole workbook into manual mode (every other, still-uncoded button
-' reads as manually placed, landing in page 1's Unassigned column, and
-' HomeLegend would tell them their page codes control a layout they never
-' authored). "hide" omits a button; it does not place one, so it must not
-' count as a placement here. Task 8 must use THIS helper, not AnyCode, both
-' to choose BuildAutoLayout vs BuildManualLayout and to set BuildHomePage's
-' isManual - AnyCode itself is left untouched because Core_BuildControlPanel's
-' existing (live, legacy) branch still reads it, and that branch is Task 8's
-' to replace, not this task's to touch.
+' Fix round 2, fix 5: answers "is there a REAL placement code", not "is there
+' any non-blank cell at all" - the latter would be True for a SINGLE "hide"
+' entry with every other code left blank, and a user who hides one button
+' would then flip the whole workbook into manual mode (every other,
+' still-uncoded button reads as manually placed, landing in page 1's
+' Unassigned column, and HomeLegend would tell them their page codes control
+' a layout they never authored). "hide" omits a button; it does not place
+' one, so it must not count as a placement here. Core_BuildControlPanel (Task
+' 8) uses THIS helper, and only this one, both to choose BuildAutoLayout vs
+' BuildManualLayout and to set BuildHomePage's isManual.
 Private Function AnyPlacementCode(map As Object) As Boolean
     Dim k As Variant, v As String
     For Each k In map.Keys
@@ -2331,9 +2315,9 @@ Public Sub Core_FinalizeSetup()
     cfg.Visible = xlSheetVeryHidden
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
-    Core_BuildControlPanel True        ' rebuild the Macros tab so chains/grouping appear now
+    Core_BuildControlPanel True        ' rebuild the Macros pages so chains/placement appear now
     MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
-           "The Macros tab has been rebuilt to match your Setup answers.", _
+           "The Macros pages and 'Macros Home' index have been rebuilt to match your Setup answers.", _
            vbInformation, "Finalize Setup Tab"
     Exit Sub
 Fail:
@@ -2343,34 +2327,54 @@ Fail:
 End Sub
 
 '================================================================
-' 7. CONTROL PANEL  (builds the Macros tab + wires every button)
+' 7. CONTROL PANEL  (builds the Macros pages + Macros Home index)
 '================================================================
-' Legacy single "Macros" tab when no page codes exist; grouped "Macros N" pages
-' when a layout is active. Prior panels are cleared before either mode draws.
+' Auto-layout by display category when no button carries a placement code; the
+' manual code layout when any button does ("hide" alone does not count - see
+' AnyPlacementCode). Prior "Macros N" panels, and the pre-v0.4.0 single
+' "Macros" tab, are cleared before either mode draws. Home is always built,
+' even for a single page, so the workbook has one shape at every scale.
 ' silent:=True suppresses the "built N ..." confirmation (used when Finalize
 ' rebuilds the panel itself and shows its own combined message).
 Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
-    Dim buttons As Collection, codeMap As Object
+    Dim buttons As Collection, codeMap As Object, layout As Object, manual As Boolean
     On Error GoTo Fail
-    Application.ScreenUpdating = False
-    Set buttons = GatherButtons()
-    Set codeMap = ReadCodeMap(CfgSheet())
-    DeletePanels                         ' remove any prior "Macros N" pages
-    If AnyCode(codeMap) Then
-        DeleteLegacyPanel                ' grouped mode: drop the stale single "Macros" tab
-        BuildGroupedPanels buttons, codeMap, silent
+    Core_SpeedOn
+    Set codeMap = ReadCodeMap(CfgSheet())   ' read ONCE: GatherButtons' hide filter and the
+                                             ' mode decision below must see the same map
+    manual = AnyPlacementCode(codeMap)      ' computed BEFORE GatherButtons - IsHideCoded reads
+                                             ' codeMap(k) only after confirming .Exists(k), so
+                                             ' this ordering no longer matters for correctness,
+                                             ' but keeping it first documents the dependency
+    Set buttons = GatherButtons(codeMap)    ' single funnel for both filers - also where "hide"
+                                             ' is dropped, mode-independently (see GatherButtons)
+    Set layout = CreateObject("Scripting.Dictionary")   ' neither filer creates it
+    DeletePanels                            ' remove any prior "Macros N" pages (spares
+                                             ' "Macros Home" by design - see IsPanelName)
+    DeleteLegacyPanel                       ' v0.4.0: the single "Macros" tab is retired in BOTH modes
+    If manual Then
+        BuildManualLayout buttons, codeMap, layout
     Else
-        BuildSinglePanel buttons, silent ' legacy single "Macros" tab (reused/cleared)
+        BuildAutoLayout buttons, layout
     End If
-    BuildAdminPanel                      ' Create/Finalize controls on their own hideable tab
-    Application.ScreenUpdating = True
+    RenderAllPages layout
+    BuildAdminPanel                         ' Create/Finalize controls on their own hideable tab
+    BuildHomePage layout, manual            ' LAST: activates Macros Home and selects A1
+    Core_SpeedOff
+    If Not silent Then _
+        MsgBox "Built " & layout.Count & " macro page(s) with " & buttons.Count & _
+               " button(s), plus the '" & HOME_SHEET & "' index.", _
+               vbInformation, "Setup Complete"
     Exit Sub
 Fail:
-    Application.ScreenUpdating = True
+    RestoreSpeed
     MsgBox "Core_BuildControlPanel error: " & Err.Description, vbExclamation, "Setup"
 End Sub
 
-' Drop the single legacy "Macros" tab when switching into grouped mode.
+' Drop the pre-v0.4.0 single "Macros" tab. Called unconditionally by
+' Core_BuildControlPanel now (both modes supersede it), so this is also how an
+' upgrading workbook's stale "Macros" tab is removed the first time it rebuilds
+' under this version.
 Private Sub DeleteLegacyPanel()
     On Error Resume Next
     Application.DisplayAlerts = False
@@ -2382,23 +2386,25 @@ End Sub
 ' Each item: Array(id, caption, onAction, help, category). Actions from the
 ' registry, chains from activated config. This is the SINGLE funnel for both, so
 ' the availability filter lives here and nowhere else. Admin buttons are never in
-' this list - they live on the Setup Menu tab.
+' this list - they live on the Setup Menu tab. Takes codeMap from the caller
+' (Task 8) rather than reading its own copy, so Core_BuildControlPanel's mode
+' decision (AnyPlacementCode) and this hide filter always see the same map.
 ' Fix round 3, fix 1 (BLOCKING, live path): also the single funnel for the
-' "hide" placement code now, and for the same reason - BuildAutoLayout never
-' sees codeMap at all (it only distributes by category), so a "hide"-coded
-' button used to be filtered ONLY inside BuildManualLayout/BuildGroupedPanels.
-' Fix round 2's fix 5 correctly stopped a lone "hide" from flipping a workbook
-' into manual mode (AnyPlacementCode ignores it) - but that means a hide-only
-' store now routes to the AUTO filer once Task 8 wires it up, and the auto
-' filer has no "hide" concept of its own, so the hidden button would be drawn,
-' catalogued, and counted. Filtering it here, before either filer ever sees the
-' button, makes "hide" mode-independent, matching contract section 6 ("hide omits a
-' button") without qualification.
-Private Function GatherButtons() As Collection
+' "hide" placement code, and for the same reason - BuildAutoLayout never sees
+' codeMap at all (it only distributes by category), so a "hide"-coded button
+' would otherwise be filtered ONLY inside BuildManualLayout. Fix round 2's fix
+' 5 correctly stopped a lone "hide" from flipping a workbook into manual mode
+' (AnyPlacementCode ignores it) - but that means a hide-only store routes to
+' the AUTO filer, and the auto filer has no "hide" concept of its own, so the
+' hidden button would be drawn, catalogued, and counted. Filtering it here,
+' before either filer ever sees the button, makes "hide" mode-independent,
+' matching contract section 6 ("hide omits a button") without qualification.
+' Feed both filers ONLY this collection - nothing assembled another way - or
+' "hide" silently stops working.
+Private Function GatherButtons(codeMap As Object) As Collection
     Dim out As New Collection, reg As Object, a As Object, chains As Collection, ch As Object
-    Dim onAct As String, availMap As Object, codeMap As Object
+    Dim onAct As String, availMap As Object
     Set availMap = ReadAvailMap(CfgSheet())
-    Set codeMap = ReadCodeMap(CfgSheet())
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
             If HasButton(availMap, CStr(a("id"))) And Not IsHideCoded(codeMap, CStr(a("id"))) Then
@@ -2419,10 +2425,20 @@ Private Function GatherButtons() As Collection
     Set GatherButtons = out
 End Function
 
+' Test .Exists BEFORE reading the item. Scripting.Dictionary's default Item
+' property CREATES a missing key (with an Empty value) on read, and VBA's And
+' is not short-circuiting, so "codeMap.Exists(k) And LCase(codeMap(k)) = ..."
+' evaluates codeMap(k) even when .Exists(k) is False, silently inserting a
+' phantom key. Harmless when codeMap was a throwaway local, but Task 8 shares
+' ONE codeMap between Core_BuildControlPanel's mode decision and every
+' GatherButtons/filer call that follows it, so a phantom key inserted here
+' would corrupt that shared map for everything reading it afterwards. The If
+' below only reads codeMap(k) once .Exists(k) is already known True.
 Private Function IsHideCoded(codeMap As Object, ByVal id As String) As Boolean
     Dim k As String
     k = LCase(id)
-    IsHideCoded = codeMap.Exists(k) And LCase(Trim(CStr(codeMap(k)))) = "hide"
+    If Not codeMap.Exists(k) Then Exit Function
+    IsHideCoded = LCase(Trim(CStr(codeMap(k)))) = "hide"
 End Function
 
 ' Chain help text only - fix round 1: was raw action ids ("importexport.updateMaster"),
@@ -2436,96 +2452,6 @@ Private Function StepsInline(steps As Collection) As String
     Next v
     StepsInline = s
 End Function
-
-' Legacy layout: one "Macros" tab, action + chain buttons, then Core's two admin
-' buttons appended with the same cadence. Matches the pre-grouping look.
-Private Sub BuildSinglePanel(buttons As Collection, Optional ByVal silent As Boolean = False)
-    Dim ws As Worksheet, drawList As New Collection, e As Variant
-    Dim i As Long, leftPos As Double, topPos As Double
-    Dim btnW As Double, btnH As Double, gap As Double, helpRow As Long
-
-    Set ws = EnsurePanelSheet(MACRO_SHEET, True)
-
-    With ws.Range("B2")
-        .Value = "Macro Toolkit  -  Control Panel"
-        .Font.Size = 16
-        .Font.Bold = True
-        .Font.Color = RGB(31, 78, 121)
-    End With
-    With ws.Range("B3")
-        .Value = "Run the action buttons for daily work. First-time / re-config setup lives on the 'Setup Menu' tab."
-        .Font.Italic = True
-    End With
-
-    ' Daily action + chain buttons only (admin controls live on the Setup Menu tab).
-    For Each e In buttons
-        drawList.Add Array(CStr(e(1)), CStr(e(2)), CStr(e(3)))
-    Next e
-
-    ' Cadence: btnH + gap = 45pt = 3 rows at 15pt, so each description row lines
-    ' up with its button. Force the row heights so the alignment holds regardless
-    ' of the sheet's default.
-    btnW = 220: btnH = 32: gap = 13
-    leftPos = ws.Range("B5").Left
-    topPos = ws.Range("B5").Top
-    ws.Rows("5:" & (5 + drawList.Count * 3 + 2)).RowHeight = 15
-    helpRow = 5
-    i = 0
-    For Each e In drawList
-        i = i + 1
-        AddBtn ws, "btn" & i, CStr(e(0)), CStr(e(1)), leftPos, topPos, btnW, btnH
-        ' Description spans 2 rows (~button height) so a long, wrapped description
-        ' shows in full instead of being clipped to one 15pt row.
-        With ws.Range(ws.Cells(helpRow, 3), ws.Cells(helpRow + 1, 3))
-            .Merge
-            .Value = CStr(e(2))
-            .Font.Size = 10
-            .WrapText = True
-            .VerticalAlignment = xlCenter
-        End With
-        topPos = topPos + btnH + gap
-        helpRow = helpRow + 3
-    Next e
-
-    ws.Activate
-    ws.Range("A1").Select
-    If Not silent Then MsgBox "Macros tab built with " & buttons.Count & " button(s).", vbInformation, "Setup Complete"
-End Sub
-
-' Grouped layout: place each button onto a "Macros N" page by its code. Blank code
-' -> page 1 Unassigned column (9999); "hide" -> omitted; unparseable -> Unassigned.
-' Blank-coded buttons go to page 1's Unassigned column; "hide" omits; admin
-' controls live on their own Setup Menu tab (built separately).
-Private Sub BuildGroupedPanels(buttons As Collection, codeMap As Object, Optional ByVal silent As Boolean = False)
-    Dim pages As Object, e As Variant, id As String, code As String
-    Dim tabNum As Long, colIx As Long, colL As String, unassigned As New Collection
-    Set pages = CreateObject("Scripting.Dictionary")
-    For Each e In buttons
-        id = LCase(CStr(e(0)))
-        code = ""
-        If codeMap.Exists(id) Then code = Trim(CStr(codeMap(id)))
-        If LCase(code) = "hide" Then GoTo NextBtn
-        If Len(code) = 0 Then
-            unassigned.Add e
-        ElseIf ParseCode(code, tabNum, colIx, colL) Then
-            AddToPage pages, tabNum, colIx, e
-        Else
-            unassigned.Add e            ' unparseable degrades to Unassigned (already blocked at Finalize)
-        End If
-NextBtn:
-    Next e
-    For Each e In unassigned
-        AddToPage pages, 1, 9999, e     ' blank-coded buttons go to page 1's Unassigned column
-    Next e
-    Dim tabKeys As Variant, ti As Long, firstPanel As Worksheet, panel As Worksheet
-    tabKeys = SortedKeys(pages)
-    For ti = LBound(tabKeys) To UBound(tabKeys)
-        Set panel = RenderPageLegacy(pages, CLng(tabKeys(ti)))
-        If firstPanel Is Nothing Then Set firstPanel = panel
-    Next ti
-    If Not firstPanel Is Nothing Then firstPanel.Activate
-    If Not silent Then MsgBox "Built " & pages.Count & " page(s).", vbInformation, "Setup Complete"
-End Sub
 
 ' Create/Finalize controls on their own tab, so they can be hidden when not in
 ' use and never clutter the action pages. Reused (not re-created) on rebuild, so
@@ -2670,42 +2596,6 @@ Private Sub FitDescRows(ws As Worksheet, ByVal firstDescRow As Long, ByVal lastR
         If ws.Rows(r).RowHeight < DESC_MIN_H Then ws.Rows(r).RowHeight = DESC_MIN_H
     Next r
 End Sub
-
-' Draw one "Macros N" page: title, per-column headers (Setup/Unassigned/Column X),
-' and the stacked buttons. Columns 9998 = "Setup", 9999 = "Unassigned".
-Private Function RenderPageLegacy(pages As Object, ByVal tabNum As Long) As Worksheet
-    Dim panel As Worksheet, cols As Object, colKeys As Variant, ci As Long
-    Dim colIx As Long, items As Collection, ii As Long, it As Variant
-    Dim leftBase As Double, topBase As Double, colLeft As Double, topPos As Double, hdr As String
-    Set panel = EnsurePanelSheet(PANEL_BASE & tabNum, False)
-    leftBase = panel.Range("B4").Left: topBase = panel.Range("B4").Top
-    AddText panel, leftBase, panel.Range("B2").Top, 400, 24, "Macros - Page " & tabNum, 15, True, RGB(31, 78, 121)
-    Set cols = pages(tabNum)("cols")   ' fix round 1: AddToPage now files a page dict {title,cols,hdrs},
-                                       ' not the cols dict directly - SortedKeys(pages(tabNum)) here
-                                       ' used to CLng("title") and blew up with runtime error 13
-    colKeys = SortedKeys(cols)
-    For ci = LBound(colKeys) To UBound(colKeys)
-        colIx = colKeys(ci)
-        colLeft = leftBase + ci * (BTN_W + COL_GAP)          ' ci is 0-based across sorted columns
-        Set items = cols(colIx)
-        If colIx = 9998 Then
-            hdr = "Setup"
-        ElseIf colIx = 9999 Then
-            hdr = "Unassigned"
-        Else
-            hdr = "Column " & IndexToCol(colIx)
-        End If
-        AddText panel, colLeft, topBase, BTN_W, HDR_H, hdr, 11, True, RGB(90, 90, 90)
-        topPos = topBase + HDR_H + ROW_GAP
-        For ii = 1 To items.Count
-            it = items(ii)
-            AddBtn panel, "b" & tabNum & "_" & colIx & "_" & ii, CStr(it(1)), CStr(it(2)), colLeft, topPos, BTN_W, BTN_H
-            topPos = topPos + BTN_H + ROW_GAP
-        Next ii
-    Next ci
-    panel.Range("A1").Select
-    Set RenderPageLegacy = panel
-End Function
 
 ' Draw one "Macros N" page as an unmerged card grid: nav row, page title, one
 ' category-headed card column per layout column, each button followed by its
