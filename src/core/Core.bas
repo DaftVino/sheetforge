@@ -49,6 +49,16 @@ Private Const AVAIL_BUTTON   As String = "button"
 Private Const AVAIL_CHAIN    As String = "chains only"
 Private Const AVAIL_OFF      As String = "off"
 
+' Column header caption for the action catalog's Availability column.
+' RenderPlacementBlock writes this literal as the visible header; MarkerVerdict's
+' tamper test (case-insensitively) reads it back to decide whether an absent
+' schema marker means "pre-v1.2 layout" (recoverable) or "this v1.2-shaped block
+' was tampered with" (must not be trusted). The two must stay tied to the same
+' Const - if the caption is reworded in only one place, the tamper test silently
+' stops firing, a tampered store degrades to "absent", ReadAvailMap returns an
+' empty map, and every action the user switched Off goes live again.
+Private Const AVAIL_HEADER   As String = "Availability"
+
 ' Config-format marker, written into the hidden RID column of the action catalog's
 ' key row - a machine-owned cell, not a visible header. A display label is
 ' presentation, is user-editable, and must never decide whether saved config is
@@ -1074,7 +1084,7 @@ End Function
 
 Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
-    Dim firstFieldRow As Long
+    Dim firstFieldRow As Long, availMap As Object, bandFirst As Long, bandLast As Long
     On Error GoTo Fail
 
     If Not GateConfigMigration() Then Exit Sub
@@ -1122,32 +1132,48 @@ Public Sub Core_BuildSetup()
     PopulateReferenceLists ws, r + 1
     r = r + 2
 
+    ' The availability map comes from the ACTIVATED config, so a rebuild reflects
+    ' the last Finalize. A fresh workbook has no _Config, so the map is empty and
+    ' AvailFor reports Button for everything - the v0.4.0 default.
+    Set availMap = ReadAvailMap(CfgSheet())
+
     firstFieldRow = r
     Dim banner As String
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
         banner = UCase(CStr(reg("name")))
         r = SectionHeader(ws, r, banner)
-        r = RenderTier(ws, r, reg, "simple", True, banner)   ' simple fields, with their sections
-        If HasAdvanced(reg) Then
+        r = RenderTier(ws, r, reg, "simple", True, banner, availMap, True)   ' simple fields, with their sections
+        If HasAdvanced(reg, availMap) Then
             r = SectionHeader(ws, r, "ADVANCED  -  most users can leave these as-is")
-            r = RenderTier(ws, r, reg, "advanced", False, banner)  ' advanced, collected flat
+            r = RenderTier(ws, r, reg, "advanced", False, banner, availMap, True)  ' advanced, collected flat
         End If
         r = r + 1
     Next reg
 
     r = RenderComposeSection(ws, r)
 
+    ' The off band goes BELOW Compose on purpose: the action catalog is where the
+    ' user turns things on and off, so it must never sit under a collapsed section.
+    r = r + 1
+    r = RenderOffBand(ws, r, availMap, bandFirst, bandLast)
+
     ' Sentinel key in column A. The config readers bound a list/table block by
     ' scanning column A for the next non-blank cell; without a trailing key the
     ' LAST list/table on the sheet has no lower bound (End(xlUp) stops at its own
     ' key row, whose value rows are blank in column A) and its values are dropped.
+    ' It stays last, after the off band, because the off band may contain the
+    ' sheet's final list/table block.
     ws.Cells(r, KEY_COL).Value = END_KEY
 
     ' Long labels in column B are set to wrap (below); auto-size the field rows
     ' so a wrapped label is fully visible instead of being clipped by the value
     ' cell in column C.
     ws.Rows(firstFieldRow & ":" & r).AutoFit
+
+    ' Group AFTER AutoFit: AutoFit sizes rows and would otherwise fight the
+    ' collapse, and a collapsed row's height is irrelevant anyway.
+    CollapseRows ws, bandFirst, bandLast
 
     ws.Columns("A").Font.Color = RGB(190, 190, 190)
     ws.Columns("A").Hidden = True
@@ -1172,14 +1198,15 @@ Fail:
     MsgBox "Core_BuildSetup error: " & Err.Description, vbExclamation, "Create Setup Tab"
 End Sub
 
-' Render every field of the given tier. When showSections is True, a section
-' header is emitted just before its first matching field (so a section whose
-' fields are all in the other tier is not drawn). When False (the advanced
-' pass), section headers are skipped and the fields render flat under the one
-' ADVANCED band.
+' Render every field of the given tier whose in-use state matches wantInUse. When
+' showSections is True, a section header is emitted just before its first matching
+' field (so a section whose fields are all in the other tier is not drawn). When
+' False (the advanced pass and the off-band pass), section headers are skipped and
+' the fields render flat under the one band.
 Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
                             ByVal tier As String, ByVal showSections As Boolean, _
-                            ByVal bannerText As String) As Long
+                            ByVal bannerText As String, availMap As Object, _
+                            ByVal wantInUse As Boolean) As Long
     Dim f As Object, pending As String, havePending As Boolean
     For Each f In reg("fields")
         If f("kind") = "section" Then
@@ -1190,11 +1217,13 @@ Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
                 havePending = True
             End If
         ElseIf CStr(f("tier")) = tier Then
-            If showSections And havePending Then
-                r = SectionHeader(ws, r, pending)
-                havePending = False
+            If FieldInUse(f, availMap) = wantInUse Then
+                If showSections And havePending Then
+                    r = SectionHeader(ws, r, pending)
+                    havePending = False
+                End If
+                r = RenderField(ws, r, reg, f)
             End If
-            r = RenderField(ws, r, reg, f)
         End If
     Next f
     RenderTier = r
@@ -1211,17 +1240,91 @@ Private Function RenderField(ws As Worksheet, ByVal r As Long, reg As Object, f 
     End Select
 End Function
 
-Private Function HasAdvanced(reg As Object) As Boolean
+' Is there an advanced field that belongs in the working area? An advanced field
+' whose actions are all Off goes to the off band instead, so drawing the ADVANCED
+' header for it would leave an empty band.
+Private Function HasAdvanced(reg As Object, availMap As Object) As Boolean
     Dim f As Object
     For Each f In reg("fields")
         If f("kind") <> "section" Then
             If CStr(f("tier")) = "advanced" Then
-                HasAdvanced = True
+                If FieldInUse(f, availMap) Then
+                    HasAdvanced = True
+                    Exit Function
+                End If
+            End If
+        End If
+    Next f
+End Function
+
+' Does this package have ANY non-section field on the requested side of the
+' in-use split? Used to skip both an empty ADVANCED band and an empty off band.
+Private Function HasAnyTier(reg As Object, availMap As Object, ByVal wantInUse As Boolean) As Boolean
+    Dim f As Object
+    For Each f In reg("fields")
+        If f("kind") <> "section" Then
+            If FieldInUse(f, availMap) = wantInUse Then
+                HasAnyTier = True
                 Exit Function
             End If
         End If
     Next f
 End Function
+
+' Every field whose usedBy names only Off actions, from every package, collected
+' under one band at the very bottom of the field area and collapsed with Excel's
+' row outline.
+'
+' They are RENDERED, never omitted. DO NOT "improve" this to skip them:
+' Core_BuildSetup deletes and re-seeds Setup from the FINALIZED _Config, so
+' omit-unless-enabled costs toggle -> Finalize -> rebuild -> fill -> Finalize and
+' discards anything typed but not yet finalized (design section 2.3, which
+' deliberately overrides all three panelists of an earlier review round).
+'
+' Returns the next free row; reports the collapsible span through bandFirst /
+' bandLast so the caller can group AFTER its AutoFit pass. bandFirst = 0 means
+' nothing was relegated and no band was drawn.
+Private Function RenderOffBand(ws As Worksheet, ByVal r As Long, availMap As Object, _
+                               ByRef bandFirst As Long, ByRef bandLast As Long) As Long
+    Dim reg As Object, any As Boolean
+    bandFirst = 0
+    bandLast = 0
+    RenderOffBand = r
+    For Each reg In BuildRegistry()
+        If HasAnyTier(reg, availMap, False) Then any = True
+    Next reg
+    If Not any Then Exit Function              ' nothing off: draw no band at all
+
+    r = SectionHeader(ws, r, "SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON")
+    r = TintRow(ws, r, "These belong to actions set to 'Off' in the action catalog above. " & _
+                "They are kept and still saved, so nothing you typed is lost - set the " & _
+                "action back to 'Button' and they move up into the main list. Click the + " & _
+                "in the left margin to open this section.", _
+                9, False, True, RGB(90, 70, 120))
+    bandFirst = r
+    For Each reg In BuildRegistry()
+        If HasAnyTier(reg, availMap, False) Then
+            r = TintRow(ws, r, CStr(reg("name")), 10, True, False, RGB(90, 70, 120))
+            r = RenderTier(ws, r, reg, "simple", False, UCase(CStr(reg("name"))), availMap, False)
+            r = RenderTier(ws, r, reg, "advanced", False, UCase(CStr(reg("name"))), availMap, False)
+        End If
+    Next reg
+    bandLast = r - 1
+    RenderOffBand = r
+End Function
+
+' Group + collapse the off band, with the band's own header row left visible above
+' it (SummaryRow = xlAbove). Degrades to a plain VISIBLE band if outlining is
+' refused - the fields are rendered and readable by Finalize either way, because
+' the config readers key off column A and never care whether a row is hidden.
+Private Sub CollapseRows(ws As Worksheet, ByVal firstRow As Long, ByVal lastRow As Long)
+    If firstRow < 1 Or lastRow < firstRow Then Exit Sub
+    On Error Resume Next
+    ws.Outline.SummaryRow = xlAbove
+    ws.Rows(firstRow & ":" & lastRow).Group
+    ws.Outline.ShowLevels RowLevels:=1
+    On Error GoTo 0
+End Sub
 
 Private Function RenderScalar(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     ws.Cells(r, KEY_COL).Value = f("key")
@@ -1595,7 +1698,7 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                    "Type  hide  to leave one button off a manual layout.")
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
-    ws.Cells(r, VAL_COL + 1).Value = "Availability"
+    ws.Cells(r, VAL_COL + 1).Value = AVAIL_HEADER
     ws.Cells(r, VAL_COL + 2).Value = "Page code"
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
     ' The machine-owned schema marker, in the hidden id column of the key row -
@@ -1740,7 +1843,7 @@ Private Function MarkerVerdict(ws As Worksheet, ByVal keyRow As Long, ByRef deta
     If ws Is Nothing Or keyRow < 1 Then MarkerVerdict = "absent": Exit Function
     marker = BlockSchema(ws, keyRow)
     If Len(marker) = 0 Then
-        If LCase(Trim(CStr(ws.Cells(keyRow, VAL_COL + 1).Value))) = "availability" Then
+        If LCase(Trim(CStr(ws.Cells(keyRow, VAL_COL + 1).Value))) = LCase(AVAIL_HEADER) Then
             detail = "The hidden format marker for the Action catalog block is missing, even " & _
                      "though its layout looks like this version's, so saved Availability " & _
                      "choices cannot be trusted."
