@@ -1520,8 +1520,22 @@ Private Function ActionCaptionFor(ByVal actionId As String) As String
 End Function
 
 ' "Import Source Data [importexport.import]" for an action id (falls back to the id).
+' Own registry lookup (not ActionCaptionFor + actionId) so the bracketed id is
+' the registry's canonical a("id"), not whatever casing/spelling the caller
+' passed in - a hand-typed non-canonical id in a Steps cell is normalised back
+' to canonical when the Setup tab is rebuilt (fix round 2: a prior refactor
+' bracketed the caller's raw actionId instead, losing that normalisation).
 Private Function ActionTokenFor(ByVal actionId As String) As String
-    ActionTokenFor = ActionCaptionFor(actionId) & " [" & actionId & "]"
+    Dim reg As Object, a As Object
+    ActionTokenFor = actionId & " [" & actionId & "]"
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            If LCase(CStr(a("id"))) = LCase(actionId) Then
+                ActionTokenFor = CStr(a("caption")) & " [" & CStr(a("id")) & "]"
+                Exit Function
+            End If
+        Next a
+    Next reg
 End Function
 
 Private Function StepsToTokens(steps As Collection) As String
@@ -2552,6 +2566,16 @@ Private Function CardCol(ByVal slot As Long) As Long
     CardCol = slot * 2
 End Function
 
+' Row of a card pair's button, 1-based pair index within a column. The SOLE
+' place this arithmetic is written. RenderPage's loop and FitDescRows' start
+' row both derive from this function (start row = CardBtnRow(1) + 1) instead
+' of each independently re-deriving CARD_HDR_ROW's offset, so the two cannot
+' drift apart if CARD_HDR_ROW - or this formula - ever changes (fix round 2:
+' the previous pairing held only because CARD_HDR_ROW happened to be odd).
+Private Function CardBtnRow(ByVal pairIx As Long) As Long
+    CardBtnRow = CARD_HDR_ROW + 1 + (pairIx - 1) * 2
+End Function
+
 ' Anchor a button to a cell so it lines up with the description directly beneath.
 Private Sub AddBtnInCell(ws As Worksheet, ByVal nm As String, ByVal cap As String, _
                          ByVal action As String, anchor As Range)
@@ -2655,7 +2679,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
         End If
         For ii = 1 To items.Count
             it = items(ii)
-            bRow = CARD_HDR_ROW + 1 + (ii - 1) * 2
+            bRow = CardBtnRow(ii)
             dRow = bRow + 1
             panel.Rows(bRow).RowHeight = BTN_ROW_H
             AddBtnInCell panel, "b" & tabNum & "_" & colIx & "_" & ii, _
@@ -2678,7 +2702,15 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
         Next ii
 NextSlot:
     Next si
-    FitDescRows panel, CARD_HDR_ROW + 2, lastRow
+    ' Explicit AutoFit for the header row: it renders correctly on a fresh
+    ' sheet only because Excel's implicit auto-height flag is still live.
+    ' RenderNavRow already sets row 1's RowHeight explicitly, which clears
+    ' that flag; the header row gets the same explicit treatment here so a
+    ' two-line category name never depends on an implicit sheet default.
+    panel.Rows(CARD_HDR_ROW).AutoFit
+    ' Start row derived from CardBtnRow(1), not CARD_HDR_ROW directly - see
+    ' CardBtnRow's comment for why.
+    FitDescRows panel, CardBtnRow(1) + 1, lastRow
     Set RenderPage = panel
 End Function
 

@@ -323,7 +323,9 @@ rule above.** When **no** button carries a placement code, the engine distribute
 buttons automatically. A page is a **capacity unit, not a category unit**:
 
 - a page holds up to **three category-headed columns**; a column holds up to
-  **eight** buttons, all of one category;
+  **six** buttons, all of one category (sized for one screen at typical
+  display scaling — see the portability note below for the arithmetic this
+  answers);
 - small categories therefore **share** a page;
 - a category needing more than one column takes consecutive columns, and a
   category that does not fit in a page's remaining columns starts a new page
@@ -347,10 +349,12 @@ and codes remain a complete override.
 **Portability note:** the *packing rule* is normative — fill a column, then a
 column-slot on the page, then start a new page; never straddle a category
 across pages unless it exceeds a whole page — and so is the ordering above. The
-specific capacities (three columns, eight buttons) are the reference
-implementation's values, sized for one screen of Excel; a platform with
-different real estate MAY choose its own capacities but MUST apply the same
-rule and the same ordering.
+specific capacities (three columns, six buttons) are the reference
+implementation's values, sized for one screen of Excel at typical display
+scaling (eight button-pairs only fit a full-HD, 100%-scaled, maximised
+window; 125% scaling — common — fits about 5.7); a platform with different
+real estate MAY choose its own capacities but MUST apply the same rule and
+the same ordering.
 
 **Generated index (v1.2.0):** the engine **always** generates an index surface,
 even for a single page, so the workbook has one shape at every scale. It lists one
