@@ -274,14 +274,18 @@ prompts (e.g. a range picker) and error dialogs are not suppressible.
 
 **Grouping / layout (v1.1.0):** each button (action or chain) may carry a
 **placement code** `<page-number><column-letters>` (e.g. `1A` = page 1, column A;
-`12AB` = page 12, column "AB"). Semantics: if NO button anywhere has a code, a
-single default button page is built (legacy behavior; **superseded for the
-uncoded case by Auto-layout (v1.2.0) below** — a store with no codes now packs
-into capacity-bound pages, not one page; see that paragraph). If any code is present, a
-layout is active: numbered pages are built; a blank-coded button goes to page 1
-(the default page)'s **Unassigned** area. The explicit code **`hide`** omits a
-button. Same-code buttons stack in authoring order. Core's own admin controls
-are never user-placeable.
+`12AB` = page 12, column "AB"), or the explicit code **`hide`**, which omits a
+button and — normative, v1.2.0 — is **not** a placement: it does not count
+toward "any code is present" below in either direction. Semantics: if NO
+button anywhere has a **placement** code (no codes at all, or `hide` codes
+only, are both "none"), a single default button page is built (legacy
+behavior; **superseded for the uncoded case by Auto-layout (v1.2.0) below** —
+a store with no placement codes now packs into capacity-bound pages, not one
+page; see that paragraph). If any **placement** code is present, a layout is
+active: numbered pages are built; a blank-coded button goes to page 1 (the
+default page)'s **Unassigned** area. `hide` omits a button the same way in
+either mode. Same-code buttons stack in authoring order. Core's own admin
+controls are never user-placeable.
 
 **Column-cap overflow (v1.2.0).** A rendered page draws at most the same three
 columns Auto-layout is capped at below, and a column draws at most the same six
@@ -362,13 +366,15 @@ produce identical layouts.
 
 The v1.1.0 behaviour — a single default button page holding everything — is
 withdrawn: it does not survive contact with a large catalog, which is what this
-version exists to support. **When any code is present the v1.1.0 rule is unchanged**
-and codes remain a complete override — of **which column** a button belongs
-to. They are not, per the Column-cap overflow clause above (v1.2.0), a
-guarantee that a column renders on the exact page number its code names: a
-page's three-column and a column's six-button capacity are fixed regardless of
-what any code says, so a column or button-stack that would exceed either still
-moves to a continuation page.
+version exists to support. **When any placement code is present the v1.1.0 rule
+is unchanged** (`hide` does not count — see above) and codes remain a complete
+override of **which column** a button is filed into, and the order same-code
+buttons stack within it. They are not, per the Column-cap overflow clause
+above (v1.2.0), a guarantee of which page or column slot that produces: a
+same-code stack past six buttons continues into a further column beyond the
+one its code names, and that further column lands on a continuation page only
+once its own page already holds three columns — otherwise it stays on the same
+page its code named, alongside the column it overflowed from.
 
 **Portability note:** the *packing rule* is normative — fill a column, then a
 column-slot on the page, then start a new page; never straddle a category
@@ -543,8 +549,9 @@ port realizes them per platform rather than re-deriving them:
   `availability` flag, the capacity-packed auto-layout rule for uncoded buttons,
   the column-cap overflow clause for coded layouts (a page's three-column and a
   column's six-button capacity bind a coded layout too, so an over-capacity
-  column or button-stack moves to a continuation page rather than a page number
-  or column a code names being silently unrenderable), the always-generated
+  column or button-stack moves to a further column - and, once its page is
+  already at the three-column cap, on to a continuation page - rather than a
+  page number or column a code names being silently unrenderable), the always-generated
   index surface with its navigation and button catalog, the
   no-clipping rule for descriptions, the config schema marker with fail-closed
   migration, and the reserved `Chains` category + `Macros Home` name. No `key`,

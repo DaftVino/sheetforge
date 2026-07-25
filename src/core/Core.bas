@@ -1750,12 +1750,16 @@ End Sub
 ' never make the action undiscoverable.
 Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim prior As Object, priorAvail As Object, reg As Object, a As Object, id As String
+    ' Fix round 3, fix 3: "hide" used to read as manual-layout-only ("leave one
+    ' button off A MANUAL LAYOUT") - true only before fix round 3's fix 1, which
+    ' made GatherButtons drop a hide-coded button before either filer runs, so
+    ' it now works the same whether or not any placement code is set.
     r = BlockIntro(ws, r, "Action catalog  -  what each action is available as, and where it goes", _
                    "Availability: 'Button' shows a button; 'Chains only' hides the button but a " & _
                    "Chain can still run it; 'Off' hides it and stops it running anywhere. " & _
                    "Page code: leave every code blank for the automatic layout; fill in even one " & _
-                   "and codes take over - number = page, letters = column (e.g. 1A). " & _
-                   "Type  hide  to leave one button off a manual layout.")
+                   "placement code and codes take over - number = page, letters = column (e.g. 1A). " & _
+                   "Type  hide  to leave any one button off, whether or not you use placement codes.")
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
     ws.Cells(r, VAL_COL + 1).Value = AVAIL_HEADER
@@ -2185,13 +2189,24 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
         s = s & vbCrLf & "CHAINS ONLY (no button; runs only inside a Chain):" & vbCrLf & chainOnly
     End If
 
-    If AnyCode(map) Then
-        s = s & vbCrLf & "A layout is ACTIVE (numbered pages will be built)." & vbCrLf
-        If Len(unassigned) > 0 Then s = s & "Unassigned -> page 1:" & vbCrLf & unassigned
-        If Len(hidden) > 0 Then s = s & "Hidden (not placed):" & vbCrLf & hidden
+    ' Fix round 3, fix 2 (live path - this runs from Core_FinalizeSetup, before
+    ' the user decides to activate): was AnyCode(map), which counts "hide" as a
+    ' layout-activating code - the exact bug fix round 2's fix 5 exists to
+    ' prevent, just at a different call site. A hide-only store would have shown
+    ' "A layout is ACTIVE" here while the engine actually runs auto-layout.
+    ' AnyPlacementCode agrees with what BuildAutoLayout/BuildManualLayout (once
+    ' Task 8 wires them in) will actually do. Both messages rewritten to
+    ' describe v0.4.0's real behaviour, not the pre-auto-layout "single Macros
+    ' tab" default this replaced.
+    If AnyPlacementCode(map) Then
+        s = s & vbCrLf & "A layout is ACTIVE - your placement codes control which page and column each button lands on." & vbCrLf
+        If Len(unassigned) > 0 Then s = s & "Unassigned -> page 1's Unassigned column (or a continuation page, if that column is already full):" & vbCrLf & unassigned
     Else
-        s = s & vbCrLf & "No page codes -> a single 'Macros' tab (current behavior)." & vbCrLf
+        s = s & vbCrLf & "No placement codes -> categories will be packed onto numbered pages automatically." & vbCrLf
     End If
+    ' "hide" is honoured in EITHER mode now (fix 1), so this is no longer
+    ' conditional on AnyPlacementCode.
+    If Len(hidden) > 0 Then s = s & "Hidden (not placed, in either mode):" & vbCrLf & hidden
     ComposeReport = s
 End Function
 
@@ -2368,13 +2383,25 @@ End Sub
 ' registry, chains from activated config. This is the SINGLE funnel for both, so
 ' the availability filter lives here and nowhere else. Admin buttons are never in
 ' this list - they live on the Setup Menu tab.
+' Fix round 3, fix 1 (BLOCKING, live path): also the single funnel for the
+' "hide" placement code now, and for the same reason - BuildAutoLayout never
+' sees codeMap at all (it only distributes by category), so a "hide"-coded
+' button used to be filtered ONLY inside BuildManualLayout/BuildGroupedPanels.
+' Fix round 2's fix 5 correctly stopped a lone "hide" from flipping a workbook
+' into manual mode (AnyPlacementCode ignores it) - but that means a hide-only
+' store now routes to the AUTO filer once Task 8 wires it up, and the auto
+' filer has no "hide" concept of its own, so the hidden button would be drawn,
+' catalogued, and counted. Filtering it here, before either filer ever sees the
+' button, makes "hide" mode-independent, matching contract section 6 ("hide omits a
+' button") without qualification.
 Private Function GatherButtons() As Collection
     Dim out As New Collection, reg As Object, a As Object, chains As Collection, ch As Object
-    Dim onAct As String, availMap As Object
+    Dim onAct As String, availMap As Object, codeMap As Object
     Set availMap = ReadAvailMap(CfgSheet())
+    Set codeMap = ReadCodeMap(CfgSheet())
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
-            If HasButton(availMap, CStr(a("id"))) Then
+            If HasButton(availMap, CStr(a("id"))) And Not IsHideCoded(codeMap, CStr(a("id"))) Then
                 onAct = "'Core_Run " & Chr(34) & CStr(a("id")) & Chr(34) & "'"
                 out.Add Array(CStr(a("id")), CStr(a("caption")), onAct, _
                               CStr(a("help")), CStr(a("category")))
@@ -2383,13 +2410,19 @@ Private Function GatherButtons() As Collection
     Next reg
     Set chains = ReadChains(CfgSheet())
     For Each ch In chains
-        If Len(CStr(ch("id"))) > 0 Then
+        If Len(CStr(ch("id"))) > 0 And Not IsHideCoded(codeMap, CStr(ch("id"))) Then
             onAct = "'Core_Run " & Chr(34) & CStr(ch("id")) & Chr(34) & "'"
             out.Add Array(CStr(ch("id")), CStr(ch("label")), onAct, _
                           "Chain: " & StepsInline(ch("steps")), CHAIN_CAT)
         End If
     Next ch
     Set GatherButtons = out
+End Function
+
+Private Function IsHideCoded(codeMap As Object, ByVal id As String) As Boolean
+    Dim k As String
+    k = LCase(id)
+    IsHideCoded = codeMap.Exists(k) And LCase(Trim(CStr(codeMap(k)))) = "hide"
 End Function
 
 ' Chain help text only - fix round 1: was raw action ids ("importexport.updateMaster"),
@@ -2830,8 +2863,15 @@ Private Sub RenderAllPages(layout As Object)
 End Sub
 
 ' Manual layout: file each button onto a "Macros N" page by its code. Blank code
-' -> page 1 Unassigned column (9999); "hide" -> omitted; unparseable -> Unassigned
-' (already blocked at Finalize). Files only - rendering is RenderAllPages.
+' -> page 1 Unassigned column (9999); unparseable -> Unassigned (already blocked
+' at Finalize). "hide" never reaches here at all (see the fix round 3, fix 1
+' comment below) - GatherButtons omits a hide-coded button before either filer
+' runs. Files only - rendering is RenderAllPages.
+' Fix round 3, fix 1: no longer checks for "hide" here - GatherButtons (the
+' live-path funnel both filers are fed from) now drops a hide-coded button
+' before it ever reaches either filer, so this Sub can never see one. Removed
+' rather than left as a dead branch, so nobody reads it as evidence "hide" is
+' still handled per-filer and re-adds a per-filer check that can never fire.
 Private Sub BuildManualLayout(buttons As Collection, codeMap As Object, layout As Object)
     Dim e As Variant, id As String, code As String
     Dim tabNum As Long, colIx As Long, colL As String, unassigned As New Collection
@@ -2839,7 +2879,6 @@ Private Sub BuildManualLayout(buttons As Collection, codeMap As Object, layout A
         id = LCase(CStr(e(0)))
         code = ""
         If codeMap.Exists(id) Then code = Trim(CStr(codeMap(id)))
-        If LCase(code) = "hide" Then GoTo NextBtn
         If Len(code) = 0 Then
             unassigned.Add e
         ElseIf ParseCode(code, tabNum, colIx, colL) Then
@@ -2847,7 +2886,6 @@ Private Sub BuildManualLayout(buttons As Collection, codeMap As Object, layout A
         Else
             unassigned.Add e            ' unparseable degrades to Unassigned
         End If
-NextBtn:
     Next e
     For Each e In unassigned
         AddToPage layout, 1, 9999, e     ' blank-coded buttons go to page 1's Unassigned column
@@ -2905,9 +2943,13 @@ Private Sub LabelManualPages(layout As Object)
             ' (see that Sub's comment): the piece may since have been relocated
             ' to a different page by CapManualColumns above, and a header set
             ' before that move would not have travelled with it.
+            ' Fix round 3, fix 8: colIx also encodes WHICH piece (colIx Mod
+            ' VSPLIT_MULT = the pieceIndex SplitTallManualColumns minted it
+            ' with), so a stack split into 4+ pieces gets distinctly numbered
+            ' headers instead of several identical "(cont.)" columns on one page.
             If colIx >= VSPLIT_MULT Then
                 origColIx = colIx \ VSPLIT_MULT
-                contTag = " (cont.)"
+                contTag = " (cont. " & (colIx Mod VSPLIT_MULT) & ")"
             Else
                 origColIx = colIx
                 contTag = ""
@@ -3177,7 +3219,13 @@ Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
                 SetColHeader layout, tabNum, slotsUsed, cat
                 firstColOfCat = False
             Else
-                SetColHeader layout, tabNum, slotsUsed, cat & " (cont.)"
+                ' Fix round 3, fix 8 (found here too, not just in the manual
+                ' split): a category needing exactly CARD_COLS columns (13-18
+                ' buttons) fits on one page, so k=2 and k=3 would both be
+                ' unsuffixed "(cont.)" - two identical headers on the same
+                ' page. k is already this category's 1-based column counter, so
+                ' number the header with it instead.
+                SetColHeader layout, tabNum, slotsUsed, cat & " (cont. " & k & ")"
             End If
         Next k
     Next ci
@@ -3204,6 +3252,7 @@ End Function
 Private Sub LabelAutoPages(layout As Object)
     Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
     Dim hdrs As Object, hk As Variant, seen As Object, title As String, one As String
+    Dim contAt As Long
     tabKeys = SortedKeys(layout)
     For ti = LBound(tabKeys) To UBound(tabKeys)
         tabNum = CLng(tabKeys(ti))
@@ -3212,7 +3261,13 @@ Private Sub LabelAutoPages(layout As Object)
         Set seen = CreateObject("Scripting.Dictionary")
         title = ""
         For Each hk In hdrs.Keys
-            one = Replace(CStr(hdrs(hk)), " (cont.)", "")
+            one = CStr(hdrs(hk))
+            ' Fix round 3, fix 8: a "(cont.)" header is now numbered ("(cont. 2)",
+            ' "(cont. 3)", ...), so a literal Replace(" (cont.)", "") no longer
+            ' matches - truncate at the fixed " (cont." anchor instead, which is
+            ' the same regardless of the number that follows it.
+            contAt = InStr(one, " (cont.")
+            If contAt > 0 Then one = Left$(one, contAt - 1)
             If Not seen.Exists(LCase(one)) Then
                 seen(LCase(one)) = True
                 title = title & IIf(Len(title) > 0, "   |   ", "") & one
@@ -3374,8 +3429,13 @@ Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons
         r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
     End If
     r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
-    r = HomeLine(ws, r, "As soon as ONE code is filled in, the codes control everything; a blank-coded button lands " & _
-                         "in page 1's Unassigned area, or a continuation page if page 1 is already full.")
+    ' Fix round 3, fix 3: "hide" places nothing, so it does not switch this
+    ' workbook to manual mode by itself - a store with only "hide" codes still
+    ' packs automatically (fix round 2's fix 5 / this line used to say ANY code
+    ' switches the layout, which was true for "hide" too and is not).
+    r = HomeLine(ws, r, "As soon as ONE placement code (not counting hide) is filled in, the codes control " & _
+                         "everything; a blank-coded button lands in page 1's Unassigned area, or a continuation " & _
+                         "page if that area is already full. hide always omits a button, in either mode.")
     r = HomeLine(ws, r, "Availability on the Setup tab: 'Button' = shown here. 'Chains only' = no button, but a Chain can run it.")
     r = HomeLine(ws, r, "'Off' = no button and it will not run at all; Finalize refuses to activate a Chain that uses one.")
     HomeLegend = r
@@ -3525,6 +3585,19 @@ Private Function ParseCode(ByVal code As String, ByRef tabNum As Long, _
     If i <= Len(s) Then Exit Function
     If Len(digits) = 0 Or Len(letters) = 0 Then Exit Function
     If Len(digits) > 7 Then Exit Function        ' overflow guard (CLng-safe page range)
+    ' Fix round 3, fix 9: the digit run was capped, but the letter run never
+    ' was. Two real problems, not just an absurd-input curiosity: (1) a bare-
+    ' minimum 4-letter run ("AAAA" = 18279) already exceeds VSPLIT_MULT
+    ' (100000)'s assumption that every real colIx from ParseCode stays well
+    ' under it, so a long enough letter run would get misdecoded by
+    ' LabelManualPages as a vertical-overflow split piece; (2) a sufficiently
+    ' long letter run overflows the colIndex accumulation below and raises a
+    ' runtime error instead of this function returning False, so a typo like
+    ' this could crash Finalize's own validation pass instead of being reported
+    ' as a bad code. Capping at 3 letters matches Excel's own column-letter
+    ' grammar (real columns never exceed 3 letters, "XFD") and keeps every
+    ' accepted colIndex at or under 18278 - safely below VSPLIT_MULT.
+    If Len(letters) > 3 Then Exit Function
     tabNum = CLng(digits)
     If tabNum < 1 Then Exit Function             ' pages are 1-based; "0A" is invalid
     colLetter = letters

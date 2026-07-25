@@ -8,16 +8,25 @@
   package are separate .bas during development, but a deployment imports ONE .bas.
   A single imported .bas is a single VBA standard module, so this script:
 
-    1. Concatenates Core + every Pkg*.bas into one module body.
-    2. Strips each file's own `Attribute VB_Name` and `Option Explicit` and
+    1. FAILS if any candidate source file (Core.bas + every Pkg*.bas on disk,
+       not only the -Packages subset this run selected) contains a byte
+       outside ASCII - the VBE imports a .bas as ANSI, so a stray non-ASCII
+       byte is silently mis-decoded on import.
+    2. Concatenates Core + every Pkg*.bas into one module body.
+    3. Strips each file's own `Attribute VB_Name` and `Option Explicit` and
        writes exactly one of each at the top (module name = -ModuleName).
-    3. FAILS if two source files declare the same Sub/Function/Property name -
+    4. FAILS if two source files declare the same Sub/Function/Property name -
        a single module needs globally-unique Public AND Private names.
-    4. Sanity-checks Sub/Function block balance in the output.
-    5. FAILS on a module-level declaration (Const/Dim/Type/Enum/Declare/module
+    5. Sanity-checks Sub/Function block balance in the assembled content.
+    6. FAILS on a module-level declaration (Const/Dim/Type/Enum/Declare/module
        var) that appears after the first procedure - VBA requires the whole
        declarations section to precede all procedures, and such a stray
        declaration is a compile error in Excel (this script does not compile VBA).
+
+  Every check above runs on the assembled content BEFORE dist/MacrosBundle.bas
+  is written, so a failing build never leaves a broken (or stale-looking, but
+  actually freshly-overwritten) artifact on disk - only ever the last
+  successful build's output, or nothing at all.
 
   NOTE: these are structural checks, NOT a VBA compiler. They cannot catch every
   compile error (undefined vars, type mismatches). The final gate is still a
@@ -66,6 +75,45 @@ if ($Packages) {
                 Sort-Object Name | ForEach-Object { $_.FullName }
 }
 $sources = @($corePath) + @($pkgFiles)
+
+# --- guard: every candidate source file must be pure ASCII ---
+# Fix round 3, fixes 5/6/7. The VBE imports a .bas as ANSI/the system codepage,
+# not UTF-8, so any non-ASCII byte - a smart quote or em dash pasted from a
+# doc, or (as caught here once) a stray section-sign in a comment - gets
+# silently mis-decoded on import (a section-sign becomes "Â§").
+#
+# Runs BEFORE assembly, on every Pkg*.bas discovered on disk PLUS Core.bas -
+# NOT only the files -Packages selected for this run (fix 7): "content is
+# ASCII" is a repo-wide invariant a module must satisfy before it ships in ANY
+# build, so `pwsh build/build.ps1 -Packages PkgImportExport` must still catch a
+# bad byte sitting in PkgClean.bas even though this particular build excludes
+# it - that module ships the day someone bundles it, and the whole point of a
+# gate is to catch it before that day, not on it.
+#
+# Reports every match on a line, not just the first (fix 6), and - because
+# this scan happens before $Out is touched at all - a failure here can never
+# leave a poisoned dist/MacrosBundle.bas on disk (fix 5): the artifact is
+# either absent (first build) or whatever the last SUCCESSFUL build left
+# (unchanged), never a freshly-written file containing the bad byte.
+$asciiCandidates = @($corePath) + @(
+    Get-ChildItem -LiteralPath $pkgDir -Filter 'Pkg*.bas' | Sort-Object Name | ForEach-Object { $_.FullName }
+)
+$asciiProblems = New-Object System.Collections.Generic.List[string]
+foreach ($f in $asciiCandidates) {
+    $leaf = Split-Path $f -Leaf
+    $srcLines = Get-Content -LiteralPath $f
+    for ($i = 0; $i -lt $srcLines.Count; $i++) {
+        foreach ($m in [regex]::Matches($srcLines[$i], '[^\x00-\x7F]')) {
+            $ch = $m.Value
+            $asciiProblems.Add("non-ASCII character in ${leaf}:$($i + 1), column $($m.Index + 1): '$ch' (U+$('{0:X4}' -f [int][char]$ch))")
+        }
+    }
+}
+if ($asciiProblems.Count -gt 0) {
+    Write-Host "BUILD FAILED - source validation:" -ForegroundColor Red
+    $asciiProblems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 1
+}
 
 # --- guard: every Sub/Function/Property name must be unique across all modules ---
 # NOTE: Property Get/Let/Set sharing a name would false-positive here; this
@@ -119,13 +167,15 @@ foreach ($src in $sources) {
     [void]$sb.Append($nl)
 }
 
-# --- write (UTF-8 no BOM; content is asserted ASCII below, so import-safe) ---
-$outDir = Split-Path $Out -Parent
-if (-not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
-[System.IO.File]::WriteAllText($Out, $sb.ToString(), (New-Object System.Text.UTF8Encoding($false)))
-
-# --- post-build sanity: single Attribute/Option + Sub/Function balance ---
-$text = [System.IO.File]::ReadAllText($Out)
+# --- validate the assembled content BEFORE writing anything (fix round 3, fix 5) ---
+# Previously wrote $Out first and validated the file it had just written - so a
+# failing build left a freshly-timestamped dist/MacrosBundle.bas on disk,
+# containing whatever was wrong, for someone to import instead of reading the
+# red text below. Validating the in-memory StringBuilder content first means a
+# failure here writes nothing: $Out is left exactly as the last SUCCESSFUL
+# build produced it (or absent, on a first build) - never overwritten with a
+# broken artifact.
+$text = $sb.ToString()
 $attr = ([regex]::Matches($text, '(?m)^Attribute VB_Name')).Count
 $opt = ([regex]::Matches($text, '(?m)^Option Explicit')).Count
 $subO = ([regex]::Matches($text, '(?m)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Sub\s')).Count
@@ -139,20 +189,13 @@ if ($opt -ne 1) { $problems.Add("expected 1 Option Explicit, found $opt") }
 if ($subO -ne $subC) { $problems.Add("Sub/End Sub imbalance: $subO / $subC") }
 if ($fnO -ne $fnC) { $problems.Add("Function/End Function imbalance: $fnO / $fnC") }
 
-# --- guard: output must be pure ASCII ---
-# The VBE imports a .bas as ANSI/the system codepage, not UTF-8, so any
-# non-ASCII byte - a smart quote or em dash pasted from a doc, or (as caught
-# here once) a stray section-sign in a comment - gets silently mis-decoded on
-# import (a section-sign becomes "Â§"). Fails the whole build, not just a
-# warning, and names the exact line/column so it is instantly actionable.
-$asciiLines = $text -split "`n"
-for ($i = 0; $i -lt $asciiLines.Count; $i++) {
-    $m = [regex]::Match($asciiLines[$i], '[^\x00-\x7F]')
-    if ($m.Success) {
-        $ch = $m.Value
-        $problems.Add("non-ASCII character at line $($i + 1), column $($m.Index + 1): '$ch' (U+$('{0:X4}' -f [int][char]$ch))")
-    }
-}
+# NOTE: the assembled $text is not re-scanned for ASCII here - the guard above
+# already scanned every byte of every candidate source file that could
+# possibly end up in $text, before assembly ever ran, and assembly only adds
+# hardcoded-ASCII boilerplate (plus -ModuleName, which Attribute VB_Name/
+# Core_BuildControlPanel's own naming conventions keep to identifier
+# characters in practice) - re-scanning here would just repeat the same
+# findings under a different line number.
 
 # --- guard: no module-level declaration after the first procedure ---
 # VBA requires the declarations section (Const/Dim/Type/Enum/Declare/module vars)
@@ -178,6 +221,13 @@ if ($problems.Count -gt 0) {
     $problems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
     exit 1
 }
+
+# --- write (UTF-8 no BOM; content asserted ASCII above, so import-safe) ---
+# Only reached once every check above has passed - see the fix round 3, fix 5
+# comment above the balance checks for why the write moved here.
+$outDir = Split-Path $Out -Parent
+if (-not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
+[System.IO.File]::WriteAllText($Out, $text, (New-Object System.Text.UTF8Encoding($false)))
 
 $lines = ($text -split "`n").Count
 $pkgNames = ($pkgFiles | ForEach-Object { Split-Path $_ -Leaf }) -join ', '
