@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 1.1.0** (2026-07-24) · SemVer, independent of the
+**Contract version: 1.2.0** (2026-07-24) · SemVer, independent of the
 repo `VERSION` and of per-package versions.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -52,7 +52,8 @@ field is the following record:
   "default":  "string — scalar default (kinds text/int/sheet/file/bool)",
   "headers":  "string — column header(s); list = one header, table = \"|\"-delimited",
   "defaults": ["ordered seed rows for kind list/table; see §3"],
-  "help":     "string — optional plain-language note shown under the field"
+  "help":     "string — optional plain-language note shown under the field",
+  "usedBy":   "string — optional comma-separated action ids this field configures (v1.2.0)"
 }
 ```
 
@@ -67,6 +68,19 @@ field is the following record:
   seed rows preserve their order (§3).
 - `default` carries the scalar default for scalar kinds; `defaults[]` carries the
   seed rows for `list`/`table`. A `section` has neither.
+- **`usedBy` (v1.2.0, optional).** A comma-separated list of action `id`s this
+  field configures. A field that declares nothing is **package-wide** and always
+  renders in the working area. A field is relegated only when **every** action it
+  names is `off` (§6) — an action that is `chains-only` still runs, so it still
+  needs its settings. Relegated means **moved, never omitted**: the engine still
+  renders the field, still stores it, and still falls back to its default; it is
+  simply placed in one collapsed "settings for actions you haven't turned on" band
+  at the end of the Setup surface. An unrecognised id in `usedBy` counts as in-use,
+  so a typo cannot make a field unreachable.
+  **Portability note:** collapsing is a presentation affordance (reference: Excel
+  row outlining). A platform that cannot collapse MUST still render the band,
+  visibly and last. Omitting the fields is non-conforming — it would force a
+  second activate cycle and discard un-activated input.
 
 ---
 
@@ -179,6 +193,20 @@ actions into one button:
 manifests. It is authored on the same Setup grid with the same key/value model,
 and MUST NOT be discovered through the package-probing mechanism (§1).
 
+**Config schema marker (v1.2.0, normative):** the engine writes a machine-owned
+schema-version token into the config store alongside the engine-owned blocks,
+outside any user-editable cell (reference: the hidden per-row id column, on the
+placement block's key row). Readers branch on that token, **never on a visible
+label** — a display header is presentation, is user-editable, and must never
+decide whether saved configuration is preserved or discarded.
+
+Migration is **fail-closed**. When the marker is absent the store predates v1.2.0
+and is read with the older column layout; every value recovered that way MUST be
+validated against its grammar (for placement, a valid code or `hide`), and any
+conflict — an unknown marker, or a recovered value that does not validate — MUST
+abort the rebuild with a report and leave the existing surface untouched. Silently
+rebuilding with blanks is non-conforming.
+
 ---
 
 ## 6. Action contract
@@ -190,6 +218,8 @@ An action is one thing a package *does* (it becomes a button). Each action is:
 | `id` | Dotted `pkg.verb` token, globally unique (`importexport.import`, `clean.dupes`). |
 | `caption` | Button label (may carry an ordinal, e.g. `"2.  Import Source Data"`). |
 | `help` | Plain-language description shown on/near the button. |
+| `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on the generated index and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
+| `availability` | Deployment config, not manifest data (v1.2.0): one of `button`, `chains-only`, `off`. Defaults to `button`. |
 | `semantics` | **Normative** description of the action's behavior (§8). This is what every platform reproduces. |
 
 **Handler binding is platform-specific and NOT part of the portable contract.**
@@ -223,6 +253,68 @@ layout is active: numbered pages are built; a blank-coded button goes to page 1
 Same-code buttons stack in authoring order. Core's own admin controls are never
 user-placeable.
 
+**Per-action availability (v1.2.0):** each action carries a deployment-level
+`availability`, authored on the same engine-owned surface as the placement code
+(§5). It has exactly three values and defaults to `button`, so a deployment that
+predates v1.2.0 is unchanged.
+
+| Value | Button drawn | Runnable directly | Runnable as a chain step |
+|---|---|---|---|
+| `button` (default) | yes | yes | yes |
+| `chains-only` | no | **no** | yes |
+| `off` | no | **no** | **no** |
+
+- **`off` means off.** The engine MUST refuse to dispatch an `off` action, and
+  Finalize MUST **block activation** when any chain references one, naming the
+  chain. An implementation where a switched-off action still executes inside a
+  chain is non-conforming: a user who disables a destructive action and then
+  watches it run has been actively misled.
+- **`chains-only`** exists so "reachable only as part of a composed button" is an
+  explicit, authored state rather than a side effect of hiding something. A direct
+  dispatch of a `chains-only` id MUST be refused.
+- An action that is not `button` **stays listed** on the authoring surface, so it
+  never becomes undiscoverable. Only `off` relegates that action's fields (§2).
+- **An unrecognised value MUST block Finalize** and report the accepted values. It
+  MUST NOT fall back to `button` — a user who typed `of` meaning `off` would
+  otherwise be handed a live destructive button. A **blank** cell is not
+  unrecognised: it means "never set" and reads as `button`.
+- **Portability note:** the reference implementation presents the three values as a
+  validated dropdown on the authoring grid. A platform without cell validation
+  still parses the same three tokens and still blocks on anything else.
+
+**Auto-layout (v1.2.0) — supersedes the "no codes" clause of the v1.1.0 grouping
+rule above.** When **no** button carries a placement code, the engine distributes
+buttons automatically. A page is a **capacity unit, not a category unit**:
+
+- a page holds up to **three category-headed columns**; a column holds up to
+  **eight** buttons, all of one category;
+- small categories therefore **share** a page;
+- a category needing more than one column takes consecutive columns, and a
+  category that does not fit in a page's remaining columns starts a new page
+  rather than straddling one — splitting a category across tabs destroys the
+  grouping that putting it in one place buys;
+- a category larger than a whole page continues onto further pages.
+
+The v1.1.0 behaviour — a single default button page holding everything — is
+withdrawn: it does not survive contact with a large catalog, which is what this
+version exists to support. **When any code is present the v1.1.0 rule is unchanged**
+and codes remain a complete override.
+
+**Generated index (v1.2.0):** the engine **always** generates an index surface,
+even for a single page, so the workbook has one shape at every scale. It lists one
+entry per built page with its title, its button count and a link; a full **action
+catalog** (caption, description, and the page each button is on); a link to the
+admin surface; and a legend explaining the placement code and availability. Every
+built page carries a persistent link back to the index and links to its
+previous/next page. Reference implementation: a `Macros Home` sheet; that name is
+**reserved** (§7).
+
+**Description legibility (v1.2.0, normative for grid platforms):** an action's
+`help` text is displayed with its button and MUST NOT be clipped. Reference
+implementation: an unmerged cell-card grid — button anchored to a content cell,
+the description in the cell directly beneath it, that row auto-fitted. Merged
+cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
+
 ---
 
 ## 7. Naming rules (contract-level)
@@ -232,6 +324,9 @@ user-placeable.
   shared config namespace). Namespace by convention (`k_*`, `clean_*`).
 - **Action id** — `pkg.verb`, unique.
 - **Reserved:** the id namespace `chain.*` is reserved for engine chains; no package action id may use it.
+- **Reserved:** the display category `Chains` (engine-generated, holds chain
+  buttons) and, in the Excel reference implementation, the sheet name
+  `Macros Home`. A platform substitutes its own index surface name.
 - Reference-implementation binding names (`Pkg<Name>_<Verb>` entry points,
   `Pkg<Name>_Manifest`, `Core_*` API) are an Excel/VBA detail, not part of the
   portable contract.
@@ -352,3 +447,16 @@ port realizes them per platform rather than re-deriving them:
   id namespace, engine-owned config, the grouping/layout placement code, and the
   quiet/dispatch convention. No existing key, action id, kind, value encoding, or
   semantics changed — v1.0.0 deployments remain valid.
+- **v1.2.0 (additive):** adds the optional action `category` attribute, the
+  optional field `usedBy` attribute, the three-state deployment-level
+  `availability` flag, the capacity-packed auto-layout rule for uncoded buttons,
+  the always-generated index surface with its navigation and action catalog, the
+  no-clipping rule for descriptions, the config schema marker with fail-closed
+  migration, and the reserved `Chains` category + `Macros Home` name. No `key`,
+  action `id`, kind, value encoding, or **action** semantics changed, so
+  v1.0.0/v1.1.0 configs remain valid and read as all-actions-`button`. The one
+  *behaviour* replaced is engine layout for the uncoded case (single page →
+  capacity-packed pages), which §10 does not classify as breaking: it renames
+  nothing and re-encodes nothing. Owner-approved; see the Provenance section of
+  `docs/designs/2026-07-24-finish-excel-track1-plan.md` for the three contested
+  calls and who lost them.
