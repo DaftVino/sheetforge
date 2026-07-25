@@ -61,9 +61,13 @@ param(
 # first array element; there is no invocation shell where the comma form is
 # guaranteed to work without this. Split it ourselves instead of trusting the
 # caller's shell: safe under this repo's Pkg<Name>.bas PascalCase naming rule,
-# since no real package name can itself contain a comma.
+# since no real package name can itself contain a comma. Trim each piece too -
+# "-Packages PkgA, PkgB" (a space after the comma, a very natural way to type
+# a list) would otherwise leave a leading space baked into the file name
+# ("Package not found: ... PkgB.bas"), about the least diagnosable form that
+# error can take.
 if ($Packages) {
-    $Packages = $Packages | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
+    $Packages = $Packages | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 }
 
 $ErrorActionPreference = 'Stop'
