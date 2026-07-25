@@ -139,14 +139,10 @@ Private Function FixtureHelpText(ByVal n As Long, ByVal catName As String) As St
         Case 1                            ' typical: one plain sentence
             FixtureHelpText = "No-op fixture action " & n & " in category " & catName & _
                                " - exists only to exercise the layout, not to do real work."
-        Case Else                         ' long: several sentences, meant to wrap 4-5 lines
+        Case Else                         ' long: roughly double "typical", clearly taller but not extreme
             FixtureHelpText = "No-op fixture action " & n & " in category " & catName & _
-                               ". This description is deliberately long, spanning several " & _
-                               "sentences instead of one, so the card grid's autofit-with-a-floor " & _
-                               "behavior gets exercised at real length instead of just a single " & _
-                               "one-liner: on a card page this should wrap across several lines " & _
-                               "without ever clipping, and on the Macros Home catalog page - which " & _
-                               "has no per-row height floor - it should also wrap cleanly rather " & _
-                               "than collapsing or overlapping the row beneath it."
+                               ". This one is deliberately longer than the others, spanning two " & _
+                               "sentences instead of one, so a card description wraps across " & _
+                               "several lines instead of clipping to a single line."
     End Select
 End Function
