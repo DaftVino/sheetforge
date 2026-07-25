@@ -97,6 +97,12 @@ Private Const DESC_MIN_H As Double = 24          ' floor after AutoFit
 Private Const AUTO_COL_MAX As Long = 6           ' buttons per card column before a new column
                                                  ' (fix round 1: was 8; 8 only fits full-HD/100%)
 Private Const CHAIN_CARD_STEPS As Long = 4       ' step captions shown on a card before "+N more"
+' Fix round 1, fix 6: CHAIN_CARD_STEPS alone bounds step COUNT, not length - four
+' long captions (an action caption may carry an ordinal and a full phrase) sail
+' through untouched and can still reproduce the ~170pt row carry-over C exists to
+' prevent. CHAIN_CARD_CHARS bounds the composed width directly; CardHelp stops
+' adding steps once either cap is hit, whichever comes first.
+Private Const CHAIN_CARD_CHARS As Long = 120     ' composed-text length cap before "+N more" cuts in
 ' BTN_W, ROW_GAP, COL_GAP and HDR_H are no longer used by the card grid, but the
 ' legacy point-positioned RenderPageLegacy (still called by BuildGroupedPanels
 ' until Task 8) references them, so they stay until that builder is deleted.
@@ -2508,6 +2514,11 @@ Private Function EnsurePanelSheet(ByVal nm As String, ByVal atFront As Boolean) 
     Next si
     ws.Cells.Clear
     ws.Cells.UnMerge
+    ' Fix round 1, fix 9: Cells.Clear should already drop hyperlinks, but that
+    ' behaviour has historically been version-flaky in Excel, and Macros Home
+    ' accumulates one hyperlink per catalogued button - cheap insurance before a
+    ' human imports this.
+    ws.Hyperlinks.Delete
     ws.Tab.Color = RGB(31, 78, 121)
     ws.Cells.Interior.Color = RGB(255, 255, 255)
     ws.Columns("A").ColumnWidth = 2
@@ -2644,7 +2655,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
     Dim panel As Worksheet, page As Object, cols As Object, hdrs As Object
     Dim colKeys As Variant, si As Long, slot As Long, colIx As Long
     Dim items As Collection, ii As Long, it As Variant
-    Dim cc As Long, bRow As Long, dRow As Long, lastRow As Long, hdr As String
+    Dim cc As Long, bRow As Long, dRow As Long, lastRow As Long, hdr As String, skipped As Long
     Set page = layout(tabNum)
     Set cols = page("cols")
     Set hdrs = page("hdrs")
@@ -2668,7 +2679,16 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
         colIx = CLng(colKeys(si))
         slot = slot + 1
         cc = CardCol(slot)
-        If cc = 0 Then GoTo NextSlot        ' more columns than card slots: never draw off-grid
+        ' Fix round 1, fix 9: both filers now cap every page at CARD_COLS columns
+        ' by construction (BuildAutoLayout's slotsUsed check; BuildManualLayout's
+        ' CapManualColumns), so this branch is unreachable-by-invariant - but a
+        ' silent discard here is exactly how the original defect happened, so
+        ' while that invariant is fresh, count what would be skipped and surface
+        ' it on the page itself rather than trust the invariant silently forever.
+        If cc = 0 Then
+            skipped = skipped + 1
+            GoTo NextSlot        ' more columns than card slots: never draw off-grid
+        End If
         Set items = cols(colIx)
         hdr = ""
         If hdrs.Exists(colIx) Then hdr = CStr(hdrs(colIx))
@@ -2709,6 +2729,16 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
         Next ii
 NextSlot:
     Next si
+    If skipped > 0 Then
+        With panel.Cells(CARD_HDR_ROW - 1, 4)
+            .Value = "WARNING: " & skipped & " column(s) did not fit on this page and were not drawn. " & _
+                     "Both filers are supposed to cap every page at " & CARD_COLS & " columns - this means " & _
+                     "that invariant broke. Report it."
+            .Font.Bold = True
+            .Font.Color = RGB(192, 0, 0)
+            .WrapText = True
+        End With
+    End If
     ' Explicit AutoFit for the header row: it renders correctly on a fresh
     ' sheet only because Excel's implicit auto-height flag is still live.
     ' RenderNavRow already sets row 1's RowHeight explicitly, which clears
@@ -2726,20 +2756,21 @@ End Function
 ' bookkeeping and EnsurePanelSheet's Cells.Clear removes it cleanly on rebuild.
 ' ASCII arrows only - build.ps1 writes UTF-8 with no BOM on the assumption that
 ' the SOURCE is ASCII, so a literal arrow glyph in the .bas is an import hazard.
-' Carry-over B: BuildHomePage is not wired up until Task 8, so "Macros Home" can
-' legitimately not exist yet when a page renders. A hyperlink to a missing sheet
-' raises Excel's "Reference isn't valid" the moment it is clicked, so degrade to
-' plain text (same caption, no link) until the index sheet is actually there.
+' Fix round 1, fix 1: a prior draft guarded this with Core_SheetExists(HOME_SHEET)
+' and fell back to plain text when the index sheet did not exist yet. That guard
+' is actively harmful and is deliberately NOT here - do not re-add it. It fires
+' at RENDER time, but BuildHomePage runs LAST in the pipeline (Task 8), so on a
+' virgin workbook's first build every page would render before Macros Home
+' exists, drawing plain text instead of a link on every page's B1 - while
+' BuildHomePage's own B3 tells the user "Every page has a << Home link back
+' here." The failure is also self-healing on the SECOND build (IsPanelName spares
+' Macros Home from DeletePanels, so it survives and the guard passes next time),
+' which makes it invisible to anyone who only tests a rebuild, not a first build.
+' It was never needed anyway: Hyperlinks.Add does not validate SubAddress, and
+' the target sheet always exists by the time the macro returns and the user can
+' click anything - so write the link unconditionally.
 Private Sub RenderNavRow(ws As Worksheet, ByVal prevSheet As String, ByVal nextSheet As String)
-    If Core_SheetExists(HOME_SHEET) Then
-        NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
-    Else
-        With ws.Cells(1, 2)
-            .Value = "<< Home"
-            .Font.Size = 10
-            .Font.Bold = True
-        End With
-    End If
+    NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
     If Len(prevSheet) > 0 Then NavLink ws.Cells(1, 4), "< Previous", prevSheet
     If Len(nextSheet) > 0 Then NavLink ws.Cells(1, 6), "Next >", nextSheet
     ws.Rows(1).RowHeight = 18
@@ -2796,8 +2827,18 @@ NextBtn:
     ' land blank-coded buttons in Unassigned/9999 on page 1) - that is 4+ distinct
     ' columns on one page. RenderPage only draws CARD_COLS (3) card slots and
     ' silently drops anything past slot 3, so cap here rather than let the
-    ' renderer discard what the user explicitly placed.
+    ' renderer discard what the user explicitly placed. Must run BEFORE
+    ' LabelManualPages below, since it moves columns between pages and
+    ' LabelManualPages needs to see the FINAL column layout to title pages and
+    ' head columns correctly.
     CapManualColumns layout
+    ' Fix round 1, fix 5: BuildAutoLayout has always called its own labeller
+    ' (LabelAutoPages) - this filer used to leave LabelManualPages for the caller
+    ' to remember separately, which made the two filers asymmetric and left a
+    ' silent failure mode (skip the call, get "Macros - Page N" titles that
+    ' propagate into the index's category column). Self-label here so Task 8
+    ' cannot miss it either way.
+    LabelManualPages layout
 End Sub
 
 ' Title and head a hand-built layout. Column headers keep the code-based names the
@@ -2849,11 +2890,19 @@ End Sub
 ' << Home / Next nav still reaches it. Only manual layouts need this: capacity-
 ' packed BuildAutoLayout never files more than CARD_COLS columns onto a page
 ' by construction (see BuildAutoLayout's slotsUsed check).
+' Fix round 1, fix 8: an earlier draft carried header-preserving machinery here
+' (read page("hdrs"), re-tag the moved column "(cont.)", remove it from the old
+' page's hdrs) that was dead on arrival: this runs from BuildManualLayout, before
+' any header is ever set, so hdrs is always empty at this point and every branch
+' of that machinery was unreachable. Deleted rather than fixed-in-place - a moved
+' column instead gets a plain, correct header ("Column D", not "Column D
+' (cont.)") for free from LabelManualPages, which (fix 5) now always runs
+' immediately after this, over the FINAL layout including whatever this moved.
 Private Sub CapManualColumns(layout As Object)
     Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
-    Dim cols As Object, hdrs As Object, colKeys As Variant, ci As Long, colIx As Long
+    Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
     Dim maxTab As Long, newTab As Long, chunkPos As Long
-    Dim items As Collection, ii As Long, hdr As String
+    Dim items As Collection, ii As Long
 
     tabKeys = SortedKeys(layout)
     maxTab = 0
@@ -2867,7 +2916,6 @@ Private Sub CapManualColumns(layout As Object)
         tabNum = CLng(tabKeys(ti))
         Set page = layout(tabNum)
         Set cols = page("cols")
-        Set hdrs = page("hdrs")
         colKeys = SortedKeys(cols)
         If UBound(colKeys) < LBound(colKeys) + CARD_COLS Then GoTo NextTab   ' <= CARD_COLS cols: fine
         chunkPos = CARD_COLS                    ' forces a fresh page on the first overflow column
@@ -2880,17 +2928,10 @@ Private Sub CapManualColumns(layout As Object)
             End If
             chunkPos = chunkPos + 1
             Set items = cols(colIx)
-            hdr = ""
-            If hdrs.Exists(colIx) Then hdr = CStr(hdrs(colIx))
             For ii = 1 To items.Count
                 AddToPage layout, newTab, colIx, items(ii)
             Next ii
-            If Len(hdr) > 0 Then SetColHeader layout, newTab, colIx, hdr & " (cont.)"
             cols.Remove colIx
-            ' BuildManualLayout runs before LabelManualPages assigns headers, so
-            ' hdrs is typically still empty here - guard the removal instead of
-            ' assuming the Exists check above means the key is present to remove.
-            If hdrs.Exists(colIx) Then hdrs.Remove colIx
         Next ci
 NextTab:
     Next ti
@@ -2909,6 +2950,7 @@ End Sub
 ' to AUTO_COL_MAX, not here - a Const after the first procedure is a compile error.
 Private Function CardHelp(ByVal helpText As String, ByVal category As String) As String
     Dim body As String, parts() As String, n As Long, i As Long, shown As String
+    Dim usedSteps As Long, candidate As String
     If LCase(category) <> LCase(CHAIN_CAT) Then
         CardHelp = helpText
         Exit Function
@@ -2917,14 +2959,23 @@ Private Function CardHelp(ByVal helpText As String, ByVal category As String) As
     If Left$(body, 7) = "Chain: " Then body = Mid$(body, 8)
     parts = Split(body, " > ")
     n = UBound(parts) - LBound(parts) + 1
-    If n <= CHAIN_CARD_STEPS Then
+    ' Fix round 1, fix 6: BOTH caps must clear for the text to pass through as-is
+    ' - a short step count with long captions still needs bounding (see the
+    ' Consts' comment above).
+    If n <= CHAIN_CARD_STEPS And Len(helpText) <= CHAIN_CARD_CHARS Then
         CardHelp = helpText
         Exit Function
     End If
-    For i = LBound(parts) To LBound(parts) + CHAIN_CARD_STEPS - 1
-        shown = shown & IIf(Len(shown) > 0, " > ", "") & parts(i)
+    For i = LBound(parts) To UBound(parts)
+        If usedSteps >= CHAIN_CARD_STEPS Then Exit For
+        candidate = shown & IIf(Len(shown) > 0, " > ", "") & parts(i)
+        ' Always keep at least one step, even a lone long one, so the card never
+        ' shows zero steps and just a "+N more" tail.
+        If usedSteps > 0 And Len(candidate) > CHAIN_CARD_CHARS Then Exit For
+        shown = candidate
+        usedSteps = usedSteps + 1
     Next i
-    CardHelp = "Chain: " & shown & "  +" & (n - CHAIN_CARD_STEPS) & " more - see Macros Home"
+    CardHelp = "Chain: " & shown & "  +" & (n - usedSteps) & " more - see Macros Home"
 End Function
 
 ' Auto-layout: no button carries a page code, so distribute buttons by display
@@ -2943,6 +2994,14 @@ Private Sub BuildAutoLayout(buttons As Collection, layout As Object)
     Dim taken As Long, k As Long, n As Long, firstColOfCat As Boolean
 
     Set cats = CreateObject("Scripting.Dictionary")
+    ' Fix round 1, fix 7: a default Dictionary is BinaryCompare, so "Reconcile"
+    ' and "reconcile" from two different packages (an explicitly supported §6
+    ' scenario - two packages feeding one category) would become two adjacent
+    ' columns, even though LabelAutoPages de-dupes case-insensitively and would
+    ' title the page with the category named once above both. Must be set BEFORE
+    ' the first Add - VBA raises an error changing CompareMode on a non-empty
+    ' Dictionary.
+    cats.CompareMode = vbTextCompare
     For Each e In buttons
         cat = Trim(CStr(e(4)))
         If Len(cat) = 0 Then cat = "Other"       ' defensive: Core_AddAction never emits blank
@@ -3032,10 +3091,19 @@ End Sub
 ' The generated index - ALWAYS built, even for a single page, so the workbook has
 ' one shape at every scale (owner's call). Three parts: a page summary, the full
 ' action catalog, and the legend. Built last and activated, so any rebuild lands
-' the user here.
-Private Sub BuildHomePage(layout As Object, ByVal totalButtons As Long)
+' the user here. Fix round 1, fix 4: totalButtons is no longer a caller-supplied
+' parameter - it had undefined semantics (does it count hide-coded buttons? the
+' filers drop those before layout is ever built, so the only honest source is
+' layout itself), and the natural thing for Task 8 to pass, buttons.Count from
+' GatherButtons, would over-count against both the page list above and the
+' catalog below. Summing PageButtonCount over every page is the SAME quantity
+' the page-summary rows above already show per page, so there is exactly one
+' definition of "how many buttons are on this workbook" and no way for a caller
+' to get it wrong. isManual (fix 3) reports which filer built this layout, so
+' HomeLegend can describe the truth instead of a generic capability.
+Private Sub BuildHomePage(layout As Object, ByVal isManual As Boolean)
     Dim ws As Worksheet, r As Long, tabKeys As Variant, ti As Long, tabNum As Long
-    Dim page As Object
+    Dim page As Object, totalButtons As Long
     Set ws = EnsurePanelSheet(HOME_SHEET, True)
     ws.Columns("A").ColumnWidth = 2
     ws.Columns("B").ColumnWidth = 40
@@ -3075,6 +3143,7 @@ Private Sub BuildHomePage(layout As Object, ByVal totalButtons As Long)
             Set page = layout(tabNum)
             NavLink ws.Cells(r, 2), PANEL_BASE & tabNum, PANEL_BASE & tabNum
             ws.Cells(r, 3).Value = PageButtonCount(page)
+            totalButtons = totalButtons + PageButtonCount(page)   ' fix 4: one definition, summed here
             ws.Cells(r, 4).Value = CStr(page("title"))
             ws.Cells(r, 4).Font.Color = RGB(90, 90, 90)
             r = r + 1
@@ -3086,7 +3155,7 @@ Private Sub BuildHomePage(layout As Object, ByVal totalButtons As Long)
     r = r + 2
     r = HomeCatalog(ws, r, layout)
     r = r + 1
-    r = HomeLegend(ws, r, totalButtons)
+    r = HomeLegend(ws, r, totalButtons, isManual)
 
     ws.Activate                     ' Range.Select needs its sheet active
     ws.Range("A1").Select
@@ -3144,15 +3213,34 @@ Private Function HomeCatalog(ws As Worksheet, ByVal r As Long, layout As Object)
 End Function
 
 ' The legend. This is the only place the page-code convention and Availability are
-' explained where a daily user will actually see them.
-Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long) As Long
+' explained where a daily user will actually see them. Fix round 1, fix 3: this is
+' now mode-aware - it used to always claim "laid out automatically" and invite the
+' user to "take charge of the layout", which is false and actively misleading the
+' moment even one Page code exists (that code is already in charge). isManual
+' reports which filer actually built this layout (BuildAutoLayout vs
+' BuildManualLayout), so the first two lines describe the truth for THIS build,
+' not a generic capability. Also folds in the related minor: the mechanism line
+' used to promise a blank-coded button "lands on page 1", which CapManualColumns
+' can now falsify (it relocates to a continuation page once page 1 is already at
+' the column cap) - corrected below so the legend matches where the button
+' actually went.
+Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long, _
+                            ByVal isManual As Boolean) As Long
     ws.Cells(r, 2).Value = "HOW THESE PAGES ARE BUILT"
     ws.Cells(r, 2).Font.Bold = True
     r = r + 1
-    r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to 3 per page.")
-    r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
+    If isManual Then
+        r = HomeLine(ws, r, totalButtons & " button(s). Your Page codes control this layout - each button sits where " & _
+                             "the code you set in the action catalog on the Setup tab places it.")
+        r = HomeLine(ws, r, "To go back to automatic packing, clear every Page code - with none set, categories " & _
+                             "are packed onto pages for you again.")
+    Else
+        r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to 3 per page.")
+        r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' in the action catalog on the Setup tab:")
+    End If
     r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
-    r = HomeLine(ws, r, "As soon as ONE code is filled in, the codes control everything and uncoded buttons land on page 1.")
+    r = HomeLine(ws, r, "As soon as ONE code is filled in, the codes control everything; a blank-coded button lands " & _
+                         "in page 1's Unassigned area, or a continuation page if page 1 is already full.")
     r = HomeLine(ws, r, "Availability on the Setup tab: 'Button' = shown here. 'Chains only' = no button, but a Chain can run it.")
     r = HomeLine(ws, r, "'Off' = no button and it will not run at all; Finalize refuses to activate a Chain that uses one.")
     HomeLegend = r
@@ -3194,6 +3282,14 @@ Private Sub DeletePanels()
     Application.DisplayAlerts = True
 End Sub
 
+' LOAD-BEARING: "Macros Home" starts with PANEL_BASE ("Macros ") but has a
+' non-numeric tail, so it deliberately reads False here and DeletePanels never
+' touches it. That is what lets a rebuild reuse (not recreate) the index sheet -
+' EnsurePanelSheet finds it already there and clears+rewrites it in place. A
+' future tidy-up that "fixes" this to also match Macros Home would delete the
+' index every rebuild, and Fix round 1's whole point (a stale index never
+' survives a rebuild, because EnsurePanelSheet's Cells.Clear wipes it before
+' BuildHomePage rewrites it) requires that the sheet still be there to clear.
 Private Function IsPanelName(ByVal nm As String) As Boolean
     Dim tail As String
     If LCase(Left(nm, Len(PANEL_BASE))) <> LCase(PANEL_BASE) Then Exit Function
