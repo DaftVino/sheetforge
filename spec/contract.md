@@ -323,8 +323,8 @@ reference with optional `$` (`TabName!$B$4`); a range (a colon) is rejected.
 - **Blocking conditions.** Finalize MUST refuse to activate, naming the button, when:
   the named surface does not exist; the named surface is one the engine itself
   generates and rebuilds; two buttons resolve to the same target cell (two controls at
-  identical coordinates means one covers the other and is unreachable); or the value is
-  malformed.
+  identical coordinates means one covers the other and is unreachable); the value is
+  malformed; or the cell does not resolve on the named surface.
 - Both the action catalog and the chains block use this same grammar, so a **chain**
   may be anchored exactly like an action.
 

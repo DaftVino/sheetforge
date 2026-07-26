@@ -2385,13 +2385,22 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
                 If Not ParseAnchor(code, aSheet, aCell) Then
                     s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf
                     structural = structural + 1
+                ElseIf IsEngineOwnedSheet(aSheet) Then
+                    ' Checked before sheet-exists on purpose: an engine-owned tab
+                    ' (e.g. "Macros 1") legitimately does not exist yet on a brand
+                    ' new deployment's FIRST Finalize - Core_BuildControlPanel is
+                    ' what creates it, and that runs AFTER Finalize. Sheet-exists
+                    ' first would tell the user "no tab named Macros 1", and the
+                    ' natural (wrong) response - go create one - is exactly what
+                    ' DeletePanels then destroys on the next build. IsEngineOwnedSheet
+                    ' inspects a string only and has no precondition on the sheet
+                    ' existing, so it is safe to run first.
+                    s = s & "RESERVED SHEET for " & k & ": '" & code & "' - the engine " & _
+                        "rebuilds that tab on every build; pick one of your own." & vbCrLf
+                    structural = structural + 1
                 ElseIf Not Core_SheetExists(aSheet) Then
                     s = s & "NO SUCH SHEET for " & k & ": '" & code & "' - this workbook " & _
                         "has no tab named " & Chr(34) & aSheet & Chr(34) & "." & vbCrLf
-                    structural = structural + 1
-                ElseIf IsEngineOwnedSheet(aSheet) Then
-                    s = s & "RESERVED SHEET for " & k & ": '" & code & "' - the engine " & _
-                        "rebuilds that tab on every build; pick one of your own." & vbCrLf
                     structural = structural + 1
                 Else
                     ' Normalise through the resolved absolute address so "B4" and
@@ -3901,7 +3910,7 @@ Private Function IsEngineOwnedSheet(ByVal nm As String) As Boolean
              LCase(HOME_SHEET), LCase(CONFIG_SHEET), LCase(PACKAGES_SHEET)
             IsEngineOwnedSheet = True
         Case Else
-            IsEngineOwnedSheet = IsPanelName(nm)      ' every generated "Macros <n>"
+            IsEngineOwnedSheet = IsPanelName(Trim(nm))  ' every generated "Macros <n>"
     End Select
 End Function
 
