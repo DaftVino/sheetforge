@@ -313,6 +313,24 @@ Public Function Core_CfgTable(ctx As Object, ByVal key As String, _
     Core_CfgTable = TableValues(ctx("reg"), key, a, b, c)
 End Function
 
+' Reads a "bool" field (contract section 3; clean_hasheader is its first use).
+'
+' A BLANK cell means "never set" and resolves to the field's DECLARED manifest
+' default - not a hardcoded False and not an optional caller-supplied fallback.
+' That fallback is already free: Core_Cfg -> ScalarValue returns
+' FieldDefaultReg(ctx("reg"), key) when the stored value is empty. The declared
+' default is on the manifest; two places to state it would be two places to
+' disagree.
+'
+' An unrecognised NON-blank value fails closed to False. It cannot normally get
+' this far - Core_FinalizeSetup blocks activation on one, naming the field - but
+' a reader that guessed would be exactly the "user typed 'ye' and got a silent
+' no" failure the availability parser exists to prevent.
+Public Function Core_CfgBool(ctx As Object, ByVal key As String) As Boolean
+    Dim flag As Boolean
+    If ParseBool(Core_Cfg(ctx, key), flag) Then Core_CfgBool = flag
+End Function
+
 ' ---- setup-helper API: read/write the LIVE Setup sheet before Finalize ----
 ' For "setup helper" actions (e.g. suggest column types) that operate on what
 ' the user is editing on the Setup tab, not the activated _Config. These encode
@@ -1418,8 +1436,18 @@ End Sub
 Private Function RenderScalar(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     ws.Cells(r, KEY_COL).Value = f("key")
     LabelCell ws.Cells(r, 2), CStr(f("label"))
-    ws.Cells(r, VAL_COL).Value = ScalarValue(reg, CStr(f("key")))
-    Yellow ws.Cells(r, VAL_COL)
+    If LCase(CStr(f("kind"))) = "bool" Then
+        ' Write the DISPLAY spelling, exactly as RenderPlacementBlock writes
+        ' AvailLabel rather than the raw token - otherwise a seeded lowercase
+        ' "yes" would sit in a cell whose dropdown offers "Yes", which reads as
+        ' a value the validation does not recognise.
+        ws.Cells(r, VAL_COL).Value = BoolLabel(ScalarValue(reg, CStr(f("key"))))
+        Yellow ws.Cells(r, VAL_COL)
+        BoolDropdown ws.Cells(r, VAL_COL)
+    Else
+        ws.Cells(r, VAL_COL).Value = ScalarValue(reg, CStr(f("key")))
+        Yellow ws.Cells(r, VAL_COL)
+    End If
     r = r + 1
     r = RenderHelp(ws, r, CStr(f("help")))
     RenderScalar = r
@@ -1757,6 +1785,54 @@ Private Function ParseAvail(ByVal v As String) As String
             ParseAvail = ""                  ' unrecognised - caller must block
     End Select
 End Function
+
+' "yes"/"y"/"true"/"1" -> True; "no"/"n"/"false"/"0" -> False. Returns False for
+' anything else, so every caller fails CLOSED.
+'
+' Deliberately NOT IsTrue: that one accepts only TRUE/1 and fails OPEN to False
+' for everything else, which is right for the optional _Packages enable column
+' and wrong here.
+'
+' The spellings beyond "yes"/"no" are a REFERENCE-IMPLEMENTATION convenience
+' (contract section 3), mirroring the same tolerance clause section 6 already
+' grants availability. A port MAY accept only "yes" / "no".
+Private Function ParseBool(ByVal raw As String, ByRef flag As Boolean) As Boolean
+    Select Case LCase(Trim(raw))
+        Case "yes", "y", "true", "1"
+            flag = True
+            ParseBool = True
+        Case "no", "n", "false", "0"
+            flag = False
+            ParseBool = True
+    End Select
+End Function
+
+' Display spelling for a bool cell, mirroring AvailLabel. An UNRECOGNISED value
+' is handed back untouched rather than normalised - Finalize has to be able to
+' see and block on what the user actually typed.
+Private Function BoolLabel(ByVal raw As String) As String
+    Dim flag As Boolean
+    If ParseBool(raw, flag) Then
+        BoolLabel = IIf(flag, "Yes", "No")
+    Else
+        BoolLabel = raw
+    End If
+End Function
+
+' A validated dropdown removes free-typing from a two-value cell. Wrapped in
+' On Error Resume Next for the same reason AvailDropdown is: validation can be
+' refused (a protected sheet, some locales) and a refused dropdown must not abort
+' the build - ParseBool still guards the value, and Finalize still blocks on
+' anything unrecognised.
+Private Sub BoolDropdown(rng As Range)
+    On Error Resume Next
+    rng.Validation.Delete
+    rng.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+                       Operator:=xlBetween, Formula1:="Yes,No"
+    rng.Validation.IgnoreBlank = True
+    rng.Validation.InCellDropdown = True
+    On Error GoTo 0
+End Sub
 
 ' The display label written into the cell for a token.
 Private Function AvailLabel(ByVal token As String) As String
@@ -2348,6 +2424,7 @@ End Function
 Public Sub Core_FinalizeSetup()
     Dim ws As Worksheet, cfg As Worksheet, reg As Object, f As Object
     Dim rpt As String, warn As Long, v As String, msg As String
+    Dim boolBad As String, boolBadN As Long, bTmp As Boolean
     On Error GoTo Fail
 
     If Not Core_SheetExists(SETUP_SHEET) Then
@@ -2376,6 +2453,15 @@ Public Sub Core_FinalizeSetup()
                             warn = warn + 1
                         End If
                     End If
+                Case "bool"
+                    ' STRUCTURAL, not a soft note: a user who typed "ye" meaning
+                    ' "yes" must not be silently handed a "no". Contract section 3.
+                    If v <> "" Then
+                        If Not ParseBool(v, bTmp) Then
+                            boolBad = boolBad & "  - '" & f("label") & "': '" & v & "'" & vbCrLf
+                            boolBadN = boolBadN + 1
+                        End If
+                    End If
             End Select
         Next f
     Next reg
@@ -2393,6 +2479,11 @@ Public Sub Core_FinalizeSetup()
     ' --- Compose Your Buttons: validate chains + placement ---
     Dim composeRep As String, structural As Long
     composeRep = ComposeReport(ws, structural)
+    If boolBadN > 0 Then
+        composeRep = composeRep & vbCrLf & "UNRECOGNISED Yes/No value (use Yes or No):" & _
+                     vbCrLf & boolBad
+        structural = structural + boolBadN
+    End If
     msg = msg & vbCrLf & vbCrLf & String(40, "-") & vbCrLf & composeRep
     If structural > 0 Then
         MsgBox msg & vbCrLf & structural & " problem(s) above must be fixed before activating.", _

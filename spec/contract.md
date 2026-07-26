@@ -101,7 +101,7 @@ it.
 | `int` | integer | decimal string (e.g. `-1`) | coerced with the platform's integer parse | Universal. |
 | `sheet` | a worksheet/tab name | the tab name string | validated at Finalize to exist in the workbook | Excel worksheet ↔ Sheets tab. |
 | `file` | a **filename prefix** | the prefix string | newest file in the deployment's data location whose name **starts with** the value, ignoring a trailing ` (1)`/` (2)` copy suffix | The data location is the workbook's containing folder in Excel; a Drive folder in Sheets. See §7. |
-| `bool` | yes/no | **reserved** | — | **Reserved: defined but not yet used by any package.** Encoding (`yes`/`no` vs `TRUE`/`FALSE`) is fixed on first use and this table updated then. |
+| `bool` | yes/no | `yes` / `no` (canonical tokens; a reader MUST be case-insensitive) | validated Yes/No dropdown; a **blank** cell means "never set" and reads as the field's declared default | Encoding fixed at v1.2.0 by `clean_hasheader`, the kind's first use. Like `availability` (§6), the tokens are abstract, not a mandated on-screen spelling: the Excel reference implementation presents and stores `Yes` / `No`. A port MAY accept only `yes` / `no`; the reference additionally tolerates `y` / `true` / `1` and `n` / `false` / `0`. An unrecognised non-blank value MUST block Finalize, naming the field — it MUST NOT fall back to either state. |
 | `list` | ordered single values | one value per row | consecutive value cells (column C), one per row | Ordered rows on any grid. |
 | `table` | ordered N-column rows | each row `"a\|b\|c"`; up to 3 columns | value cells across columns C/D/E, one row per record | Ordered rows on any grid. |
 
@@ -492,6 +492,7 @@ Demo default rows (`|`-delimited): `IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N
 | key | kind | tier | default | semantics |
 |---|---|---|---|---|
 | `clean_keycols` | text | simple | `1` | Which column(s) decide duplicates, numbered `1,2,3…` from the LEFT of the picked range. One number or several (`1,2,4`). |
+| `clean_hasheader` | bool | simple | `yes` | Whether the picked range's first row is a header. `yes` (default) excludes it from the duplicate comparison and never removes it; `no` considers every row in the selection. |
 
 `clean` configures no target range — each action prompts for its range at run
 time (see §3, `range` note).
@@ -500,7 +501,7 @@ time (see §3, `range` note).
 
 | id | caption | semantics |
 |---|---|---|
-| `clean.dupes` | Remove Duplicates | Prompt for a range (incl. header row); remove duplicate rows using `clean_keycols`. |
+| `clean.dupes` | Remove Duplicates | Prompt for a range; remove duplicate rows using `clean_keycols`. `clean_hasheader` decides whether the range's first row is treated as a header (excluded from comparison and never removed) or as data. |
 | `clean.trim` | Trim & Clean Text | Prompt for a range; strip leading/trailing spaces, collapse double spaces, remove non-printing characters. |
 | `clean.filldown` | Fill Blanks Down | Prompt for a range; fill each blank cell with the value from the cell above it. |
 
@@ -554,14 +555,17 @@ port realizes them per platform rather than re-deriving them:
 - The contract is the source of truth going forward: the reference VBA build and
   every port MUST conform. A discovered divergence is reconciled **in favor of
   this document**.
-- **Reserved for first use:** the `bool` kind (§3) — its encoding is fixed, and
-  this document updated, when the first package uses it.
+- **Reserved for first use — DISCHARGED at v1.2.0.** The `bool` kind (§3) had its
+  encoding reserved until first use. `clean_hasheader` (package `clean`, §8) is that
+  first use, so §3's row now states the fixed encoding and this bullet is a record,
+  not an outstanding obligation.
 - **v1.1.0 (additive):** adds the `chain` config entity, the reserved `chain.*`
   id namespace, engine-owned config, the grouping/layout placement code, and the
   quiet/dispatch convention. No existing key, action id, kind, value encoding, or
   semantics changed — v1.0.0 deployments remain valid.
 - **v1.2.0 (additive):** adds the optional action `category` attribute, the
-  optional field `usedBy` attribute, the three-state deployment-level
+  optional field `usedBy` attribute, the `clean_hasheader` field and the
+  now-fixed `bool` encoding (§3), the three-state deployment-level
   `availability` flag, the capacity-packed auto-layout rule for uncoded buttons,
   the column-cap overflow clause for coded layouts (a page's three-column and a
   column's six-button capacity bind a coded layout too, so an over-capacity
