@@ -4034,7 +4034,17 @@ End Sub
 Private Sub AddBtn(ws As Worksheet, ByVal nm As String, ByVal cap As String, ByVal action As String, _
                    ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
                    Optional ByVal place As XlPlacement = xlMoveAndSize)
-    Dim btn As Button
+    Dim btn As Button, eNum As Long, eDesc As String
+    ' ALL-OR-NOTHING. Buttons.Add can succeed and a later property assignment
+    ' still raise - and a half-built button is worse than no button at all: it
+    ' carries Excel's default name ("Button 11"), so SweepPlacedButtons cannot
+    ' find it (that matches on PLACED_PREFIX), it has no caption to identify it
+    ' and no OnAction so it does nothing when clicked, and it therefore survives
+    ' every later rebuild forever. Found at the v0.4.0 gate: unclickable orphan
+    ' buttons accumulating on a user's own sheet, one per failed placement.
+    ' Delete the partial shape, then re-raise the ORIGINAL error so the caller
+    ' still counts a skip and reports it.
+    On Error GoTo Abort
     Set btn = ws.Buttons.Add(l, t, w, h)
     btn.name = nm
     btn.Caption = cap
@@ -4052,6 +4062,16 @@ Private Sub AddBtn(ws As Worksheet, ByVal nm As String, ByVal cap As String, ByV
     ' button to track it, but on a user's sheet, narrowing a column must not
     ' squash their button.
     btn.Placement = place
+    Exit Sub
+Abort:
+    eNum = Err.Number
+    eDesc = Err.Description
+    If Not btn Is Nothing Then
+        On Error Resume Next
+        btn.Delete
+        On Error GoTo 0
+    End If
+    Err.Raise eNum, "AddBtn", eDesc
 End Sub
 
 ' Map any character outside A-Za-z0-9_ to "_", so the action id "clean.dupes"
