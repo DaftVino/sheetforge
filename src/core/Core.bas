@@ -127,6 +127,18 @@ Private Const CHAIN_CARD_CHARS As Long = 120     ' composed-text length cap befo
 ' 3-letter code, max 18278) collides with it; SplitTallManualColumns itself
 ' guards the multiply against Long overflow for anything larger.
 Private Const VSPLIT_MULT As Long = 100000
+' ---- Sheet!Cell anchored buttons (v0.4.0) ----
+' Shape-name prefix for every button this engine places on a user's OWN sheet.
+' RESERVED (contract section 7): nothing else in the workbook may use it.
+' SweepPlacedButtons finds and removes buttons by this prefix alone - it is the
+' only handle the engine has on a sheet it must otherwise never touch.
+Private Const PLACED_PREFIX As String = "SFPlaced_"
+' Width of an anchored button, in points. Deliberately NOT the target cell's own
+' width: a user's column may be three characters wide. Height reuses BTN_H.
+' 110pt is the owner's call at the v0.4.0 gate (the design proposed 150pt), sized
+' to stay close to one default-width column so a button is not intrusive sitting
+' next to real data.
+Private Const ANCHOR_BTN_W  As Double = 110
 ' ---- Setup / _Config layout ----
 Private Const KEY_COL   As Long = 1       ' column A: machine keys (hidden)
 Private Const VAL_COL   As Long = 3       ' column C: scalar value / list value / 1st table col
@@ -2682,6 +2694,8 @@ End Sub
 ' rebuilds the panel itself and shows its own combined message).
 Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object, layout As Object, manual As Boolean
+    Dim paged As Collection, anchored As Collection, nPlaced As Long
+    Dim placedNote As String
     mLastBuildOk = False    ' reset FIRST, every call - see the flag's own declaration comment
     InvalidateRegistry              ' a build begins here - see InvalidateRegistry
     On Error GoTo Fail
@@ -2694,31 +2708,42 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
                                              ' but keeping it first documents the dependency
     Set buttons = GatherButtons(codeMap)    ' single funnel for both filers - also where "hide"
                                              ' is dropped, mode-independently (see GatherButtons)
+    SplitAnchored buttons, codeMap, paged, anchored   ' downstream of the funnel - "hide"
+                                             ' has already been applied to both halves
     Set layout = CreateObject("Scripting.Dictionary")   ' neither filer creates it
     DeletePanels                            ' remove any prior "Macros N" pages (spares
                                              ' "Macros Home" by design - see IsPanelName)
     DeleteLegacyPanel                       ' v0.4.0: the single "Macros" tab is retired in BOTH modes
     DeleteHomePanel                         ' v0.4.0: so is the withdrawn "Macros Home" index
+    SweepPlacedButtons                      ' after the deletes: fewer sheets left to walk
     If manual Then
-        BuildManualLayout buttons, codeMap, layout
+        BuildManualLayout paged, codeMap, layout
     Else
-        BuildAutoLayout buttons, layout
+        BuildAutoLayout paged, layout
     End If
     RenderAllPages layout
     BuildAdminPanel                         ' Create/Finalize controls on their own hideable tab
+    nPlaced = PlaceAnchoredButtons(anchored, codeMap)
     LandOnFirstPage layout                  ' LAST: the build's deliberate landing place
     mLastBuildOk = True     ' the whole pipeline finished - only set here, never in Fail:
     Core_SpeedOff
     If Not silent Then
+        If nPlaced > 0 Then _
+            placedNote = vbCrLf & vbCrLf & nPlaced & " button(s) placed on your own sheets."
         ' "Built 0 macro page(s)" is true but reads as a failure, and zero pages
-        ' is a real, reachable state now that every button can be hidden or
-        ' switched Off. Say what actually happened instead.
+        ' is a real, reachable state: every button can be hidden, switched Off,
+        ' or anchored onto one of the user's own tabs.
         If layout.Count = 0 Then
-            MsgBox "No macro pages were built - every button is either hidden or switched Off.", _
+            MsgBox "No macro pages were built - every button is hidden, switched Off, or " & _
+                   "placed on one of your own sheets." & placedNote, _
                    vbInformation, "Setup Complete"
         Else
-            MsgBox "Built " & layout.Count & " macro page(s) with " & buttons.Count & _
-                   " button(s).", vbInformation, "Setup Complete"
+            ' paged.Count, NOT buttons.Count: an anchored button is not on a
+            ' generated page and must not be counted against one. This is the
+            ' same class of miscount the ledger records for BuildHomePage's
+            ' totalButtons - one honest definition, not the nearest handy number.
+            MsgBox "Built " & layout.Count & " macro page(s) with " & paged.Count & _
+                   " button(s)." & placedNote, vbInformation, "Setup Complete"
         End If
     End If
     Exit Sub
@@ -2804,6 +2829,34 @@ Private Function GatherButtons(codeMap As Object) As Collection
     Next ch
     Set GatherButtons = out
 End Function
+
+' Partition the SINGLE funnel's output into the buttons the page pipeline draws
+' and the buttons anchored onto a user's own sheet.
+'
+' Runs strictly DOWNSTREAM of GatherButtons, so "hide" has already been applied to
+' both halves. DO NOT re-filter "hide" here, and DO NOT assemble either
+' collection any other way - GatherButtons' own comment records what happened the
+' last time a filer was fed something assembled separately: "hide" silently
+' stopped working, on the live path, and it took a BLOCKING fix round to find.
+'
+' Only "paged" reaches either layout filer, so an anchored button never affects
+' page counts, column caps, category packing or continuation pages.
+Private Sub SplitAnchored(buttons As Collection, codeMap As Object, _
+                          ByRef paged As Collection, ByRef anchored As Collection)
+    Dim e As Variant, id As String, code As String
+    Set paged = New Collection
+    Set anchored = New Collection
+    For Each e In buttons
+        id = LCase(CStr(e(0)))
+        code = ""
+        If codeMap.Exists(id) Then code = Trim(CStr(codeMap(id)))
+        If CodeKind(code) = "anchor" Then
+            anchored.Add e
+        Else
+            paged.Add e
+        End If
+    Next e
+End Sub
 
 ' Test .Exists BEFORE reading the item. Scripting.Dictionary's default Item
 ' property CREATES a missing key (with an Empty value) on read, and VBA's And
@@ -3653,6 +3706,84 @@ Private Sub DeletePanels()
     Application.DisplayAlerts = True
 End Sub
 
+' Delete every button this engine has EVER placed on a user's sheet, across the
+' whole workbook, before re-placing from the CURRENT codes.
+'
+' Self-healing by construction: a moved cell, a cleared code, a renamed sheet,
+' and an orphan left by a build that died halfway are all fixed by the same pass.
+' It runs on EVERY build, including builds with zero anchors - that is exactly
+' how clearing a code removes its button.
+'
+' DeletePanels cannot help here: it only deletes generated "Macros N" sheets, and
+' an anchored button lives on a sheet the engine must otherwise never touch.
+'
+' Shapes are iterated BACKWARDS - the established idiom in EnsurePanelSheet -
+' because deleting one shifts every later index down.
+Private Sub SweepPlacedButtons()
+    Dim ws As Worksheet, si As Long
+    On Error Resume Next
+    For Each ws In ThisWorkbook.Worksheets
+        For si = ws.Shapes.Count To 1 Step -1
+            If Left$(ws.Shapes(si).Name, Len(PLACED_PREFIX)) = PLACED_PREFIX Then _
+                ws.Shapes(si).Delete
+        Next si
+    Next ws
+    On Error GoTo 0
+End Sub
+
+' Resolve an anchor's sheet part to a Worksheet (Nothing when it does not exist)
+' and hand back its cell part. The single place an anchor becomes objects, so the
+' Finalize checks and the placer cannot disagree about what "TabName!B4" resolves to.
+Private Function AnchorSheet(ByVal code As String, ByRef cellRef As String) As Worksheet
+    Dim sh As String
+    cellRef = ""
+    If Not ParseAnchor(code, sh, cellRef) Then Exit Function
+    If Not Core_SheetExists(sh) Then Exit Function
+    Set AnchorSheet = ThisWorkbook.Worksheets(sh)
+End Function
+
+' Anchor one button per placement onto a sheet the engine otherwise leaves
+' COMPLETELY alone. Writes to no cell: no Clear, no UnMerge, no column width, no
+' row height, no value, no format, no hyperlink. The ONLY mutation to a user's
+' sheet is adding - and, via SweepPlacedButtons, removing - a shape whose name
+' carries this engine's reserved prefix.
+'
+' This is deliberately a separate procedure, NOT a parameter on RenderPage. The
+' card-grid renderer owns its sheet outright: EnsurePanelSheet does Cells.Clear,
+' Cells.UnMerge, Hyperlinks.Delete, Cells.RowHeight, six column widths, tab
+' colour and interior fill. A user's own sheet must never be treated that way.
+'
+' Returns how many buttons were actually placed, for the completion message.
+'
+' A failure skips that one button rather than raising. Finalize has already
+' blocked on a missing sheet, an engine-owned sheet, a duplicate target and a
+' malformed anchor, so anything still failing here is a workbook that changed
+' underneath its own config - and a build must not die on its last step because
+' one anchor went stale.
+Private Function PlaceAnchoredButtons(anchored As Collection, codeMap As Object) As Long
+    Dim e As Variant, id As String, code As String, aCell As String
+    Dim ws As Worksheet, target As Range, n As Long
+    For Each e In anchored
+        id = LCase(CStr(e(0)))
+        code = ""
+        If codeMap.Exists(id) Then code = Trim(CStr(codeMap(id)))
+        Set ws = AnchorSheet(code, aCell)
+        If Not ws Is Nothing Then
+            Set target = Nothing
+            On Error Resume Next
+            Set target = ws.Range(aCell)
+            On Error GoTo 0
+            If Not target Is Nothing Then
+                AddBtn ws, PLACED_PREFIX & SafeShapeName(CStr(e(0))), _
+                       CStr(e(1)), CStr(e(2)), _
+                       target.Left, target.Top, ANCHOR_BTN_W, BTN_H, xlMove
+                n = n + 1
+            End If
+        End If
+    Next e
+    PlaceAnchoredButtons = n
+End Function
+
 ' "Macros Home" starts with PANEL_BASE ("Macros ") but has a non-numeric tail, so
 ' it reads False here and DeletePanels never touches it.
 '
@@ -3712,7 +3843,8 @@ Private Sub PopulateReferenceLists(ws As Worksheet, ByVal startRow As Long)
 End Sub
 
 Private Sub AddBtn(ws As Worksheet, ByVal nm As String, ByVal cap As String, ByVal action As String, _
-                   ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double)
+                   ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
+                   Optional ByVal place As XlPlacement = xlMoveAndSize)
     Dim btn As Button
     Set btn = ws.Buttons.Add(l, t, w, h)
     btn.name = nm
@@ -3725,8 +3857,31 @@ Private Sub AddBtn(ws As Worksheet, ByVal nm As String, ByVal cap As String, ByV
     ' below the first pair - that only works because a Forms button anchors and
     ' resizes with its underlying cells, which is xlMoveAndSize. Make it explicit
     ' rather than leaving the whole card-grid layout resting on Excel's default.
-    btn.Placement = xlMoveAndSize
+    ' v0.4.0: xlMoveAndSize stays the DEFAULT, so every existing call site is
+    ' unchanged. An anchored button on a user's own sheet passes xlMove instead:
+    ' on a generated page the engine controls the column width and wants the
+    ' button to track it, but on a user's sheet, narrowing a column must not
+    ' squash their button.
+    btn.Placement = place
 End Sub
+
+' Map any character outside A-Za-z0-9_ to "_", so the action id "clean.dupes"
+' composes into the legal shape name "SFPlaced_clean_dupes".
+' A theoretical collision between two ids differing only by that substitution is
+' harmless: placement is sweep-then-add and never looks a button up by name.
+Private Function SafeShapeName(ByVal s As String) As String
+    Dim i As Long, ch As String, out As String
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If (ch >= "A" And ch <= "Z") Or (ch >= "a" And ch <= "z") _
+           Or (ch >= "0" And ch <= "9") Or ch = "_" Then
+            out = out & ch
+        Else
+            out = out & "_"
+        End If
+    Next i
+    SafeShapeName = out
+End Function
 
 '================================================================
 ' Small utilities
