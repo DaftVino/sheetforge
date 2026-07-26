@@ -2694,6 +2694,13 @@ Add to **Step 2 (fixture pass — packing and geometry)**:
       from an earlier build, confirm it has been **deleted**, not left behind.
 - [ ] The build lands you on **`Macros 1`**, cell A1.
 - [ ] The completion dialog does **not** mention an index.
+- [ ] **The nav row on a SINGLE-page build.** `RenderNavRow` still sets row 1 to
+      18pt unconditionally, but with only one page there is no `< Previous` and no
+      `Next >` — and `<< Home` no longer occupies B1 — so row 1 renders as a blank
+      18pt band. Behaviourally correct, but your original complaint was clutter and
+      a reserved-but-empty band is the mirror image of it. **Judge it:** if it reads
+      as wasted space, suppressing the row height when both links are absent is a
+      two-line change.
 ```
 
 Add a new **Step 5b: anchored placements** after Step 5:
