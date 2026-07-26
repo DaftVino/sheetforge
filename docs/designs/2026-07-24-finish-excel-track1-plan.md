@@ -2405,27 +2405,40 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 - [ ] **A PROTECTED target sheet.** Right-click `TabName` ▸ Protect Sheet ▸ OK (the
       default protects `DrawingObjects`), then Finalize. Expected: **the build
       COMPLETES** — it must not die with "rebuilding the Macros pages failed" — and
-      the completion dialog reports `1 anchored button(s) could NOT be placed`.
+      the `Configuration activated.` dialog Finalize shows at the end reports
+      `1 anchored button(s) could NOT be placed.` followed by two bullet lines, the
+      second of which tells you to unprotect the sheet and Finalize again.
       **This is the single most important item in this section**: it is the one
       assumption that could not be verified without Excel (`ws.Buttons.Add` raising
       1004 on a protected sheet), and before the fix it took down the whole build.
+      **If the dialog says only `Configuration activated.` with no count, the note
+      is not reaching Finalize** — the build composes it and Finalize appends it, so
+      a missing note is a real finding, not a cosmetic one.
       **Known residual, not a bug to report:** a button placed on that sheet by an
       *earlier* build survives, because the sweep cannot delete it either. Removing
-      it would mean the engine unprotecting your sheet, which it must never do.
-      Unprotect and re-Finalize to clear it.
+      it would mean the engine unprotecting your sheet, which it must never do — the
+      dialog's second bullet says so. Unprotect and re-Finalize to clear it.
 - [ ] **A RENAMED target sheet.** Anchor a button to `TabName!B4`, Finalize, then rename
-      `TabName` to something else and Finalize again. Expected: the completion dialog
-      says `1 anchored button(s) could NOT be placed - the sheet or cell no longer
-      exists...`. Confirm that action now has **no** button anywhere; that is
-      correct and is what the message exists to tell you.
+      `TabName` to something else and Finalize again. Expected: the `Configuration
+      activated.` dialog says `1 anchored button(s) could NOT be placed.` and its
+      **first** bullet — `If the sheet or cell no longer exists, that action has no
+      button anywhere: fix the placement on the Setup tab and Finalize again.` — is
+      the one that applies. Confirm that action now has **no** button anywhere; that
+      is correct and is what the message exists to tell you.
 - [ ] With an anchor active, the Finalize report shows a soft
       `Placed on your own sheets` list in the same `caption [id]` format the
       `Hidden` and `Unassigned` lists use, and it does **not** block.
 - [ ] Set every button to `hide` except one anchored button, then Finalize. Confirm
-      the completion dialog reads `No macro pages were built - every button is
-      hidden, switched Off, or anchored to one of your own sheets.` followed by
-      `1 button(s) placed on your own sheets.` - not an error, and not
-      `Built 0 macro page(s)`.
+      the `Configuration activated.` dialog ends with
+      `1 button(s) placed on your own sheets.` - a success dialog, not an error.
+      **Then, without changing anything, run `Core_BuildControlPanel` from
+      Alt+F8** (Excel ▸ Developer ▸ Macros, or Alt+F8, pick `Core_BuildControlPanel`,
+      Run). That is the *non-silent* path, and only it shows the zero-pages wording:
+      `No macro pages were built - every button is hidden, switched Off, or anchored
+      to one of your own sheets.` followed by the same
+      `1 button(s) placed on your own sheets.` - not `Built 0 macro page(s)`.
+      Two dialogs is correct here (one per run); the note must appear exactly **once
+      per dialog**, never doubled inside one.
 
 - [ ] **Step 6: Real pass — the shipping bundle**
 

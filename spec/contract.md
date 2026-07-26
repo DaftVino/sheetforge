@@ -320,6 +320,17 @@ reference with optional `$` (`TabName!$B$4`); a range (a colon) is rejected.
   rebuild**, across the whole deployment, before placing from the current values — so
   a moved cell, a cleared value, a renamed sheet, or a build that died halfway cannot
   leave a live orphan behind.
+  - **Normative: that removal obligation is best-effort where the surface refuses
+    control deletion.** A surface may be locked against control changes by the user
+    (in Excel, a sheet protected with `DrawingObjects`, which is Protect's default);
+    removal there fails and a previously-placed control survives. The engine **MUST
+    NOT** alter the surface's protection state — unprotecting, then reprotecting, a
+    surface the user chose to lock is a larger violation than a stale control, and
+    the preceding "MUST NOT modify the target surface" rule outranks this one. The
+    engine **MUST** instead report the failure to the user, with the count and the
+    repair (unprotect, then rebuild). A surviving control on a locked surface is
+    **conforming behaviour**, not a divergence to be reconciled under §10 — do not
+    "fix" it by unprotecting.
 - **Blocking conditions.** Finalize MUST refuse to activate, naming the button, when:
   the named surface does not exist; the named surface is one the engine itself
   generates and rebuilds; two buttons resolve to the same target cell (two controls at
