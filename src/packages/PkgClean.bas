@@ -22,8 +22,10 @@ Public Sub PkgClean_Manifest(reg As Object)
     ' (No section header: the package banner already reads "CLEAN & STANDARDIZE".)
     Core_AddField reg, "clean_keycols", "Remove-duplicates key column(s)", "text", "1", _
         help:="Which column(s) decide whether two rows are duplicates, numbered 1,2,3... from the LEFT of the range you pick. One number, or several like 1,2,4."
+    Core_AddField reg, "clean_hasheader", "Does the range you pick include a header row?", "bool", "yes", _
+        help:="Yes: the first row of your selection is treated as a header and is never removed. No: every row in the selection is considered, including the first one."
 
-    Core_AddAction reg, "clean.dupes", "Remove Duplicates", "PkgClean_RemoveDupes", "Pick a range (include the header row); removes duplicate rows using the key column(s) from Setup."
+    Core_AddAction reg, "clean.dupes", "Remove Duplicates", "PkgClean_RemoveDupes", "Pick a range; removes duplicate rows using the key column(s) from Setup. Whether the first row is treated as a header is the 'header row' setting on Setup."
     Core_AddAction reg, "clean.trim", "Trim & Clean Text", "PkgClean_TrimClean", "Pick a range; strips leading/trailing spaces, collapses double spaces, and removes non-printing characters."
     Core_AddAction reg, "clean.filldown", "Fill Blanks Down", "PkgClean_FillDown", "Pick a range; fills each blank cell with the value from the cell above it."
 End Sub
@@ -39,7 +41,8 @@ Public Sub PkgClean_RemoveDupes(ctx As Object)
 
     keys = Core_Cfg(ctx, "clean_keycols")
     Core_SpeedOn
-    rng.RemoveDuplicates Columns:=ParseCols(keys), Header:=xlYes
+    rng.RemoveDuplicates Columns:=ParseCols(keys), _
+                         Header:=IIf(Core_CfgBool(ctx, "clean_hasheader"), xlYes, xlNo)
     Core_SpeedOff
 
     Core_Done ctx, "Remove Duplicates complete on " & Core_RangeRef(rng) & _
@@ -126,7 +129,7 @@ Private Function AskRange(ByVal title As String) As Range
     Dim rng As Range
     On Error Resume Next
     Set rng = Application.InputBox( _
-        Prompt:="Select the range for '" & title & "' (include the header row):", _
+        Prompt:="Select the range for '" & title & "':", _
         title:=title, Type:=8)
     On Error GoTo 0
     If Not rng Is Nothing Then
