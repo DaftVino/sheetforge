@@ -2369,7 +2369,7 @@ That 82 is 74 fixture actions plus the 8 real ones (5 from `PkgImportExport`, 3 
       window, `Core_Run "fixture.a7"` refuses with the "Chains only" message.
 - [x] Build a chain containing `fixture.a7`: it **runs** as a step, one combined
       summary, no per-step dialogs.
-- [ ] Build a chain containing `fixture.a1` (which is `Off`), then Finalize.
+- [x] Build a chain containing `fixture.a1` (which is `Off`), then Finalize.
       **Judge this on the DIALOG, not on the Macros tabs** — see immediately below.
 
 **Expected dialog.** A warning containing `OFF ACTION IN CHAIN: '<your chain name>'
@@ -2396,7 +2396,7 @@ outright.
       exercise this check at all; pasting bypasses cell validation and is the
       only way to get an unrecognised value into the cell. Finalize **BLOCKS**
       with `UNRECOGNISED Availability` and does not activate.
-- [ ] **Clear the Availability cell of an action that is currently `Off`** — not one
+- [x] **Clear the Availability cell of an action that is currently `Off`** — not one
       already showing `Button`, or nothing will appear to happen and the check
       proves nothing. Blank means "never set", which reads as `Button`. Expected:
       Finalize activates with no complaint, **and that action's button comes back**
@@ -2417,60 +2417,123 @@ outright.
       type something else into that cell, Finalize, then re-run `Create Setup Tab`
       and confirm your text survived — the point is that relegating a setting never
       discards it.
-- [ ] `fx_chain` (used by the `Chains only` action) is **NOT** in the band — a
-      runnable action keeps its settings up.
-- [ ] `fx_typo` (unknown `usedBy` id) is not in the band.
-- [ ] `fixture.a2` `Off` but `a3` on: `fx_a2a3` stays up. Both `Off`: it moves in.
-- [ ] `fixture.a5` and `a6` `Off`: the list and table blocks land in the band, and
-      after re-Finalizing their values still read back (the `_core_end` sentinel
-      still bounds the last block).
-- [ ] Everything back to `Button`: the band disappears rather than showing empty.
+**What this step is testing, in one sentence.** A setting that belongs *only* to
+actions you have switched `Off` is moved into a collapsed band at the bottom of the
+Setup tab — **never deleted**. A setting still reachable by anything stays in the
+main list.
+
+**You will not see any `fx_*` name on screen.** The Setup tab shows each field's
+**label**; the `fx_*` names below are internal keys, listed only so you can match the
+two. Actions likewise appear as `Fixture 1 - Ingest & Import [fixture.a1]` in the
+Action catalog — caption first, id in brackets.
+
+| Setup tab shows this label | Internal key | Belongs to | Moves into the band when |
+|---|---|---|---|
+| `Always shown (declares no usedBy)` | `fx_always` | nothing | **never** |
+| `Used by Fixture 1 only` | `fx_a1` | `fixture.a1` | Fixture 1 is `Off` |
+| `Used by Fixture 2 or Fixture 3` | `fx_a2a3` | `fixture.a2` **or** `a3` | **both** are `Off` |
+| `Used by Fixture 7 (test 'Chains only')` | `fx_chain` | `fixture.a7` | Fixture 7 is `Off` — **not** when it is `Chains only` |
+| `Names an action id that does not exist` | `fx_typo` | a typo'd id | **never** |
+| `Advanced, used by Fixture 4` | `fx_adv` | `fixture.a4` | Fixture 4 is `Off` |
+| `List used by Fixture 5` | `fx_list` | `fixture.a5` | Fixture 5 is `Off` |
+| `Table used by Fixture 6` | `fx_table` | `fixture.a6` | Fixture 6 is `Off` |
+
+Each check below is: set the Availability, click `Finalize Setup Tab`, then click
+`Create Setup Tab` and look at the bottom of the rebuilt Setup tab. **The band only
+redraws on `Create Setup Tab`** — Finalize alone never redraws Setup.
+
+- [ ] **A `Chains only` action keeps its settings up.** Set `fixture.a7` to
+      `Chains only`. `Used by Fixture 7 (test 'Chains only')` must stay in the
+      **main list**, not the band — `Chains only` still runs inside a chain, so its
+      setting is still needed. Only `Off` relegates anything.
+- [ ] **An unknown owner never hides a field.** `Names an action id that does not
+      exist` points at an action id that isn't real. It must **always** stay in the
+      main list, whatever you switch off. Failing closed here matters: a typo in a
+      package's manifest must never make a user's setting vanish.
+- [ ] **Either-owner-runnable keeps a field up.** Set `fixture.a2` `Off` but leave
+      `fixture.a3` as `Button`: `Used by Fixture 2 or Fixture 3` stays in the main
+      list. Now set `fixture.a3` `Off` too: it moves into the band.
+- [ ] **An advanced field relegates too.** Set `fixture.a4` `Off`. `Advanced, used
+      by Fixture 4` normally lives under the **ADVANCED** band; confirm it moves out
+      of there and into the off band, rather than staying put or disappearing.
+- [ ] **List and table blocks survive relegation.** Set `fixture.a5` and `fixture.a6`
+      `Off`. `List used by Fixture 5` and `Table used by Fixture 6` both move into
+      the band **with their rows intact** — the list still shows `seed one` /
+      `seed two`, the table still shows `a1|b1|c1` across its three columns. Then
+      Finalize again and re-run `Create Setup Tab`: the values must still read back.
+      A multi-row block is the easiest thing to truncate when it moves, which is why
+      it is checked explicitly.
+- [ ] **Empty band means no band.** Set every action back to `Button` and rebuild
+      Setup. The **SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON** heading must be
+      **gone entirely** — not present-but-empty.
 
 - [ ] **Step 5: Fixture pass — manual codes, cancel and error paths**
 
-- [ ] `1A` on one action and `2B` on another, rest blank, Finalize (at fixture
-      scale this leaves roughly 80 buttons uncoded): numbered pages appear;
-      `1A`'s button is on page 1 headed `Column A`, `2B`'s is on page 2 headed
-      `Column B`. **This is NOT a one-column result at this scale.** Every
-      uncoded button starts in page 1's `Unassigned` column, but
-      `SplitTallManualColumns` splits any column over the 6-button cap into
-      further columns before `CapManualColumns` caps every page at 3 columns —
-      so ~80 Unassigned buttons spread across **several pages**, headed
-      `Unassigned`, `Unassigned (cont. 2)`, `Unassigned (cont. 3)`, and so on.
-      This is expected: it is the same overflow machinery a same-code stack past
-      6 buttons already uses, applied to the Unassigned bucket. Do not read
-      several `Unassigned (cont. N)` pages as a bug.
-- [ ] `hide` omits a button while leaving its catalog row.
-- [ ] Clear every code: packed auto-layout returns.
-- [ ] A bad code (`0A`, `A1`, `1`): Finalize blocks with `BAD CODE`.
-- [ ] Answer **No** to "Activate this configuration now?": nothing rebuilt, no
-      `_Config` written.
-- [ ] Answer **No** to `Create Setup Tab`'s rebuild confirmation: Setup untouched.
-- [ ] Finalize twice in a row: no *"That name is already taken"*, no `Setup (2)`.
-- [ ] **Force the failure path once, deliberately.** This is the only genuinely new
-      logic in the cutover, it sits on the live Finalize path, and no amount of code
-      reading can prove it — so break it on purpose. **Trigger: right-click the
-      `Setup Menu` tab ▸ Protect Sheet ▸ OK (no password needed), then Finalize.**
-      `BuildAdminPanel` reuses `Setup Menu` rather than recreating it (`DeletePanels`
-      only removes `Macros N` pages — `Setup Menu` is never one of those), so the
-      rebuild **reuses** the existing, now-protected sheet — and `EnsurePanelSheet`'s
-      `Cells.Clear` raises a runtime 1004 on a protected sheet, which propagates out
-      of `BuildAdminPanel` to `Core_BuildControlPanel`'s own error handler. (Two
-      other triggers people reach for do **not** work and verify nothing: hiding
-      `Setup Menu` and re-running does not raise — `EnsurePanelSheet`'s
-      `Cells.Clear` runs fine on a hidden sheet, and `BuildAdminPanel` never
-      activates the tab at all; and renaming `_Config` does not raise either —
-      `CfgSheet()` swallows a missing `_Config` and every consumer is
-      `Nothing`-safe, so the build simply succeeds with defaults.) You must get
-      **exactly two dialogs, in this order**: first `Core_BuildControlPanel error:
-      … Your settings are safe. Click 'Finalize Setup Tab' again to retry the
-      rebuild.`, then `Configuration activated, but rebuilding the Macros pages
-      failed`. Before the cutover this path showed the error and then cheerfully
-      claimed the rebuild had succeeded — on a workbook whose panels were already
-      deleted, so it had no buttons at all. If you see one dialog, or the success
-      wording, the build-success flag is not being read. **Then unprotect `Setup
-      Menu`** (right-click ▸ Unprotect Sheet) **and re-run Finalize**, and confirm
-      the workbook fully recovers.
+**Where you type these.** All placement codes go in the **Placement** column of the
+**Action catalog** block on the Setup tab (third column, next to `Availability`). A
+code means "put this button on page *N*, column *X*" — `1A` is page 1 column A.
+
+- [ ] **Two codes, everything else blank.** Put `1A` on one action and `2B` on
+      another, leave every other Placement cell empty, and Finalize.
+
+**Expected:** `1A`'s button is on `Macros 1` under a column headed `Column A`;
+`2B`'s is on `Macros 2` under `Column B`.
+
+**And the other ~80 buttons spread across several tabs under `Unassigned`,
+`Unassigned (cont. 2)`, `Unassigned (cont. 3)` and so on. That is correct — do not
+report it.** Filling in even one code switches the whole workbook out of automatic
+layout, so every uncoded button falls into an "Unassigned" pile. That pile obeys the
+same limits as everything else — 6 buttons per column, 3 columns per tab — so 80 of
+them need many columns and therefore many tabs. At the real 8-action scale you would
+see one small Unassigned column; the fixture makes it look dramatic.
+
+- [ ] **`hide`.** Type `hide` in one action's Placement cell and Finalize: its button
+      is gone from every tab, but **its row is still in the Action catalog** on the
+      Setup tab. Hiding a button must never make the action undiscoverable.
+- [ ] **Clearing every code returns automatic layout.** Empty every Placement cell
+      and Finalize: the tidy category-packed pages from Step 2 come back.
+- [ ] **A bad code blocks.** Type `0A` (page 0 does not exist), `A1` (letters before
+      digits) or `1` (no column letter) and Finalize. Expected: a warning listing
+      `BAD CODE for <id>: '<what you typed>'` and ending `problem(s) above must be
+      fixed before activating`. Nothing is rebuilt.
+- [ ] **Declining activation changes nothing.** Finalize, and at
+      `Activate this configuration now?` answer **No**. No tabs are rebuilt and your
+      previously activated settings are untouched.
+- [ ] **Declining a Setup rebuild changes nothing.** Click `Create Setup Tab` on a
+      workbook that already has one and answer **No** to the rebuild prompt. The
+      Setup tab is left exactly as it was, including anything you had typed but not
+      yet finalized.
+- [ ] **Finalize twice in a row.** Click `Finalize Setup Tab`, let it finish, click
+      it again. Expected: it just works. Specifically **no** *"That name is already
+      taken"* error, and **no** stray `Setup (2)` or `Setup (3)` tab left behind —
+      that was a real bug in v0.3.0.
+- [ ] **Break the build on purpose, once.** This tests what happens when your
+      settings save but the tab rebuild then fails. No amount of code reading proves
+      it, so it has to be forced.
+
+**Do this:** right-click the **`Setup Menu`** tab ▸ **Protect Sheet** ▸ **OK** (no
+password needed) ▸ then click `Finalize Setup Tab`.
+
+**Expected: exactly two dialogs, in this order.**
+
+1. `Core_BuildControlPanel error: ... Your settings are safe. Click 'Finalize Setup
+   Tab' again to retry the rebuild.`
+2. `Configuration activated, but rebuilding the Macros pages failed`
+
+**A failure is: only one dialog, or a dialog claiming plain success.** In v0.3.0 this
+path reported the error and then cheerfully said the rebuild had succeeded — on a
+workbook whose button tabs had already been deleted, so it had none at all. Two
+dialogs means the success flag is being read properly.
+
+**Then recover:** right-click `Setup Menu` ▸ **Unprotect Sheet**, re-run Finalize, and
+confirm the workbook comes back intact.
+
+*Why `Setup Menu` specifically:* it is the one generated tab the engine **reuses**
+rather than deletes and recreates, so protecting it makes the rebuild fail on a real
+sheet. Two triggers people reach for instead do **not** work and verify nothing:
+*hiding* `Setup Menu` (writing to a hidden sheet is perfectly legal), and renaming
+`_Config` (a missing config is handled gracefully — the build just succeeds using
+defaults).
 
 - [ ] **Step 5b: Fixture pass — Sheet!Cell anchored placements**
 
@@ -2509,7 +2572,8 @@ outright.
 - [ ] **`Macros 1!B4` on a workbook that has NOT been built yet** (a fresh import,
       before any `Macros N` tab exists). Finalize must say **`RESERVED SHEET`**, not
       `NO SUCH SHEET`. The wrong message here would tell you to create a tab called
-      `Macros 1`, which `DeletePanels` destroys on the very next build.
+      `Macros 1` yourself — and the engine deletes and recreates those tabs on every
+      build, so it would be destroyed immediately.
 - [ ] **A PROTECTED target sheet.** Right-click `TabName` ▸ Protect Sheet ▸ OK (the
       default protects `DrawingObjects`), then Finalize. Expected: **the build
       COMPLETES** — it must not die with "rebuilding the Macros pages failed" — and
@@ -2556,17 +2620,21 @@ outright.
 Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
 `Debug ▸ Compile VBAProject`, `Core_BuildSetup`, Finalize:
 
-- [ ] **One page holds two category columns** — `Import / Export` (5) and
-      `Clean & Standardize` (3). 8 buttons fit on one page, so this is the case
-      the panel warned about: confirm the real bundle does not produce more
-      `Macros N` tabs than v0.3.0 had pages.
-- [ ] **Click all 8 real actions** and confirm each does its real work.
-- [ ] Cancel out of each action that prompts (range pickers, file dialogs): no
-      error dialog, no half-finished state.
-- [ ] Force an error path (a `sheet` field pointing at a missing tab, a `file`
-      field at a missing prefix): Finalize reports it, and a failing action
-      restores `ScreenUpdating`/`Calculation`/`EnableEvents` so the next action
-      still runs normally.
+- [ ] **Exactly ONE `Macros` tab, holding two columns** — `Import / Export`
+      (5 buttons) and `Clean & Standardize` (3). All 8 fit on one tab. The point of
+      this check is that a real deployment must not end up with more tabs than
+      v0.3.0 had; the 7 tabs you saw with the fixture were the fixture's doing.
+- [ ] **Click all 8 buttons** and confirm each does its real work on real data.
+- [ ] **Cancel out of every prompt.** Each action that opens a range picker or file
+      dialog: press Cancel. Expected: it simply stops — no error dialog, and nothing
+      half-done left behind.
+- [ ] **A failed action must not poison the next one.** Force a failure: point a tab
+      setting at a tab that does not exist, or a file setting at a prefix matching no
+      file, and run that action. Expected: Finalize warns you about it beforehand,
+      and after the failure **Excel still behaves normally** — screen still redraws,
+      formulas still recalculate, and the next button you click works. A macro that
+      dies with screen updating switched off leaves Excel looking frozen, which is
+      what this is checking.
 - [ ] **The duplicates header field.** On Setup, `Does the range you pick include a
       header row?` is present with a working **Yes/No dropdown**, defaulting to
       **Yes**.
@@ -2590,71 +2658,90 @@ Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
 
 - [ ] **Step 7: Upgrade pass — fail-closed migration**
 
-The check that protects an existing user's layout. Use a workbook **already
-finalized under v0.3.0** (so its `_Config` has the old `Action | Page code` block)
-with manual page codes set:
+**This is the check that protects a real user's existing work on upgrade.** Use
+**workbook C** — the one finalized under v0.3.0, per the recipe at the top of Task 10.
+v0.3.0 stored `Action | Page code`; v0.4.0 stores `Action | Availability | Placement`,
+so the saved codes have to survive being shifted one column to the right.
 
-- [ ] Import `dist/MacrosBundle.bas` over it, run `Core_BuildSetup`.
-- [ ] **Every prior page code is still there**, now in the `Placement` column to
-      the right of `Availability`, and every `Availability` reads `Button`.
-- [ ] Now corrupt one old code in the hidden `_Config` (unhide it, put `zzz` in the
-      old code column, re-hide): `Core_BuildSetup` must **ABORT** naming that
-      action, and must leave the Setup tab exactly as it was.
+- [ ] **Upgrade it.** Import `dist/MacrosBundle.bas` over that workbook, then run
+      `Create Setup Tab`.
+- [ ] **Every code you set under v0.3.0 is still there**, now under the `Placement`
+      header, and every `Availability` cell reads `Button` (v0.3.0 had no such
+      column, so everything defaults to "shown as a button").
 
-If codes come back blank, `BlockSchema` / `ConfigSchemaStatus` (Task 4) is wrong —
-stop and fix it; do not re-enter the codes by hand.
+**If any code comes back blank, stop.** Do not retype them — a blank means the
+migration dropped saved settings, which is the exact failure this step exists to
+catch, and retyping hides it.
+
+- [ ] **Now corrupt one deliberately.** Put `zzz` into the old code column of the
+      hidden `_Config` sheet (see the note in Step 7b for how to open it — it cannot
+      be unhidden from Excel's normal menu). Run `Create Setup Tab` again. Expected:
+      it **refuses to run**, names the action whose code it could not read, and
+      leaves your Setup tab exactly as it was. Refusing is the correct behaviour —
+      rebuilding around an unreadable value risks discarding it.
 
 - [ ] **Step 7b: Previously-unverified behaviour (added in the final-review fix
       wave)** — shipped but never exercised by the checklist above.
 
-- [ ] **The config-migration recovery states nobody has triggered.**
-      `ConfigSchemaStatus`/`GateConfigMigration` (Task 4) has more outcomes than
-      the "legacy" / "invalid" paths Step 7 above exercises:
-      - `damaged` (the hidden schema marker itself is unparseable or tampered,
-        not a visible page code) — force it by corrupting the marker cell
-        directly, and confirm `ConfirmAndClear`'s guarded rebuild runs (explicit
-        DISCARDED/KEPT wording, defaults to No).
-      - `unknown` (a marker from a newer version than this build understands) —
-        force it by writing a higher schema string into the marker cell, and
-        confirm `Create Setup Tab` **refuses** and tells you to re-import that
-        version's bundle, rather than rebuilding.
-      - the `invalid`-with-**no-Setup-tab** escape hatch (contract §5) — this one
-        must be done on the **v0.3.0 workbook from Step 7**, whose `_Config` has
-        no format marker. A v0.4.0 `_Config` carries the marker, so it classifies
-        as `ok`, the page-code validation never runs, and `Create Setup Tab`
-        rebuilds silently — which would read as a failure of this check when it is
-        not. On that v0.3.0 workbook: leave the corrupted page code in the OLD
-        code column (column D, not E), delete the Setup tab, then click `Create
-        Setup Tab` and confirm you get the non-default confirmation prompt naming
-        what will be discarded, not a silent rebuild.
-      To edit `_Config` directly for any of these — including Step 7's corrupted
-      page code — it is `xlSheetVeryHidden`, so it **cannot** be unhidden from the
-      Excel UI (Format ▸ Sheet ▸ Unhide will not list it). Open the VBA editor
-      (Alt+F11), select the sheet in the Properties window, and set its `Visible`
-      property there. The format marker is in **column J** of the row whose
-      hidden column A reads `k_core_layout`.
-- [ ] **A chain's card, bounded.** Build a chain with enough steps (or long
-      enough captions) to exceed `CHAIN_CARD_STEPS`/`CHAIN_CARD_CHARS`, and
-      confirm: the card on its `Macros N` page is **bounded** — it shows a
-      partial step list ending `+N more - see the Setup tab`, pointing at the
-      Setup tab's Chains block, where the full recipe is authored. Also confirm
-      a `+0 more` tail never appears (that would mean nothing was actually left
-      off but the card claims there is more — a bug, not a valid state).
-- [ ] **The reserved `Chains` category sorts last.** Author a chain before
-      filling in any other category's actions (or simply note when the chain
-      was authored relative to the other actions) and confirm its column still
-      renders after every other category's, regardless of authoring order.
-- [ ] **Shrink-on-rebuild.** Build with the fixture (`dist/MacrosBundle.fixture.bas`),
-      then rebuild the SAME workbook with the real bundle
-      (`dist/MacrosBundle.bas`, fixture removed) and Finalize again. Confirm: no
-      tall rows left behind from the fixture's longer descriptions.
-- [ ] **The all-off empty-layout case.** **Delete every chain first** — a
-      surviving chain that references an `Off` action makes Finalize refuse with
-      `OFF ACTION IN CHAIN`, so the empty state is unreachable until the chains
-      are gone. Then set every action's Availability to `Off` (no buttons at all)
-      and Finalize. Confirm the completion dialog reads `No macro pages were
-      built - every button is hidden, switched Off, or anchored to one of your
-      own sheets.` and that no error appears.
+**First: how to open the hidden `_Config` sheet.** Several checks below need you to
+edit it directly. It is stored *very* hidden, so **Excel's Format ▸ Sheet ▸ Unhide
+will not list it**. Do this instead:
+
+1. **Alt+F11** to open the VBA editor.
+2. Find `_Config` in the Project pane (top left).
+3. Select it, then in the **Properties** pane (bottom left) set **`Visible`** to
+   **`-1 - xlSheetVisible`**.
+4. Switch back to Excel and edit it. Set `Visible` back to `2 - xlSheetVeryHidden`
+   when you are done.
+
+Inside `_Config`, the **format marker** is the cell in **column J** on the row whose
+column A reads `k_core_layout`. That marker is how the engine knows which version
+wrote the file.
+
+- [ ] **A damaged marker asks before discarding anything.** Open `_Config`, put
+      nonsense (e.g. `xxx`) into the marker cell, re-hide, and run `Create Setup
+      Tab`. Expected: a confirmation prompt that spells out explicitly what will be
+      **DISCARDED** and what will be **KEPT**, and that defaults to **No**. Answering
+      No must leave everything untouched. It must never rebuild silently.
+- [ ] **A marker from a newer version refuses outright.** Put a higher version string
+      into the marker cell (e.g. `v9.9`), re-hide, and run `Create Setup Tab`.
+      Expected: it **refuses** and tells you to re-import that version's bundle. This
+      is the guard against an old build stomping on a newer format it cannot read —
+      it must not offer to rebuild.
+- [ ] **The no-Setup-tab escape hatch.** **This one must be done on workbook C, the
+      v0.3.0 one** — on a v0.4.0 workbook the marker is present and valid, so this
+      path never runs and the rebuild proceeds silently, which would look like a
+      failure and is not.
+
+  On workbook C: leave the corrupted `zzz` code from Step 7 in the **old** code
+  column (column D, not E), **delete the Setup tab entirely**, then click `Create
+  Setup Tab`. Expected: a confirmation prompt naming exactly what will be discarded —
+  not a silent rebuild. This is the recovery route for a user who has no Setup tab
+  left to correct the value on.
+- [ ] **A long chain's description gets truncated, with a pointer.** Build a chain
+      with **5 or more steps**, Finalize, and look at its button's description on the
+      Macros tab. Expected: a partial step list ending `+N more - see the Setup tab`.
+      A long chain must not be allowed to draw one enormous description row that
+      stretches every card beside it. Also confirm you **never** see `+0 more` —
+      that would mean the card claims there is more to see when nothing was
+      actually left off.
+- [ ] **Chain buttons always come last.** Chains are grouped into their own reserved
+      `Chains` category, and that column must render **after every other category**
+      no matter when you authored the chain. Easiest test: author a chain now, on a
+      workbook whose other categories were set up earlier, and confirm it still lands
+      last rather than in authoring order.
+- [ ] **Going from many buttons to few leaves no debris.** On workbook A (the
+      fixture one), delete the `MacrosBundle` module from the VBA editor, import
+      `dist/MacrosBundle.bas` instead — the real 8-action bundle — and Finalize.
+      Expected: the tabs shrink back to one, and **no abnormally tall rows are left
+      behind** from the fixture's longer descriptions. Rows that grew for big text
+      must shrink again when the text goes away.
+- [ ] **Every button switched off.** **Delete every chain first** — otherwise a chain
+      pointing at a now-`Off` action makes Finalize refuse, and you never reach the
+      empty state. Then set every action's Availability to `Off` and Finalize.
+      Expected: `No macro pages were built - every button is hidden, switched Off, or
+      anchored to one of your own sheets.` and **no error**. An empty workbook is a
+      legitimate configuration, not a failure.
 
 - [ ] **Step 8: Record the result**
 
