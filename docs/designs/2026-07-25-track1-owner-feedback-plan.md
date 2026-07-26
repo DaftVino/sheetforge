@@ -285,10 +285,9 @@ with:
 
 ```vba
     Core_Done ctx, "Filled blanks down on " & rng.Address(False, False) & ".", _
-           "Filled Blanks Down"
+           "Fill Blanks Down"
 ```
 
-*(note: the real line ends `"Fill Blanks Down"` — match the file, do not retype from here)*
 with:
 
 ```vba
