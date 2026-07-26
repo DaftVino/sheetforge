@@ -246,7 +246,7 @@ An action is one thing a package *does* (it becomes a button). Each action is:
 | `id` | Dotted `pkg.verb` token, globally unique (`importexport.import`, `clean.dupes`). |
 | `caption` | Button label (may carry an ordinal, e.g. `"2.  Import Source Data"`). |
 | `help` | Plain-language description shown on/near the button. |
-| `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on the generated index and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
+| `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on an index surface where a platform provides one (§6), and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
 | `availability` | Deployment config, not manifest data (v1.2.0): one of `button`, `chains-only`, `off`. Defaults to `button`. |
 | `semantics` | **Normative** description of the action's behavior (§8). This is what every platform reproduces. |
 
@@ -433,7 +433,13 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
 - **Reserved:** the id namespace `chain.*` is reserved for engine chains; no package action id may use it.
 - **Reserved:** the display category `Chains` (engine-generated, holds chain
   buttons) and, in the Excel reference implementation, the sheet name
-  `Macros Home`. A platform substitutes its own index surface name.
+  `Macros Home`. A platform substitutes its own index surface name. The name
+  stays reserved even though the reference implementation withdrew its index
+  before release (§6) — and as of that withdrawal the engine **deletes
+  `Macros Home` unconditionally with alerts suppressed on every rebuild**, the
+  same treatment `Macros` and `Macros <n>` get below, so that a stale index left
+  by an earlier build cannot survive: a package or a user relying on that name
+  for anything else loses it silently.
 - **Reserved (v1.2.0):** in the Excel reference implementation, the sheet name
   `Macros` (the pre-v0.4.0 single default page, retired) and every `Macros <n>`
   (the generated page tabs) — the engine deletes these unconditionally with

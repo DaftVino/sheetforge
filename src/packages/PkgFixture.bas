@@ -42,8 +42,8 @@ Option Explicit
 ' one sub.
 '
 ' Help-string lengths (fix round 1) deliberately vary instead of sharing one
-' boilerplate sentence: action 1 is empty (tests the card grid's height floor
-' and the index catalog's un-floored AutoFit on the very first card), and the
+' boilerplate sentence: action 1 is empty (tests that a bare card row still
+' holds the card grid's height floor on the very first card), and the
 ' rest cycle through short / typical-sentence / long-paragraph bands so a
 ' single Excel session shows several different description heights on several
 ' different pages, not just one. See FixtureHelpText below.
@@ -118,10 +118,11 @@ Public Sub PkgFixture_Noop(ctx As Object)
 End Sub
 
 ' Fix round 1: one shared boilerplate sentence left the card grid's
-' AutoFit-with-a-floor behavior (and HomeCatalog's un-floored AutoFit)
-' exercised at exactly one description length. Action 1 is the sole
-' deliberately-empty description (a bare card row must still hold its floor
-' height; the catalog row must still line up, not collapse). Every other
+' AutoFit-with-a-floor behavior exercised at exactly one description length.
+' (It used to exercise the index catalog's un-floored AutoFit as well; that
+' surface was withdrawn in v0.4.0 - see src/attic/HomeIndex.bas.txt.)
+' Action 1 is the sole deliberately-empty description: a bare card row must
+' still hold its floor height rather than collapse. Every other
 ' action cycles through three bands - short, a typical one-line sentence, and
 ' a long multi-sentence paragraph meant to wrap several lines in a narrow
 ' card column - so several different pages show several different heights in
