@@ -2359,31 +2359,64 @@ That 82 is 74 fixture actions plus the 8 real ones (5 from `PkgImportExport`, 3 
       exactly `Button`, `Chains only`, `Off`.
 - [x] Set `fixture.a1` to `Off`, Finalize: its button disappears, **its row stays**
       in the catalog.
-- [ ] Run `Core_Run "fixture.a1"` — it **refuses** with the "switched Off" message
+- [x] Run `Core_Run "fixture.a1"` — it **refuses** with the "switched Off" message
       and does not run. **Not via Alt+F8:** that dialog lists only `Public Sub`s
       taking no arguments (just `Core_BuildSetup`, `Core_FinalizeSetup`,
       `Core_SpeedOn`, `Core_SpeedOff`), and `Core_Run` takes an action id. Use the
       VBA editor's Immediate window instead — **Alt+F11**, then **Ctrl+G**, type the
       line, press Enter. The dialog appears exactly as it would from a button.
-- [ ] Set `fixture.a7` to `Chains only`, Finalize: no button. In the Immediate
+- [x] Set `fixture.a7` to `Chains only`, Finalize: no button. In the Immediate
       window, `Core_Run "fixture.a7"` refuses with the "Chains only" message.
-- [ ] Build a chain containing `fixture.a7`: it **runs** as a step, one combined
+- [x] Build a chain containing `fixture.a7`: it **runs** as a step, one combined
       summary, no per-step dialogs.
-- [ ] Build a chain containing `fixture.a1` (which is `Off`): Finalize **BLOCKS**
-      with `OFF ACTION IN CHAIN`, naming the chain, and refuses to activate.
-- [ ] **Paste** (do not type) `maybe` into an Availability cell — `AvailDropdown`
+- [ ] Build a chain containing `fixture.a1` (which is `Off`), then Finalize.
+      **Judge this on the DIALOG, not on the Macros tabs** — see immediately below.
+
+**Expected dialog.** A warning containing `OFF ACTION IN CHAIN: '<your chain name>'
+uses fixture.a1, which is switched Off.` and ending `1 problem(s) above must be fixed
+before activating.` Finalize then stops.
+
+**Read this before judging the result — it is the confusing part.** A blocked
+Finalize exits *before* rebuilding anything. So the chain's button from your **last
+successful** Finalize is **still sitting on its Macros tab**, and **clicking it still
+runs**, `fixture.a1` step included.
+
+Both of those are correct. `Off` was typed on the Setup tab but never *activated*,
+and the engine dispatches from the last activated configuration — not from what is
+currently typed on screen. **A working chain button after a blocked Finalize is the
+block working**, because nothing was rebuilt.
+
+**It is a failure only if the dialog says `Configuration activated.`** If it does,
+stop — an `Off` action would be reachable inside a chain, which contract §6 forbids
+outright.
+
+- [x] **Paste** (do not type) `maybe` into an Availability cell — `AvailDropdown`
       validates with `AlertStyle:=xlValidAlertStop`, which hard-refuses a typed
       invalid entry before it ever reaches the cell, so typing `maybe` cannot
       exercise this check at all; pasting bypasses cell validation and is the
       only way to get an unrecognised value into the cell. Finalize **BLOCKS**
       with `UNRECOGNISED Availability` and does not activate.
-- [ ] Clear an Availability cell entirely: it reads as `Button` and activates.
+- [ ] **Clear the Availability cell of an action that is currently `Off`** — not one
+      already showing `Button`, or nothing will appear to happen and the check
+      proves nothing. Blank means "never set", which reads as `Button`. Expected:
+      Finalize activates with no complaint, **and that action's button comes back**
+      on its Macros tab. Set `fixture.a1` back to `Off` afterwards if a later step
+      still needs it off.
 
-- [ ] **Step 4: Fixture pass — the collapsed band**
+- [x] **Step 4: Fixture pass — the collapsed band**
 
-- [ ] With `fixture.a1` `Off`, run `Create Setup Tab`: `fx_a1` is inside a
-      collapsed **SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON** band with a working
-      `+`, and the value previously typed into `fx_a1` **survived**.
+- [ ] With `fixture.a1` set to `Off`, run `Create Setup Tab` and scroll to the
+      bottom of the Setup tab. Three things to confirm:
+      **(a)** a band headed **SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON** exists and
+      the row `Used by Fixture 1 only` (`fx_a1`) is inside it — that field belongs to
+      `fixture.a1`, so switching that action off relegates its setting;
+      **(b)** the band is **collapsed**, with a `+` in Excel's left margin (the row
+      outline gutter, left of the row numbers) that expands it when clicked;
+      **(c)** whatever was in `fx_a1`'s yellow cell is **still there**. Out of the
+      box that is the default `one`, so seeing `one` is a pass. To test it properly,
+      type something else into that cell, Finalize, then re-run `Create Setup Tab`
+      and confirm your text survived — the point is that relegating a setting never
+      discards it.
 - [ ] `fx_chain` (used by the `Chains only` action) is **NOT** in the band — a
       runnable action keeps its settings up.
 - [ ] `fx_typo` (unknown `usedBy` id) is not in the band.
