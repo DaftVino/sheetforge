@@ -305,6 +305,18 @@ be quoted (`'MIC Data'!B4`) or bare even when it contains spaces (`MIC Data!B4`)
 embedded apostrophe is doubled inside the quotes. The cell part is a single A1
 reference with optional `$` (`MIC!$B$4`); a range (a colon) is rejected.
 
+**Normative, authoring-surface quirk (v1.2.0).** Where the authoring surface itself
+consumes a leading apostrophe — Excel treats one as a "this cell is text" prefix and
+strips it from the stored value, so a user who types `'MIC Data'!B4` into a cell
+stores `MIC Data'!B4` — an implementation MUST accept the resulting
+opening-quote-less form and treat the orphaned closing quote as the eaten pair. Left
+unhandled, the quoted spelling this clause lists **first** is unreachable through
+that platform's own UI, and the user is told the surface does not exist while looking
+straight at it. A platform whose cells do not eat the character has nothing to do
+here. The cost is that a surface whose real name *ends* in an apostrophe cannot be
+addressed by its bare name; that is accepted, and it fails loudly rather than
+resolving to the wrong surface.
+
 - **Normative: an anchor is NOT a placement code for the mode decision.** It does not
   count toward "any code is present" in either direction — the same carve-out `hide`
   already has. A store whose only non-blank values are anchors is a store with **no**

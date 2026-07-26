@@ -2405,14 +2405,14 @@ outright.
 
 - [x] **Step 4: Fixture pass — the collapsed band**
 
-- [ ] **The band exists, is collapsed, and holds the right field.** Set `fixture.a1`
+- [x] **The band exists, is collapsed, and holds the right field.** Set `fixture.a1`
       to `Off`, click `Finalize Setup Tab`, then click `Create Setup Tab` and scroll
       to the bottom. Confirm **(a)** a band headed **SETTINGS FOR ACTIONS YOU HAVEN'T
       TURNED ON** exists, with the row labelled `Used by Fixture 1 only` inside it;
       and **(b)** the band is **collapsed** — there is a `+` in Excel's outline
       gutter (the narrow strip left of the row numbers) that expands it when clicked.
 
-- [ ] **A relegated setting keeps its value.** This is the point of the whole
+- [x] **A relegated setting keeps its value.** This is the point of the whole
       feature: switching an action off must never throw away what you typed. Run
       these **in order** — the middle step is the one that matters:
 
@@ -2457,38 +2457,38 @@ Each check below is: set the Availability, click `Finalize Setup Tab`, then clic
 `Create Setup Tab` and look at the bottom of the rebuilt Setup tab. **The band only
 redraws on `Create Setup Tab`** — Finalize alone never redraws Setup.
 
-- [ ] **A `Chains only` action keeps its settings up.** Set `fixture.a7` to
+- [x] **A `Chains only` action keeps its settings up.** Set `fixture.a7` to
       `Chains only`. `Used by Fixture 7 (test 'Chains only')` must stay in the
       **main list**, not the band — `Chains only` still runs inside a chain, so its
       setting is still needed. Only `Off` relegates anything.
-- [ ] **An unknown owner never hides a field.** `Names an action id that does not
+- [x] **An unknown owner never hides a field.** `Names an action id that does not
       exist` points at an action id that isn't real. It must **always** stay in the
       main list, whatever you switch off. Failing closed here matters: a typo in a
       package's manifest must never make a user's setting vanish.
-- [ ] **Either-owner-runnable keeps a field up.** Set `fixture.a2` `Off` but leave
+- [x] **Either-owner-runnable keeps a field up.** Set `fixture.a2` `Off` but leave
       `fixture.a3` as `Button`: `Used by Fixture 2 or Fixture 3` stays in the main
       list. Now set `fixture.a3` `Off` too: it moves into the band.
-- [ ] **An advanced field relegates too.** Set `fixture.a4` `Off`. `Advanced, used
+- [x] **An advanced field relegates too.** Set `fixture.a4` `Off`. `Advanced, used
       by Fixture 4` normally lives under the **ADVANCED** band; confirm it moves out
       of there and into the off band, rather than staying put or disappearing.
-- [ ] **List and table blocks survive relegation.** Set `fixture.a5` and `fixture.a6`
+- [x] **List and table blocks survive relegation.** Set `fixture.a5` and `fixture.a6`
       `Off`. `List used by Fixture 5` and `Table used by Fixture 6` both move into
       the band **with their rows intact** — the list still shows `seed one` /
       `seed two`, the table still shows `a1|b1|c1` across its three columns. Then
       Finalize again and re-run `Create Setup Tab`: the values must still read back.
       A multi-row block is the easiest thing to truncate when it moves, which is why
       it is checked explicitly.
-- [ ] **Empty band means no band.** Set every action back to `Button` and rebuild
+- [x] **Empty band means no band.** Set every action back to `Button` and rebuild
       Setup. The **SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON** heading must be
       **gone entirely** — not present-but-empty.
 
-- [ ] **Step 5: Fixture pass — manual codes, cancel and error paths**
+- [x] **Step 5: Fixture pass — manual codes, cancel and error paths**
 
 **Where you type these.** All placement codes go in the **Placement** column of the
 **Action catalog** block on the Setup tab (third column, next to `Availability`). A
 code means "put this button on page *N*, column *X*" — `1A` is page 1 column A.
 
-- [ ] **Two codes, everything else blank.** Put `1A` on one action and `2B` on
+- [x] **Two codes, everything else blank.** Put `1A` on one action and `2B` on
       another, leave every other Placement cell empty, and Finalize.
 
 **Expected:** `1A`'s button is on `Macros 1` under a column headed `Column A`;
@@ -2502,23 +2502,23 @@ same limits as everything else — 6 buttons per column, 3 columns per tab — s
 them need many columns and therefore many tabs. At the real 8-action scale you would
 see one small Unassigned column; the fixture makes it look dramatic.
 
-- [ ] **`hide`.** Type `hide` in one action's Placement cell and Finalize: its button
+- [x] **`hide`.** Type `hide` in one action's Placement cell and Finalize: its button
       is gone from every tab, but **its row is still in the Action catalog** on the
       Setup tab. Hiding a button must never make the action undiscoverable.
-- [ ] **Clearing every code returns automatic layout.** Empty every Placement cell
+- [x] **Clearing every code returns automatic layout.** Empty every Placement cell
       and Finalize: the tidy category-packed pages from Step 2 come back.
-- [ ] **A bad code blocks.** Type `0A` (page 0 does not exist), `A1` (letters before
+- [x] **A bad code blocks.** Type `0A` (page 0 does not exist), `A1` (letters before
       digits) or `1` (no column letter) and Finalize. Expected: a warning listing
       `BAD CODE for <id>: '<what you typed>'` and ending `problem(s) above must be
       fixed before activating`. Nothing is rebuilt.
-- [ ] **Declining activation changes nothing.** Finalize, and at
+- [x] **Declining activation changes nothing.** Finalize, and at
       `Activate this configuration now?` answer **No**. No tabs are rebuilt and your
       previously activated settings are untouched.
-- [ ] **Declining a Setup rebuild changes nothing.** Click `Create Setup Tab` on a
+- [x] **Declining a Setup rebuild changes nothing.** Click `Create Setup Tab` on a
       workbook that already has one and answer **No** to the rebuild prompt. The
       Setup tab is left exactly as it was, including anything you had typed but not
       yet finalized.
-- [ ] **Accepting a rebuild discards unfinalized typing — and warns you first.** The
+- [x] **Accepting a rebuild discards unfinalized typing — and warns you first.** The
       other half of the same prompt. Type something into any yellow settings cell,
       do **not** Finalize, then click `Create Setup Tab` and answer **Yes**.
       Expected: the prompt states plainly that unfinalized typing will be
@@ -2526,11 +2526,11 @@ see one small Unassigned column; the fixture makes it look dramatic.
       and after answering Yes your untyped-over value is back to whatever you last
       finalized. Losing unsaved typing here is correct; losing it *silently* would
       not be.
-- [ ] **Finalize twice in a row.** Click `Finalize Setup Tab`, let it finish, click
+- [x] **Finalize twice in a row.** Click `Finalize Setup Tab`, let it finish, click
       it again. Expected: it just works. Specifically **no** *"That name is already
       taken"* error, and **no** stray `Setup (2)` or `Setup (3)` tab left behind —
       that was a real bug in v0.3.0.
-- [ ] **Break the build on purpose, once.** This tests what happens when your
+- [x] **Break the build on purpose, once.** This tests what happens when your
       settings save but the tab rebuild then fails. No amount of code reading proves
       it, so it has to be forced.
 
@@ -2560,12 +2560,12 @@ defaults).
 
 - [ ] **Step 5b: Fixture pass — Sheet!Cell anchored placements**
 
-- [ ] Create a scratch tab named `MIC`. Put `MIC!B4` in one action's Placement
+- [x] Create a scratch tab named `MIC`. Put `MIC!B4` in one action's Placement
       cell, leave every other code blank, and Finalize. Confirm: a button appears on
       `MIC` at cell B4, **and the other ~81 buttons are still packed automatically**
       onto numbered pages - NOT dumped into page 1's `Unassigned` column. An anchor
       must not flip the workbook into manual mode.
-- [ ] The button on `MIC` is about **110pt** wide. Judge it against real data: it is
+- [x] The button on `MIC` is about **110pt** wide. Judge it against real data: it is
       the one number in this release that only your eyes can settle. If it reads
       wrong, `ANCHOR_BTN_W` is a one-line change.
 - [ ] **`MIC` is otherwise untouched.** No cleared cells, no changed column widths or
@@ -2580,8 +2580,14 @@ defaults).
 - [ ] Change the code to `MIC!D10` and Finalize: exactly **one** button on `MIC`, at
       D10. Not two.
 - [ ] Try each accepted spelling and confirm all are accepted: `MIC!B4`, `MIC!$B$4`.
-      Rename the tab to `MIC Data` and confirm both `'MIC Data'!B4` and
-      `MIC Data!B4` work.
+      Rename the tab to `MIC Data` and confirm **both** `MIC Data!B4` and
+      `'MIC Data'!B4` work — for an action **and** for a chain. The quoted form is
+      the one to watch: **Excel eats a leading apostrophe**, treating it as a "this
+      cell is text" prefix, so the cell actually stores `MIC Data'!B4` with the
+      opening quote gone. You can watch it happen — the formula bar still shows your
+      apostrophe, the cell itself does not. The engine repairs this, but if the check
+      fails you will get `NO SUCH SHEET` naming a tab that is plainly sitting right
+      there.
 - [ ] Anchor a **chain** the same way. It behaves identically - a chain is one button
       with one placement.
 - [ ] **The four blocking conditions.** Each must refuse to activate, name the button,
