@@ -2171,7 +2171,48 @@ There is no headless VBA compiler and no headless Excel. Everything above is
 structurally checked and functionally unverified. **Only the owner can run this
 task, and nothing may be described as verified until it passes.**
 
-- [ ] **Step 1: Fixture pass — compile**
+#### Before you start: the three workbooks, and which file goes in each
+
+You need **three separate workbooks**. Import **one** `.bas` per workbook, never two —
+both bundles declare the same module name and share every `Core_*` procedure, so a
+second import collides.
+
+| # | Workbook | Import | Covers |
+|---|---|---|---|
+| **A** | A **scratch copy** of any workbook. Its own data is irrelevant — nothing in these steps touches it. | `dist/MacrosBundle.fixture.bas` | Steps 1–5b |
+| **B** | A **fresh copy of the real workbook** you actually use. | `dist/MacrosBundle.bas` | Step 6 |
+| **C** | A workbook **already finalized under v0.3.0** — recipe below. | `dist/MacrosBundle.bas`, imported *over* the v0.3.0 one | Steps 7 and 7b |
+
+**Workbook A gets the *fixture* bundle:** the 8 real actions plus 74 fake ones. The
+fake ones exist only to force page-packing cases a real 8-action deployment never
+reaches, and they do nothing but show a dialog. **The 5 `Import / Export` buttons are
+real, though — do not click those here.** Step 6 is where real actions get exercised,
+on workbook B.
+
+**Workbook A also needs a scratch tab named `TabName`** for Step 5b's anchored-placement
+checks. Create it before you start; it can be empty.
+
+**What "finalized under v0.3.0" means, and how to make workbook C.** Step 7 checks
+that upgrading an *existing* deployment does not silently lose its saved layout.
+v0.4.0 inserted an `Availability` column between `Action` and `Placement` in the
+hidden `_Config` sheet; v0.3.0 wrote only `Action | Page code`. So workbook C has to
+be one whose `_Config` was written **by v0.3.0** — you cannot fake it by editing
+cells, because the migration keys off a hidden format marker that v0.3.0 never wrote.
+Build one from `main`, which is still v0.3.0:
+
+```
+git worktree add ../sheetforge-v030 main
+cd ../sheetforge-v030
+pwsh build/build.ps1 -Out dist/MacrosBundle.v030.bas
+```
+
+Import that `MacrosBundle.v030.bas` into a third scratch copy, run `Create Setup Tab`,
+type a few page codes (say `1A` on one action and `2B` on another), and click
+`Finalize Setup Tab`. That workbook is now "finalized under v0.3.0". **Keep it** —
+Steps 7 and 7b both need it, and 7b's escape-hatch check works *only* on it. Clean up
+afterwards with `git worktree remove ../sheetforge-v030`.
+
+- [x] **Step 1: Fixture pass — compile**
 
 Import `dist/MacrosBundle.fixture.bas` into a scratch workbook, then
 `Debug ▸ Compile VBAProject`. Expected: clean. A missing-argument or undefined-name
@@ -2181,37 +2222,67 @@ error here is exactly what the structural gates cannot see.
 
 Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 
-- [ ] **The merge works, and it is the two-column case.** The `Clean & Standardize`
-      category reads **8** buttons — `PkgClean`'s 3 and the fixture's 5, declared
-      from two different modules, merged into one category. Since the per-column
-      cap is **6**, 8 buttons need **two** columns: confirm you see `Clean &
-      Standardize` (6 buttons) immediately followed by `Clean & Standardize
-      (cont. 2)` (2 buttons) — not one 8-tall column, and not two separately
-      titled categories (which would mean Task 2 Step 3 is defaulting the
-      category wrongly).
-- [ ] Categories present: `Import / Export` (5), `Clean & Standardize` (8),
-      `Ingest & Import` (3), `Validate` (5), `Reconcile` (9), `Report` (14),
-      `Export` (4), `Period Close` (6), `Admin & Housekeeping` (2),
-      `Bulk Fixture Set` (26) = **10 categories, 82 buttons**.
-      (Side by side against `PkgFixture.bas`'s own category table: `Ingest &
-      Import` 3, `CLEAN & STANDARDIZE` 5 — merges with `PkgClean`'s 3 to make
-      the 8 above, `Validate` 5, `Reconcile` 9, `Report` 14, `Export` 4,
-      `Period Close` 6, `Admin & Housekeeping` 2, `Bulk Fixture Set` 26 = 74
-      fixture actions; plus the 8 real actions — 5 from `PkgImportExport`, 3
-      from `PkgClean` — = 82.)
+- [ ] **Two modules feed one category, and that category wraps to a second column.**
+      The fiddliest case in the build. Full expected result immediately below.
+
+**What you should see** — two adjacent columns, somewhere on `Macros 1`:
+
+| Column header | Buttons in it |
+|---|---|
+| `Clean & Standardize` | `Remove Duplicates`, `Trim & Clean Text`, `Fill Blanks Down`, `Fixture 4`, `Fixture 5`, `Fixture 6` — **6** |
+| `Clean & Standardize (cont. 2)` | `Fixture 7`, `Fixture 8` — **2** |
+
+**Why it is shaped like that.** Two *different* modules deliberately declare the
+*same* category with *different* capitalisation: `PkgClean` says `Clean &
+Standardize` (3 actions), `PkgFixture` says `CLEAN & STANDARDIZE` (5). The engine
+must treat those as **one** category of **8**. A plain VBA dictionary would not — it
+would produce two separate categories — so this is a real check, not a formality.
+8 then exceeds the 6-per-column cap, so the category wraps into a numbered
+continuation column.
+
+The first three buttons have no number because they are the real `PkgClean` actions;
+the numbered ones are fixtures. Fixture numbering runs across *all* categories and
+`Ingest & Import` consumes 1–3, which is why this category starts at 4.
+
+**Any of these is a failure:** one column of 8 (column cap broken); two separately
+titled categories, e.g. `Clean & Standardize` *and* `CLEAN & STANDARDIZE` (the merge
+failed); or a bare `(cont.)` with no number (see the `Reconcile` item below).
+
+- [ ] **Ten categories, 82 buttons in total.** Count the column headers across all
+      the `Macros N` tabs against this — the counts are per *category*, which may
+      span more than one column:
+
+| Category | Buttons |
+|---|---|
+| `Import / Export` | 5 |
+| `Clean & Standardize` | 8 |
+| `Ingest & Import` | 3 |
+| `Validate` | 5 |
+| `Reconcile` | 9 |
+| `Report` | 14 |
+| `Export` | 4 |
+| `Period Close` | 6 |
+| `Admin & Housekeeping` | 2 |
+| `Bulk Fixture Set` | 26 |
+| **Total** | **82** |
+
+That 82 is 74 fixture actions plus the 8 real ones (5 from `PkgImportExport`, 3 from
+`PkgClean`). Only `Import / Export` and `Clean & Standardize` contain anything real.
+
 - [ ] **Small categories share pages** — no page has one 3-button category alone
       while a neighbouring page has room.
-- [ ] `Validate` (5) fits in a **single** column and shows **no** `(cont.)` suffix
-      — 5 is under the per-column cap of **6** (not 8; contract §6 was amended
-      during Task 7, and the arithmetic is in the portability note there). The
-      two-column case is `Clean & Standardize`, checked above.
-- [ ] `Reconcile` (9) wraps to a second column headed `Reconcile (cont. 2)`.
-      **Note the number.** Continuation headers are numbered — `(cont. 2)`, `(cont. 3)` —
-      because an unnumbered suffix let one page show two identical headers. A build
-      showing a bare `(cont.)` is the *old* behaviour and should be treated as a failure.
-- [ ] `Bulk Fixture Set` (26) spans more than one page.
-- [ ] **No category is split across two tabs unless it needs more than 18 buttons**
-      (more columns than a page holds: 3 columns × 6 buttons/column).
+- [ ] `Validate` (5 buttons) sits in **one** column with **no** `(cont.)` in its
+      header. 5 is under the 6-per-column cap, so it must not wrap.
+- [ ] `Reconcile` (9) wraps to a second column headed `Reconcile (cont. 2)` —
+      6 buttons then 3. **The number matters:** a bare `(cont.)` with no number is
+      old behaviour and is a **failure**, because without it one page could show two
+      identically-titled columns.
+- [ ] `Bulk Fixture Set` (26) spans **more than one tab**. At 6 per column and 3
+      columns per tab, one tab holds at most 18, so 26 cannot fit on one.
+- [ ] **No other category is split across two tabs.** A category only splits when it
+      needs more than 18 buttons; `Bulk Fixture Set` is the only one that does. A
+      category wrapping to a second *column* on the same tab is normal and expected
+      (`Clean & Standardize` and `Reconcile` both do).
 - [ ] Page titles name the categories on that page, joined by `|` when packed —
       no bare `Macros - Page N` anywhere.
 - [ ] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
