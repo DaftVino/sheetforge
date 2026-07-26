@@ -396,17 +396,25 @@ window; 125% scaling — common — fits about 5.7); a platform with different
 real estate MAY choose its own capacities but MUST apply the same rule and
 the same ordering.
 
-**Generated index (v1.2.0):** the engine **always** generates an index surface,
-even for a single page, so the workbook has one shape at every scale. It lists one
-entry per built page with its title, its button count and a link; a **button
-catalog** (caption, description, and the page each button is on) covering every
-action whose `availability` placed it as a button — an action that is `off` or
-`chains-only` has no button and no page, so it does not appear in this catalog;
-it remains listed on the authoring surface (§6, per-action availability), which
-is where it stays discoverable; a link to the admin surface; and a legend
-explaining the placement code and availability. Every built page carries a
-persistent link back to the index and links to its previous/next page. Reference
-implementation: a `Macros Home` sheet; that name is **reserved** (§7).
+**Index surface (v1.2.0, amended v1.2.0 pre-freeze):** a platform **MAY** generate
+an index surface. It is **not required**: the Excel reference implementation built one
+and then withdrew it before release, because at the scale a real deployment runs —
+a handful of actions and one or two chains — an index is clutter rather than
+navigation. **When a platform does provide one**, it lists one entry per built page
+with its title, its button count and a link; a **button catalog** (caption,
+description, and the page each button is on) covering every action whose
+`availability` placed it as a button — an action that is `off` or `chains-only` has
+no button and no page, so it does not appear in this catalog; it remains listed on
+the authoring surface (§6, per-action availability), which is where it stays
+discoverable; a link to the admin surface; and a legend explaining the placement
+code and availability.
+
+**Page-to-page navigation is required regardless, and is unconditional:** every
+built page MUST carry links to its previous and next page. Only the index itself,
+and the per-page link back to it, are optional.
+
+The reference implementation's withdrawn index was a `Macros Home` sheet. That name
+stays **reserved** (§7) against a future restore.
 
 **Description legibility (v1.2.0, normative for grid platforms):** an action's
 `help` text is displayed with its button and MUST NOT be clipped. Reference
@@ -571,9 +579,13 @@ port realizes them per platform rather than re-deriving them:
   column's six-button capacity bind a coded layout too, so an over-capacity
   column or button-stack moves to a further column - and, once its page is
   already at the three-column cap, on to a continuation page - rather than a
-  page number or column a code names being silently unrenderable), the always-generated
-  index surface with its navigation and button catalog, the
-  no-clipping rule for descriptions, the config schema marker with fail-closed
+  page number or column a code names being silently unrenderable),
+  the optional index surface with its button catalog (built, then **withdrawn before
+  release** at the owner's call at the v0.4.0 manual gate — "needless clutter... most
+  folks will only ever load a handful of macros or 1 or 2 chains into a workbook";
+  the code is preserved unbuilt at `src/attic/HomeIndex.bas.txt` and the `Macros Home`
+  name stays reserved in §7), the unconditional previous/next page navigation,
+  the no-clipping rule for descriptions, the config schema marker with fail-closed
   migration, and the reserved `Chains` category + `Macros Home` name. No `key`,
   action `id`, kind, value encoding, or **action** semantics changed, so
   v1.0.0/v1.1.0 configs remain valid and read as all-actions-`button`. The
