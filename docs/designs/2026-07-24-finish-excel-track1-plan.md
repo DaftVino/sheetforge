@@ -2181,7 +2181,6 @@ error here is exactly what the structural gates cannot see.
 
 Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 
-- [ ] `Macros Home` exists and is the first tab.
 - [ ] **The merge works, and it is the two-column case.** The `Clean & Standardize`
       category reads **8** buttons — `PkgClean`'s 3 and the fixture's 5, declared
       from two different modules, merged into one category. Since the per-column
@@ -2218,32 +2217,28 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 - [ ] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
       9pt — **except `Fixture 1 - Ingest & Import`, whose description is
       deliberately empty** (it is the test that the minimum-height floor holds a
-      card with no text). A single blank card description, and a single blank
-      `WHAT IT DOES` cell on `Macros Home`, are both correct. Every other
+      card with no text). A single blank card description is correct. Every other
       description must show in full; if one is cut off, see the AutoFit check
       immediately below — that is the likely cause.
 - [ ] **THE AUTOFIT CHECK — look for this one deliberately; it is the single most
-      likely thing to be wrong on first open.** `FitDescRows`, `HomeCatalog`, and
-      `RenderPage`'s category-header row AutoFit are the first `AutoFit` calls
-      this build's *packed-page* code path has ever executed (Tasks 6–7 were
-      unreachable), and after Task 8 they run with `ScreenUpdating = False`
-      **and** `Calculation = xlCalculationManual` from `Core_SpeedOn`. AutoFit on
-      a `WrapText` cell under suppressed screen updating is a well-known spot for
-      Excel to hand back a **one-line** height.
+      likely thing to be wrong on first open. The primary check is
+      `Macros 1!F3`: `Clean & Standardize (cont. 2)`, 29 characters, 11pt bold,
+      in the 30-character-wide card column, with no height floor.**
+      `FitDescRows` and `RenderPage`'s category-header row AutoFit are the first
+      `AutoFit` calls this build's *packed-page* code path has ever executed
+      (Tasks 6–7 were unreachable), and after Task 8 they run with
+      `ScreenUpdating = False` **and** `Calculation = xlCalculationManual` from
+      `Core_SpeedOn`. AutoFit on a `WrapText` cell under suppressed screen
+      updating is a well-known spot for Excel to hand back a **one-line** height.
       Note what is and is not new here: AutoFit under suppressed `ScreenUpdating`
       is **not** new — `Core_BuildSetup` has done exactly this since v0.3.0 and
       it works. The genuinely new variable this release adds is
       `Calculation = xlCalculationManual` from `Core_SpeedOn`, now wrapping the
       panel-build pipeline too.
-      There are **three** AutoFit sites, with different exposure:
+      There are **two** AutoFit sites, with different exposure:
         1. `FitDescRows` (card descriptions) — half-protected by the
            `DESC_MIN_H` floor (24pt).
-        2. `HomeCatalog` (the button catalog on `Macros Home`) — **no floor at
-           all**. Check: on `Macros Home`, find the `Suggest Import Types` row
-           and read column D. Its help text is **197** characters in a 62-wide
-           column, so it must wrap to multiple lines. If it is one line and
-           visibly cut, this is the bug.
-        3. `RenderPage`'s category-header row (`panel.Rows(CARD_HDR_ROW).AutoFit`)
+        2. `RenderPage`'s category-header row (`panel.Rows(CARD_HDR_ROW).AutoFit`)
            — a `WrapText` cell with **no floor either**, and nobody flagged it
            before this fix wave. The fixture's most borderline case is the merged
            category's continuation header, **`Clean & Standardize (cont. 2)`**
@@ -2252,41 +2247,47 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
            **F3** (the merged category's second column — column D holds the
            first, un-suffixed `Clean & Standardize` header), confirm **both
            lines** of the wrapped header are visible, not clipped to one.
-      **The risk is asymmetric — say so, or a passing rebuild reads as broken.**
-      `EnsurePanelSheet` never activates a sheet it is *reusing*; it only
-      activates one it just created via `Worksheets.Add`. On the **first** build
-      ever, `Macros Home` is created (so it's active while its `AutoFit` runs);
-      on **every build after that**, `Macros Home` already exists and reuses the
-      same instance, so its `AutoFit` runs while a *different* sheet (whichever
-      `Macros N` page rendered last) is active. The `Macros N` pages themselves
-      are always freshly created by `Worksheets.Add`, hence always active when
-      their own AutoFit runs. Net: if this bug fires anywhere, it fires **only on
-      `Macros Home`, and only from the second build onward** — a first-build
-      pass here does not clear it, and if it does show up after a *rebuild*, that
-      is expected exposure, not evidence the rebuild broke something new.
-      **Fix if confirmed** (not applied pre-emptively, because the workaround
-      costs visible flicker and the bug may not occur): either re-run the
-      affected AutoFit pass(es) after `Core_SpeedOff`, bracket each pass with
-      `ScreenUpdating = True` / `= False`, or — the cheaper one-liner —
-      `Activate` `Macros Home` at the **start** of `BuildHomePage` instead of only
-      at the end. Predicted by the Task 8 review; if the text wraps correctly,
-      tick this and change nothing.
+      **This is now the primary AutoFit check, and the risk is no longer
+      asymmetric.** Every `Macros N` page is freshly created by `Worksheets.Add`,
+      which activates it, so its AutoFit always runs on the active sheet - on a
+      first build and on every rebuild alike. There is no "only from the second
+      build onward" caveat any more, and no reused sheet to blame. If
+      `Macros 1!F3` wraps correctly, tick this.
 - [ ] Cards align across all three columns — button tops and description tops line
       up on every row.
-- [ ] `<< Home` is in the same cell on every page and works; `< Previous` /
-      `Next >` work and are absent on the first/last page.
+- [ ] `< Previous` and `Next >` sit in cells **B1** and **D1** on every page
+      (`<< Home` no longer exists to occupy B1), work, and are absent on the
+      first/last page.
 - [ ] No `Macros` tab remains.
-- [ ] Home's button catalog lists all 82 buttons with their descriptions (one
-      deliberately blank — see the note above) and a
-      working page link each.
+- [ ] **Timed build.** Note the wall-clock time from clicking `Create Setup Tab` to
+      the Setup tab appearing, and again for `Finalize`. The owner measured
+      **several minutes** for the first build before the registry was memoized.
+      Anything still in minutes means the cache is not being hit - check that
+      `InvalidateRegistry` was not also wired into `Core_Run`.
+- [ ] The action catalog's third column header reads **`Placement`**, not
+      `Page code`, in BOTH the Action catalog block and the Chains block.
+- [ ] The `Availability` cells still have a working dropdown offering exactly
+      `Button` / `Chains only` / `Off`. It is now applied to the whole block in one
+      call instead of cell by cell, so this is confirming a refactor did not drop it.
+- [ ] No `Macros Home` tab exists. If you are rebuilding a workbook that had one
+      from an earlier build, confirm it has been **deleted**, not left behind.
+- [ ] The build lands you on **`Macros 1`**, cell A1.
+- [ ] The completion dialog does **not** mention an index.
+- [ ] **The nav row on a SINGLE-page build.** `RenderNavRow` still sets row 1 to
+      18pt unconditionally, but with only one page there is no `< Previous` and no
+      `Next >` — and `<< Home` no longer occupies B1 — so row 1 renders as a blank
+      18pt band. Behaviourally correct, but your original complaint was clutter and
+      a reserved-but-empty band is the mirror image of it. **Judge it:** if it reads
+      as wasted space, suppressing the row height when both links are absent is a
+      two-line change.
 
 - [ ] **Step 3: Fixture pass — the three availability states**
 
-- [ ] The catalog block reads `Action | Availability | Page code`, every row
+- [ ] The catalog block reads `Action | Availability | Placement`, every row
       `Button`, and the Availability cell has a **working dropdown** offering
       exactly `Button`, `Chains only`, `Off`.
 - [ ] Set `fixture.a1` to `Off`, Finalize: its button disappears, **its row stays**
-      in the catalog, Home's counts drop by one.
+      in the catalog.
 - [ ] Run `Core_Run "fixture.a1"` via Alt+F8: it **refuses** with the "switched
       Off" message and does not run.
 - [ ] Set `fixture.a7` to `Chains only`, Finalize: no button. Alt+F8 `Core_Run
@@ -2341,16 +2342,17 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 - [ ] **Force the failure path once, deliberately.** This is the only genuinely new
       logic in the cutover, it sits on the live Finalize path, and no amount of code
       reading can prove it — so break it on purpose. **Trigger: right-click the
-      `Macros Home` tab ▸ Protect Sheet ▸ OK (no password needed), then Finalize.**
-      `DeletePanels` deliberately spares `Macros Home` (it only removes `Macros N`
-      pages), so the rebuild **reuses** the existing, now-protected sheet rather than
-      recreating it — and `EnsurePanelSheet`'s `Cells.Clear` raises a runtime 1004 on
-      a protected sheet, which propagates out of `BuildHomePage` to
-      `Core_BuildControlPanel`'s own error handler. (Two other triggers people reach
-      for do **not** work and verify nothing: hiding `Macros Home` and re-running
-      does not raise — `BuildHomePage` unhides the index before activating it, and
-      writing to a hidden sheet is legal anyway; and renaming `_Config` does not
-      raise either — `CfgSheet()` swallows a missing `_Config` and every consumer is
+      `Setup Menu` tab ▸ Protect Sheet ▸ OK (no password needed), then Finalize.**
+      `BuildAdminPanel` reuses `Setup Menu` rather than recreating it (`DeletePanels`
+      only removes `Macros N` pages — `Setup Menu` is never one of those), so the
+      rebuild **reuses** the existing, now-protected sheet — and `EnsurePanelSheet`'s
+      `Cells.Clear` raises a runtime 1004 on a protected sheet, which propagates out
+      of `BuildAdminPanel` to `Core_BuildControlPanel`'s own error handler. (Two
+      other triggers people reach for do **not** work and verify nothing: hiding
+      `Setup Menu` and re-running does not raise — `EnsurePanelSheet`'s
+      `Cells.Clear` runs fine on a hidden sheet, and `BuildAdminPanel` never
+      activates the tab at all; and renaming `_Config` does not raise either —
+      `CfgSheet()` swallows a missing `_Config` and every consumer is
       `Nothing`-safe, so the build simply succeeds with defaults.) You must get
       **exactly two dialogs, in this order**: first `Core_BuildControlPanel error:
       … Your settings are safe. Click 'Finalize Setup Tab' again to retry the
@@ -2358,19 +2360,82 @@ Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
       failed`. Before the cutover this path showed the error and then cheerfully
       claimed the rebuild had succeeded — on a workbook whose panels were already
       deleted, so it had no buttons at all. If you see one dialog, or the success
-      wording, the build-success flag is not being read. **Then unprotect `Macros
-      Home`** (right-click ▸ Unprotect Sheet) **and re-run Finalize**, and confirm
+      wording, the build-success flag is not being read. **Then unprotect `Setup
+      Menu`** (right-click ▸ Unprotect Sheet) **and re-run Finalize**, and confirm
       the workbook fully recovers.
+
+- [ ] **Step 5b: Fixture pass — Sheet!Cell anchored placements**
+
+- [ ] Create a scratch tab named `MIC`. Put `MIC!B4` in one action's Placement
+      cell, leave every other code blank, and Finalize. Confirm: a button appears on
+      `MIC` at cell B4, **and the other ~81 buttons are still packed automatically**
+      onto numbered pages - NOT dumped into page 1's `Unassigned` column. An anchor
+      must not flip the workbook into manual mode.
+- [ ] The button on `MIC` is about **110pt** wide. Judge it against real data: it is
+      the one number in this release that only your eyes can settle. If it reads
+      wrong, `ANCHOR_BTN_W` is a one-line change.
+- [ ] **`MIC` is otherwise untouched.** No cleared cells, no changed column widths or
+      row heights, no formatting, no new values, no tab colour change. The button is
+      the ONLY thing that appeared.
+- [ ] Narrow column B on `MIC`. The button does **not** squash (it is `xlMove`, not
+      `xlMoveAndSize`). Insert a row above row 4: the button moves down with its cell.
+- [ ] Click it. It runs the action.
+- [ ] **Clear that Placement cell and Finalize again: the button is GONE from `MIC`**,
+      and the action is back on a generated page. This is the sweep working; if the
+      button is still there, `SweepPlacedButtons` is not running.
+- [ ] Change the code to `MIC!D10` and Finalize: exactly **one** button on `MIC`, at
+      D10. Not two.
+- [ ] Try each accepted spelling and confirm all are accepted: `MIC!B4`, `MIC!$B$4`.
+      Rename the tab to `MIC Data` and confirm both `'MIC Data'!B4` and
+      `MIC Data!B4` work.
+- [ ] Anchor a **chain** the same way. It behaves identically - a chain is one button
+      with one placement.
+- [ ] **The four blocking conditions.** Each must refuse to activate, name the button,
+      and change nothing:
+      - `MICC!B4` (no such tab) -> `NO SUCH SHEET`
+      - `Macros 1!B4` -> `RESERVED SHEET`
+      - two different actions both set to `MIC!B4` -> `DUPLICATE TARGET` naming both
+      - `MIC!B4:C9` (a range, not a cell) -> `BAD CODE`
+      - also confirm `MIC!$B$4` and `MIC!B4` on two different actions **do** collide
+        (they are the same cell spelled two ways)
+- [ ] **`Macros 1!B4` on a workbook that has NOT been built yet** (a fresh import,
+      before any `Macros N` tab exists). Finalize must say **`RESERVED SHEET`**, not
+      `NO SUCH SHEET`. The wrong message here would tell you to create a tab called
+      `Macros 1`, which `DeletePanels` destroys on the very next build.
+- [ ] **A PROTECTED target sheet.** Right-click `MIC` ▸ Protect Sheet ▸ OK (the
+      default protects `DrawingObjects`), then Finalize. Expected: **the build
+      COMPLETES** — it must not die with "rebuilding the Macros pages failed" — and
+      the completion dialog reports `1 anchored button(s) could NOT be placed`.
+      **This is the single most important item in this section**: it is the one
+      assumption that could not be verified without Excel (`ws.Buttons.Add` raising
+      1004 on a protected sheet), and before the fix it took down the whole build.
+      **Known residual, not a bug to report:** a button placed on that sheet by an
+      *earlier* build survives, because the sweep cannot delete it either. Removing
+      it would mean the engine unprotecting your sheet, which it must never do.
+      Unprotect and re-Finalize to clear it.
+- [ ] **A RENAMED target sheet.** Anchor a button to `MIC!B4`, Finalize, then rename
+      `MIC` to something else and Finalize again. Expected: the completion dialog
+      says `1 anchored button(s) could NOT be placed - the sheet or cell no longer
+      exists...`. Confirm that action now has **no** button anywhere; that is
+      correct and is what the message exists to tell you.
+- [ ] With an anchor active, the Finalize report shows a soft
+      `Placed on your own sheets` list in the same `caption [id]` format the
+      `Hidden` and `Unassigned` lists use, and it does **not** block.
+- [ ] Set every button to `hide` except one anchored button, then Finalize. Confirm
+      the completion dialog reads `No macro pages were built - every button is
+      hidden, switched Off, or anchored to one of your own sheets.` followed by
+      `1 button(s) placed on your own sheets.` - not an error, and not
+      `Built 0 macro page(s)`.
 
 - [ ] **Step 6: Real pass — the shipping bundle**
 
 Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
 `Debug ▸ Compile VBAProject`, `Core_BuildSetup`, Finalize:
 
-- [ ] Home lists **one** page holding two category columns —
-      `Import / Export` (5) and `Clean & Standardize` (3). 8 buttons fit on one
-      page, so this is the case the panel warned about: confirm it is **not** more
-      tabs than v0.3.0 had, aside from Home itself.
+- [ ] **One page holds two category columns** — `Import / Export` (5) and
+      `Clean & Standardize` (3). 8 buttons fit on one page, so this is the case
+      the panel warned about: confirm the real bundle does not produce more
+      `Macros N` tabs than v0.3.0 had pages.
 - [ ] **Click all 8 real actions** and confirm each does its real work.
 - [ ] Cancel out of each action that prompts (range pickers, file dialogs): no
       error dialog, no half-finished state.
@@ -2378,6 +2443,26 @@ Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
       field at a missing prefix): Finalize reports it, and a failing action
       restores `ScreenUpdating`/`Calculation`/`EnableEvents` so the next action
       still runs normally.
+- [ ] **The duplicates header field.** On Setup, `Does the range you pick include a
+      header row?` is present with a working **Yes/No dropdown**, defaulting to
+      **Yes**.
+- [ ] With it **Yes**, run `Remove Duplicates` over a range whose first row IS a
+      header: the header row survives and is not compared.
+- [ ] With it **No**, run it over `M2:M12` with no header: **all eleven values are
+      considered**, not ten. This is the owner's original symptom.
+- [ ] **Paste** (do not type) `ye` into that cell - typing is refused by the
+      validation, so pasting is the only way in. Finalize **BLOCKS** with
+      `UNRECOGNISED Yes/No value` and does not activate.
+- [ ] Clear the cell entirely: it reads as the default (**Yes**) and activates.
+- [ ] **Sheet-qualified messages.** Put a button on one tab and run
+      `Remove Duplicates` against a range on a DIFFERENT tab. The completion dialog
+      must now read `MIC!M2:M12`, not `M2:M12`.
+      **If it names the WRONG tab, that is a genuinely new finding and the diagnosis
+      in the design document is wrong - stop and report it.** The prediction is that
+      it names the right one, and that nothing was ever acting on the wrong sheet.
+- [ ] Do the same for `Trim & Clean Text` and `Fill Blanks Down`.
+- [ ] Rename a tab to something needing quotes (e.g. `MIC Data` or `2024`) and
+      confirm the message quotes it: `'MIC Data'!M2:M12`.
 
 - [ ] **Step 7: Upgrade pass — fail-closed migration**
 
@@ -2386,7 +2471,7 @@ finalized under v0.3.0** (so its `_Config` has the old `Action | Page code` bloc
 with manual page codes set:
 
 - [ ] Import `dist/MacrosBundle.bas` over it, run `Core_BuildSetup`.
-- [ ] **Every prior page code is still there**, now in the `Page code` column to
+- [ ] **Every prior page code is still there**, now in the `Placement` column to
       the right of `Availability`, and every `Availability` reads `Button`.
 - [ ] Now corrupt one old code in the hidden `_Config` (unhide it, put `zzz` in the
       old code column, re-hide): `Core_BuildSetup` must **ABORT** naming that
@@ -2424,18 +2509,13 @@ stop and fix it; do not re-enter the codes by hand.
       (Alt+F11), select the sheet in the Properties window, and set its `Visible`
       property there. The format marker is in **column J** of the row whose
       hidden column A reads `k_core_layout`.
-- [ ] **Macros Home's own links**, not just the button catalog's. Click `Setup
-      Menu` (goes to the admin tab) and click each page-list row's link in the
-      `PAGE` column (goes to that `Macros N`) — only the catalog's per-button
-      page links have been exercised so far.
-- [ ] **A chain's card vs. its Home catalog row.** Build a chain with enough
-      steps (or long enough captions) to exceed `CHAIN_CARD_STEPS`/
-      `CHAIN_CARD_CHARS`, and confirm: the card on its `Macros N` page is
-      **bounded** — it shows a partial step list ending `+N more - see Macros
-      Home` — while the same chain's row in Home's button catalog shows the
-      **full** recipe, unbounded. Also confirm a `+0 more` tail never appears
-      (that would mean nothing was actually left off but the card claims there
-      is more — a bug, not a valid state).
+- [ ] **A chain's card, bounded.** Build a chain with enough steps (or long
+      enough captions) to exceed `CHAIN_CARD_STEPS`/`CHAIN_CARD_CHARS`, and
+      confirm: the card on its `Macros N` page is **bounded** — it shows a
+      partial step list ending `+N more - see the Setup tab`, pointing at the
+      Setup tab's Chains block, where the full recipe is authored. Also confirm
+      a `+0 more` tail never appears (that would mean nothing was actually left
+      off but the card claims there is more — a bug, not a valid state).
 - [ ] **The reserved `Chains` category sorts last.** Author a chain before
       filling in any other category's actions (or simply note when the chain
       was authored relative to the other actions) and confirm its column still
@@ -2443,15 +2523,14 @@ stop and fix it; do not re-enter the codes by hand.
 - [ ] **Shrink-on-rebuild.** Build with the fixture (`dist/MacrosBundle.fixture.bas`),
       then rebuild the SAME workbook with the real bundle
       (`dist/MacrosBundle.bas`, fixture removed) and Finalize again. Confirm: no
-      dead links on `Macros Home` pointing at a page that no longer exists, no
-      tall rows left behind from the fixture's longer descriptions, and exactly
-      one `Macros Home` tab (not a `Macros Home (2)`).
+      tall rows left behind from the fixture's longer descriptions.
 - [ ] **The all-off empty-layout case.** **Delete every chain first** — a
       surviving chain that references an `Off` action makes Finalize refuse with
       `OFF ACTION IN CHAIN`, so the empty state is unreachable until the chains
       are gone. Then set every action's Availability to `Off` (no buttons at all)
-      and Finalize. Confirm `Macros Home` still builds and reads `No actions are
-      available as buttons yet.` instead of an error or a blank/broken page list.
+      and Finalize. Confirm the completion dialog reads `No macro pages were
+      built - every button is hidden, switched Off, or anchored to one of your
+      own sheets.` and that no error appears.
 
 - [ ] **Step 8: Record the result**
 
