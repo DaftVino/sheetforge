@@ -4034,7 +4034,13 @@ End Sub
 Private Sub AddBtn(ws As Worksheet, ByVal nm As String, ByVal cap As String, ByVal action As String, _
                    ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
                    Optional ByVal place As XlPlacement = xlMoveAndSize)
-    Dim btn As Button, eNum As Long, eDesc As String
+    ' errNum/errDesc, NOT eNum/eDesc: VBA identifiers are case-INSENSITIVE, so
+    ' "eNum" is the reserved keyword "Enum" (Public Enum ... End Enum) and the
+    ' line cannot compile. The VBE reports that against this declaration line,
+    ' which is why it reads as a syntax error in a Dim that looks perfectly
+    ' valid. Second instance of this class here after "any"; build.ps1's
+    ' reserved-word gate now covers both.
+    Dim btn As Button, errNum As Long, errDesc As String
     ' ALL-OR-NOTHING. Buttons.Add can succeed and a later property assignment
     ' still raise - and a half-built button is worse than no button at all: it
     ' carries Excel's default name ("Button 11"), so SweepPlacedButtons cannot
@@ -4064,14 +4070,14 @@ Private Sub AddBtn(ws As Worksheet, ByVal nm As String, ByVal cap As String, ByV
     btn.Placement = place
     Exit Sub
 Abort:
-    eNum = Err.Number
-    eDesc = Err.Description
+    errNum = Err.Number
+    errDesc = Err.Description
     If Not btn Is Nothing Then
         On Error Resume Next
         btn.Delete
         On Error GoTo 0
     End If
-    Err.Raise eNum, "AddBtn", eDesc
+    Err.Raise errNum, "AddBtn", errDesc
 End Sub
 
 ' Map any character outside A-Za-z0-9_ to "_", so the action id "clean.dupes"
@@ -4204,6 +4210,24 @@ Private Function ParseAnchor(ByVal code As String, ByRef sheetName As String, _
         If Len(sh) < 3 Then Exit Function
         If Right$(sh, 1) <> "'" Then Exit Function
         sh = Mid$(sh, 2, Len(sh) - 2)
+        sh = Replace(sh, "''", "'")
+    ElseIf Right$(sh, 1) = "'" And Len(sh) > 1 Then
+        ' EXCEL ATE THE OPENING QUOTE. Typing  'TabName Data'!B4  into a cell stores
+        ' the value  TabName Data'!B4  - a leading apostrophe is Excel's "treat this
+        ' as text" prefix, consumed by the cell and stripped from .Value. It
+        ' still shows in the formula bar, which is exactly what makes this so
+        ' baffling to diagnose: the sheet plainly exists, the placement plainly
+        ' looks right, and the engine reports NO SUCH SHEET for a name carrying
+        ' an invisible trailing quote.
+        ' Quoting a name that contains spaces is the natural instinct and the
+        ' spelling this contract lists first, so repair it rather than refusing
+        ' it. The branch above still handles a genuinely-quoted value, which is
+        ' what a port whose cells do not eat apostrophes will deliver.
+        ' Cost, accepted at the v0.4.0 gate: a sheet whose real name ENDS in an
+        ' apostrophe can no longer be anchored by its bare name. Legal in Excel,
+        ' vanishingly rare, and it fails loudly (NO SUCH SHEET at Finalize)
+        ' rather than placing a button somewhere wrong.
+        sh = Left$(sh, Len(sh) - 1)
         sh = Replace(sh, "''", "'")
     End If
     sh = Trim(sh)

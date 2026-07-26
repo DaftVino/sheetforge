@@ -159,7 +159,7 @@ if ($asciiProblems.Count -gt 0) {
 # suspicion: over-broad, this gate fails a build that would have worked.
 $vbaReserved = @(
     'any','as','byref','byval','call','case','const','declare','dim','do','each','else','elseif',
-    'end','eqv','erase','event','exit','false','for','friend','function','get','global','gosub',
+    'end','enum','eqv','erase','event','exit','false','for','friend','function','get','global','gosub',
     'goto','if','imp','implements','in','is','let','like','loop','me','mod','new','next','not',
     'nothing','null','on','option','optional','or','paramarray','preserve','private','property',
     'public','put','raiseevent','redim','rem','resume','return','select','set','static','step',
