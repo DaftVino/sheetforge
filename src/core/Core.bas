@@ -138,6 +138,29 @@ Private mSaveCalc    As XlCalculation
 ' True once the whole pipeline (through BuildHomePage) has actually finished.
 Private mLastBuildOk As Boolean
 
+' ---- memoized package registry (v0.4.0 performance) ----
+' BuildRegistry re-runs CoreCandidates, one Application.Run "Pkg<Name>_Manifest"
+' per candidate, and a _Packages worksheet scan per candidate. It is called from
+' RenderOffBand (twice), HasAnyTier's per-package loops, ActionCaptionFor and
+' ActionTokenFor ONCE PER CHAIN STEP, StepsInline once per step, and ActionIdSet
+' TWICE inside a single ComposeReport - on top of the main render loops. At the
+' 82-action fixture that is thousands of manifest rebuilds, and the owner
+' measured the first Setup build in minutes.
+'
+' Handing the SAME Collection to every caller is safe because no consumer mutates
+' a reg. Every mutation of a reg dictionary in this module is inside
+' Core_DeclarePackage / Core_AddSection / Core_AddField / Core_AddList /
+' Core_AddTable / Core_AddDefault / Core_AddAction, all of which run DURING
+' TryManifest, inside BuildRegistry itself, against a dictionary it has just
+' created. All thirteen "For Each reg In BuildRegistry()" sites only read.
+'
+' IF YOU ADD A CONSUMER THAT MUTATES A reg, this cache becomes a silent
+' cross-contamination bug: the mutation persists into every later caller in the
+' same build. Deep-copy in that consumer, or call InvalidateRegistry after it.
+' Do not "just try it" - nothing in this repo's tooling can see the failure.
+Private mRegCache   As Collection
+Private mRegCacheOk As Boolean
+
 '================================================================
 ' 1. MANIFEST-BUILDING API  (called inside Pkg<Name>_Manifest reg)
 '================================================================
@@ -759,9 +782,19 @@ Private Function TryManifest(ByVal pkgName As String, reg As Object) As Boolean
     On Error GoTo 0
 End Function
 
-' The installed + enabled packages, each as a fully-built reg.
+' The installed + enabled packages, each as a fully-built reg. MEMOIZED - see
+' mRegCache's declaration for why sharing one Collection is safe, and for the
+' one thing that would make it unsafe.
 Private Function BuildRegistry() As Collection
-    Dim names As Collection, nm As Variant, reg As Object, out As New Collection
+    Dim names As Collection, nm As Variant, reg As Object, out As Collection
+    If mRegCacheOk Then
+        Set BuildRegistry = mRegCache
+        Exit Function
+    End If
+    ' Explicit New, not "Dim out As New Collection": an auto-instantiating local
+    ' re-creates itself on the next reference after being set to Nothing, which
+    ' is a surprise nobody needs sitting next to a cache.
+    Set out = New Collection
     Set names = CoreCandidates()
     For Each nm In names
         Set reg = CreateObject("Scripting.Dictionary")
@@ -771,8 +804,25 @@ Private Function BuildRegistry() As Collection
             End If
         End If
     Next nm
+    Set mRegCache = out
+    mRegCacheOk = True
     Set BuildRegistry = out
 End Function
+
+' Drop the memoized registry. Called at the top of every entry point that BEGINS
+' a build - Core_BuildSetup, Core_FinalizeSetup, Core_BuildControlPanel - and
+' deliberately NOT from Core_Run.
+'
+' The registry depends on the installed modules (fixed for the session) and on
+' the optional _Packages sheet's enable/disable values, which a user can only
+' have edited BETWEEN builds. Those three entry points are every place a build
+' begins, so an edited _Packages is always picked up. Invalidating in Core_Run
+' would rebuild the registry once per chain STEP, which is most of what this
+' cache exists to stop.
+Private Sub InvalidateRegistry()
+    Set mRegCache = Nothing
+    mRegCacheOk = False
+End Sub
 
 ' A package is active unless the optional _Packages sheet lists it as FALSE.
 Private Function PackageEnabled(ByVal id As String) As Boolean
@@ -1181,6 +1231,7 @@ Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
     Dim firstFieldRow As Long, availMap As Object, bandFirst As Long, bandLast As Long
     On Error GoTo Fail
+    InvalidateRegistry              ' a build begins here - see InvalidateRegistry
 
     If Not GateConfigMigration() Then Exit Sub
 
@@ -1887,13 +1938,19 @@ End Function
 ' On Error Resume Next because validation can be refused (a protected sheet, some
 ' locales) and a refused dropdown must not abort the build - ParseAvail still
 ' guards the value, and Finalize still blocks on anything unrecognised.
-Private Sub AvailDropdown(cell As Range)
+'
+' v0.4.0: takes the whole block of action rows at once, not one cell at a time.
+' Per-cell it made TWO COM validation calls per row inside RenderPlacementBlock's
+' loop - about 164 at the 82-action fixture scale. Nothing depends on the
+' per-cell form: the value is guarded by ParseAvail and blocked at Finalize
+' whether or not the dropdown was accepted.
+Private Sub AvailDropdown(rng As Range)
     On Error Resume Next
-    cell.Validation.Delete
-    cell.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-                        Operator:=xlBetween, Formula1:="Button,Chains only,Off"
-    cell.Validation.IgnoreBlank = True
-    cell.Validation.InCellDropdown = True
+    rng.Validation.Delete
+    rng.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+                       Operator:=xlBetween, Formula1:="Button,Chains only,Off"
+    rng.Validation.IgnoreBlank = True
+    rng.Validation.InCellDropdown = True
     On Error GoTo 0
 End Sub
 
@@ -1904,6 +1961,7 @@ End Sub
 ' never make the action undiscoverable.
 Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim prior As Object, priorAvail As Object, reg As Object, a As Object, id As String
+    Dim firstDataRow As Long, lastDataRow As Long
     ' Fix round 3, fix 3: "hide" used to read as manual-layout-only ("leave one
     ' button off A MANUAL LAYOUT") - true only before fix round 3's fix 1, which
     ' made GatherButtons drop a hide-coded button before either filer runs, so
@@ -1926,6 +1984,7 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     ws.Cells(r, RID_COL).NumberFormat = "@"
     ws.Cells(r, RID_COL).Value = SCHEMA_VER
     r = r + 1
+    firstDataRow = r
 
     Set prior = ReadCodeMap(CfgSheet())            ' preserve prior codes by id
     Set priorAvail = ReadAvailMap(CfgSheet())      ' preserve prior availability by id
@@ -1939,10 +1998,18 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
             If prior.Exists(LCase(id)) Then ws.Cells(r, VAL_COL + 2).Value = prior(LCase(id))
             Yellow ws.Cells(r, VAL_COL + 1)
             Yellow ws.Cells(r, VAL_COL + 2)
-            AvailDropdown ws.Cells(r, VAL_COL + 1)
             r = r + 1
         Next a
     Next reg
+    lastDataRow = r - 1
+    ' ONE validation call over the exact block of action rows. Bounded to the
+    ' rows actually written - never the whole column - so it cannot leak
+    ' validation onto the key/marker row above it or onto anything below the
+    ' END_KEY sentinel.
+    If lastDataRow >= firstDataRow Then
+        AvailDropdown ws.Range(ws.Cells(firstDataRow, VAL_COL + 1), _
+                               ws.Cells(lastDataRow, VAL_COL + 1))
+    End If
     RenderPlacementBlock = r
 End Function
 
@@ -2426,6 +2493,7 @@ Public Sub Core_FinalizeSetup()
     Dim rpt As String, warn As Long, v As String, msg As String
     Dim boolBad As String, boolBadN As Long, bTmp As Boolean
     On Error GoTo Fail
+    InvalidateRegistry              ' a build begins here - see InvalidateRegistry
 
     If Not Core_SheetExists(SETUP_SHEET) Then
         MsgBox "No '" & SETUP_SHEET & "' tab found. Run 'Create Setup Tab' first.", _
@@ -2558,6 +2626,7 @@ End Sub
 Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object, layout As Object, manual As Boolean
     mLastBuildOk = False    ' reset FIRST, every call - see the flag's own declaration comment
+    InvalidateRegistry              ' a build begins here - see InvalidateRegistry
     On Error GoTo Fail
     Core_SpeedOn
     Set codeMap = ReadCodeMap(CfgSheet())   ' read ONCE: GatherButtons' hide filter and the
