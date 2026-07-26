@@ -357,6 +357,24 @@ block's) becomes one of four forms:
 placement forms can never be confused — including for a sheet legitimately named
 `1A`.
 
+> **CORRECTION (found during implementation, Task 7; body left as approved).**
+> **"which Excel forbids in a sheet name" is FALSE.** Excel's forbidden set is
+> `: \ / ? * [ ]` — `!` is not in it, so a sheet really can be called `Sales!Q1`
+> and be referenced as `'Sales!Q1'!A1`.
+> The **conclusion still holds**, for two reasons this paragraph never gave:
+>
+> 1. A valid **page code** can never contain `!` — `ParseCode`'s grammar is digits
+>    then letters with a trailing-junk guard, so `1A!` is already rejected. *That*
+>    is what makes the two forms unconfusable, even for a sheet named `1A`.
+> 2. `ParseAnchor` splits on the **last** `!` via `InStrRev`, so a sheet whose own
+>    name contains one still resolves.
+>
+> **Why this matters and is not pedantry:** a maintainer who trusts the false
+> claim has no reason to keep `InStrRev` and would "simplify" it to `InStr` —
+> silently breaking every anchor onto a sheet whose name contains `!`. The
+> correction has landed in the plan, in `spec/contract.md` §6, and in the code
+> comment at `CodeKind`; this document was the last copy carrying it.
+
 Accepted anchor spellings: `MIC!B4`, `'MIC Data'!B4`, `MIC Data!B4` (unquoted
 with spaces), `MIC!$B$4`. The sheet part may be quoted; an embedded apostrophe is
 doubled inside the quotes. The cell part is a single A1 reference — optional `$`,
@@ -407,6 +425,18 @@ New sibling:
 Private Function ParseAnchor(ByVal code As String, ByRef sheetName As String, _
                              ByRef cellRef As String) As Boolean
 ```
+
+> **CORRECTION (found during implementation, Task 7; body left as approved).**
+> The comment sketched above repeats the same falsehood: **Excel does NOT forbid
+> `!` in a sheet name** (the forbidden set is `: \ / ? * [ ]`, so `Sales!Q1` is a
+> legal sheet name). The `!` discriminator is still safe, but for the two reasons
+> given in the correction under §3a: `ParseCode`'s grammar rejects `!` in a page
+> code, and `ParseAnchor` splits on the **last** `!` via `InStrRev`. **Do not
+> "simplify" that `InStrRev` to `InStr`** — trusting the false claim is precisely
+> what would make that look like a safe cleanup, and it would silently break every
+> anchor onto a sheet whose name contains `!`. The comment as actually landed
+> (`CodeKind`, `src/core/Core.bas`) states the corrected reasons and carries that
+> warning; the sketch above does not.
 
 and a cheap classifier so no site has to re-derive the rule:
 
@@ -627,6 +657,32 @@ word only when Excel rejects one.
 ---
 
 ## Handoff log
+
+### 2026-07-25 — correction found during implementation (final-review fix wave)
+
+**A factual error in this document, annotated in place rather than rewritten.**
+§3a (the grammar table's prose) and §3b (the quoted `ParseAnchor` comment) both
+justified the `!` placement discriminator with "Excel forbids `!` in a sheet
+name". **Excel does not** — the forbidden set is `: \ / ? * [ ]`, so a sheet can
+legitimately be called `Sales!Q1`. Found by the Task 7 reviewer, after the claim
+had already propagated into the implementation plan (3 sites), the landed
+`CodeKind` comment, and Task 9's brief — where it was headed into
+`spec/contract.md` as **normative** text for the Apps Script port. That is the
+expensive part: CLAUDE.md rule 6 exists to make the port mechanical, and it would
+have been mechanical against a false premise.
+
+The design's **conclusion is unchanged** — the discriminator is safe, for two
+reasons the original text never gave (`ParseCode`'s grammar rejects `!` in a page
+code; `ParseAnchor` splits on the **last** `!` via `InStrRev`). The second-order
+risk is what makes it worth annotating: a maintainer trusting the false claim has
+no reason to keep `InStrRev` and would "simplify" it to `InStr`, silently breaking
+every anchor onto such a sheet.
+
+Corrected in the plan, in `spec/contract.md` §6, and in the code comment during
+Task 7's fix round. This document was the last copy, and is the one a future agent
+reads first — hence the two in-place correction blocks. **The body is deliberately
+left as the owner approved it**; it is the historical record of what was approved,
+not a maintained reference.
 
 ### 2026-07-25 — design phase complete, implementation not started
 

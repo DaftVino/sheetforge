@@ -129,9 +129,11 @@ Private Const CHAIN_CARD_CHARS As Long = 120     ' composed-text length cap befo
 Private Const VSPLIT_MULT As Long = 100000
 ' ---- Sheet!Cell anchored buttons (v0.4.0) ----
 ' Shape-name prefix for every button this engine places on a user's OWN sheet.
-' Task 9 RESERVES it in contract section 7 ("nothing else in the workbook may use
-' this prefix"); until that lands the reservation is a convention this engine
-' keeps rather than a documented guarantee - spec/ does not mention SFPlaced_ yet.
+' Contract section 7 RESERVES it normatively ("Reserved (v1.2.0): ... the shape-name
+' prefix SFPlaced_ ... anything else in the workbook using the prefix is deleted
+' without warning"). That reservation HAS LANDED - it is a documented guarantee, not
+' a convention this engine merely happens to keep - so do not weaken, rename or
+' shorten this prefix without amending spec/contract.md section 7 in the same change.
 ' SweepPlacedButtons finds and removes buttons by this prefix alone - it is the
 ' only handle the engine has on a sheet it must otherwise never touch.
 Private Const PLACED_PREFIX As String = "SFPlaced_"
@@ -169,6 +171,18 @@ Private mSaveCalc    As XlCalculation
 ' True once the whole pipeline (through LandOnFirstPage) has actually finished.
 Private mLastBuildOk As Boolean
 
+' Final-review fix wave, fix 1: the "N button(s) placed / N could NOT be placed"
+' note Core_BuildControlPanel composes, carried out to Core_FinalizeSetup.
+' Finalize calls Core_BuildControlPanel SILENT and prints its own success message,
+' so a note composed only for the non-silent MsgBox is invisible on the NORMAL user
+' path - and that is exactly the path an anchor onto a protected, renamed or deleted
+' sheet fails on. The skip was therefore reported to nobody: no button on the sheet,
+' no button on any generated page (SplitAnchored keeps an anchor out of "paged"),
+' and a plain "Configuration activated" dialog. Reset to "" at the very top of every
+' Core_BuildControlPanel call, alongside mLastBuildOk, so a note from a PRIOR
+' successful build can never leak into a later call that fails before composing one.
+Private mLastPlacedNote As String
+
 ' ---- memoized package registry (v0.4.0 performance) ----
 ' BuildRegistry re-runs CoreCandidates, one Application.Run "Pkg<Name>_Manifest"
 ' per candidate, and a _Packages worksheet scan per candidate. It is called from
@@ -188,6 +202,12 @@ Private mLastBuildOk As Boolean
 ' IF YOU ADD A CONSUMER THAT MUTATES A reg, this cache becomes a silent
 ' cross-contamination bug: the mutation persists into every later caller in the
 ' same build. Deep-copy in that consumer, or call InvalidateRegistry after it.
+' That includes code OUTSIDE this module: NewCtx stores the cached reg straight
+' into every action context as ctx("reg"), so a package handler holding a ctx holds
+' a live pointer into this cache. Core_Cfg / Core_CfgLong / Core_CfgList /
+' Core_CfgTable / Core_CfgBool only read through it, and a package must do the same
+' - ctx("reg") is READ-ONLY to a handler. It is the one route by which code this
+' module does not own could corrupt the cache.
 ' Do not "just try it" - nothing in this repo's tooling can see the failure.
 Private mRegCache   As Collection
 Private mRegCacheOk As Boolean
@@ -257,8 +277,11 @@ Public Sub Core_AddDefault(reg As Object, ByVal key As String, ByVal rowCsv As S
     If Not f Is Nothing Then f("defaults").Add rowCsv
 End Sub
 
-' category is the DISPLAY grouping used by the generated index and by the column
-' headers on a button page. It defaults to the package's display name, so an
+' category is the DISPLAY grouping used by the column headers on a button page -
+' and, in auto-layout, by which page a button lands on. (It also fed the generated
+' index's category column, but that index was withdrawn in v0.4.0; see
+' src/attic/HomeIndex.bas.txt. The button pages are its only live consumer now.)
+' It defaults to the package's display name, so an
 ' action that declares nothing keeps today's grouping. It is deliberately
 ' decoupled from the module: two packages may feed one category, and one package
 ' may span several, so a future package split never moves a button in the user's
@@ -2586,9 +2609,10 @@ End Function
 ' sheet the engine otherwise never touches - so it is not a page-layout decision.
 ' Without this, typing "MIC!B4" on ONE action would flip the workbook into manual
 ' mode and dump the other 81 buttons into page 1's Unassigned column. This is the
-' third carve-out of the same shape; Task 9 writes the matching contract clause,
-' in both directions, so a port reading section 6 literally cannot reintroduce
-' the bug - which the ledger records almost happening with "hide".
+' third carve-out of the same shape; contract section 6 now carries the matching
+' clause ("an anchor is NOT a placement code for the mode decision"), stated in
+' both directions, so a port reading section 6 literally cannot reintroduce the
+' bug - which the ledger records almost happening with "hide".
 Private Function AnyPlacementCode(map As Object) As Boolean
     Dim k As Variant
     For Each k In map.Keys
@@ -2617,7 +2641,14 @@ Public Sub Core_FinalizeSetup()
     For Each reg In BuildRegistry()
         For Each f In reg("fields")
             v = ReadScalar(ws, CStr(f("key")))
-            Select Case f("kind")
+            ' LCase, matching RenderScalar's own LCase(CStr(f("kind"))) = "bool"
+            ' test. Without it this Select fails OPEN in the one direction that
+            ' matters: a package declaring kind "Bool" would still get the Yes/No
+            ' dropdown from the renderer but NO Finalize validation, so the "ye"
+            ' typo this block exists to catch would sail through. Normalising the
+            ' selector rather than one Case keeps the three arms symmetrical; the
+            ' sheet/file arms only add soft warnings, so nothing newly blocks.
+            Select Case LCase(CStr(f("kind")))
                 Case "sheet"
                     If v <> "" Then
                         If Not Core_SheetExists(v) Then
@@ -2707,9 +2738,17 @@ Public Sub Core_FinalizeSetup()
     ' on a workbook with no buttons at all. mLastBuildOk is set True only once
     ' the whole rebuild pipeline finishes; it is reset False at the top of
     ' every Core_BuildControlPanel call, so it can never be stale here.
+    ' Final-review fix wave, fix 1: mLastPlacedNote appended on the SUCCESS branch
+    ' only. Core_BuildControlPanel composes it every call but shows it itself only
+    ' when non-silent, and the call above is silent - so without this append the
+    ' anchored-button counts, including the "could NOT be placed" one, reach nobody
+    ' on the normal user path. Not appended to the failure branch: that branch is
+    ' already telling the user the rebuild did not finish, and a placement tally
+    ' from a half-finished build would only muddy it.
     If mLastBuildOk Then
         MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
-               "The Macros pages have been rebuilt to match your Setup answers.", _
+               "The Macros pages have been rebuilt to match your Setup answers." & _
+               mLastPlacedNote, _
                vbInformation, "Finalize Setup Tab"
     Else
         MsgBox "Configuration activated, but rebuilding the Macros pages failed - see the error " & _
@@ -2742,6 +2781,7 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim paged As Collection, anchored As Collection, nPlaced As Long, nSkipped As Long
     Dim placedNote As String
     mLastBuildOk = False    ' reset FIRST, every call - see the flag's own declaration comment
+    mLastPlacedNote = ""    ' same reason, same place - see the variable's declaration comment
     InvalidateRegistry              ' a build begins here - see InvalidateRegistry
     On Error GoTo Fail
     Core_SpeedOn
@@ -2772,17 +2812,35 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     LandOnFirstPage layout                  ' LAST: the build's deliberate landing place
     mLastBuildOk = True     ' the whole pipeline finished - only set here, never in Fail:
     Core_SpeedOff
+    ' Final-review fix wave, fix 1: composed UNCONDITIONALLY, outside "If Not
+    ' silent". Core_FinalizeSetup - the normal user path - calls this Sub silent and
+    ' prints its own message, so a note built only for the MsgBox below was thrown
+    ' away with the local on exactly the path where it matters most. mLastPlacedNote
+    ' carries it out; the non-silent MsgBox below still reads the local, so running
+    ' Core_BuildControlPanel directly from Alt+F8 is unchanged and the note is never
+    ' doubled (that path shows it, Finalize's path is not running).
+    If nPlaced > 0 Then _
+        placedNote = vbCrLf & vbCrLf & nPlaced & " button(s) placed on your own sheets."
+    ' A skipped anchor usually leaves that action with NO button anywhere - not on a
+    ' generated page (SplitAnchored kept it out of "paged") and not on the user's
+    ' sheet. That has to be said out loud, with a repair instruction.
+    '
+    ' Final-review fix wave, fix 5: the branches need DIFFERENT sentences. On a
+    ' missing sheet/cell there is genuinely no button anywhere and the repair is to
+    ' correct the placement. On a PROTECTED sheet neither statement holds:
+    ' SweepPlacedButtons failed on that sheet too, so a button an earlier build left
+    ' there is still sitting on it, still wired to its old OnAction - an accepted
+    ' residual, because the engine must never unprotect a user's sheet - and the
+    ' repair is to unprotect, not to retype the placement.
+    If nSkipped > 0 Then _
+        placedNote = placedNote & vbCrLf & vbCrLf & nSkipped & " anchored button(s) could NOT " & _
+                     "be placed." & vbCrLf & _
+                     "- If the sheet or cell no longer exists, that action has no button " & _
+                     "anywhere: fix the placement on the Setup tab and Finalize again." & vbCrLf & _
+                     "- If the sheet is protected, unprotect it and Finalize again. Any button " & _
+                     "an earlier build left there is still on it and may be out of date."
+    mLastPlacedNote = placedNote
     If Not silent Then
-        If nPlaced > 0 Then _
-            placedNote = vbCrLf & vbCrLf & nPlaced & " button(s) placed on your own sheets."
-        ' A skipped anchor leaves that action with NO button anywhere - not on a
-        ' generated page (SplitAnchored kept it out of "paged") and not on the
-        ' user's sheet. That has to be said out loud, with a repair instruction.
-        If nSkipped > 0 Then _
-            placedNote = placedNote & vbCrLf & vbCrLf & nSkipped & " anchored button(s) could NOT " & _
-                         "be placed - the sheet or cell no longer exists, or the sheet is protected. " & _
-                         "Those actions have no button anywhere. Fix the placement on the Setup tab " & _
-                         "and Finalize again."
         ' "Built 0 macro page(s)" is true but reads as a failure, and zero pages
         ' is a real, reachable state: every button can be hidden, switched Off,
         ' or anchored onto one of the user's own tabs.
@@ -2791,7 +2849,8 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
         ' nothing was actually placed anywhere, and "placed on one of your own
         ' sheets" would then be a flat lie in the one state the user most needs
         ' the truth. "Anchored" is true whether or not the anchor resolved, and
-        ' the skipped note directly below gives the count and the repair.
+        ' placedNote - composed just above, and appended to both branches below -
+        ' gives the count and the repair.
         If layout.Count = 0 Then
             MsgBox "No macro pages were built - every button is hidden, switched Off, or " & _
                    "anchored to one of your own sheets." & placedNote, _
@@ -3331,9 +3390,10 @@ Private Sub BuildManualLayout(buttons As Collection, codeMap As Object, layout A
     ' Fix round 1, fix 5: BuildAutoLayout has always called its own labeller
     ' (LabelAutoPages) - this filer used to leave LabelManualPages for the caller
     ' to remember separately, which made the two filers asymmetric and left a
-    ' silent failure mode (skip the call, get "Macros - Page N" titles that
-    ' propagate into the index's category column). Self-label here so Task 8
-    ' cannot miss it either way.
+    ' silent failure mode (skip the call and the pages keep their "Macros - Page N"
+    ' placeholder titles where a real category name belongs - which back when the
+    ' generated index still existed also propagated into its category column).
+    ' Self-label here so Task 8 cannot miss it either way.
     LabelManualPages layout
 End Sub
 
