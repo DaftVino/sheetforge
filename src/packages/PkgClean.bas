@@ -42,7 +42,7 @@ Public Sub PkgClean_RemoveDupes(ctx As Object)
     rng.RemoveDuplicates Columns:=ParseCols(keys), Header:=xlYes
     Core_SpeedOff
 
-    Core_Done ctx, "Remove Duplicates complete on " & rng.Address(False, False) & _
+    Core_Done ctx, "Remove Duplicates complete on " & Core_RangeRef(rng) & _
            " using key column(s) " & keys & ".", "Remove Duplicates"
     Exit Sub
 Fail:
@@ -78,7 +78,7 @@ Public Sub PkgClean_TrimClean(ctx As Object)
     End If
     Core_SpeedOff
 
-    Core_Done ctx, "Trimmed & cleaned text on " & rng.Address(False, False) & ".", _
+    Core_Done ctx, "Trimmed & cleaned text on " & Core_RangeRef(rng) & ".", _
            "Trim & Clean Text"
     Exit Sub
 Fail:
@@ -109,7 +109,7 @@ Public Sub PkgClean_FillDown(ctx As Object)
     End If
     Core_SpeedOff
 
-    Core_Done ctx, "Filled blanks down on " & rng.Address(False, False) & ".", _
+    Core_Done ctx, "Filled blanks down on " & Core_RangeRef(rng) & ".", _
            "Fill Blanks Down"
     Exit Sub
 Fail:
