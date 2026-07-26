@@ -2186,9 +2186,10 @@ End Function
 ' detail is filled with a human-readable explanation for every status except
 ' "none"/"ok"/"legacy". badIds is ALWAYS set to a (possibly empty) Dictionary;
 ' for "invalid" it holds the lower-cased ids whose recovered code failed
-' ParseCode - the same set detail lists in prose - so a caller that wants to
-' clear ONLY the unreadable rows (not the whole block) has a single source of
-' truth instead of re-parsing detail's text.
+' ParseCode OR ParseAnchor, whichever CodeKind routed it to - the same set
+' detail lists in prose - so a caller that wants to clear ONLY the unreadable
+' rows (not the whole block) has a single source of truth instead of
+' re-parsing detail's text.
 Private Function ConfigSchemaStatus(ByRef detail As String, ByRef badIds As Object) As String
     Dim ws As Worksheet, kr As Long, nk As Long, i As Long
     Dim id As String, code As String, tn As Long, cx As Long, cl As String
@@ -2528,9 +2529,9 @@ End Function
 ' sheet the engine otherwise never touches - so it is not a page-layout decision.
 ' Without this, typing "MIC!B4" on ONE action would flip the workbook into manual
 ' mode and dump the other 81 buttons into page 1's Unassigned column. This is the
-' third carve-out of the same shape; the contract clause is written to match, in
-' both directions, so a port reading section 6 literally cannot reintroduce the bug -
-' which the ledger records almost happening with "hide".
+' third carve-out of the same shape; Task 9 writes the matching contract clause,
+' in both directions, so a port reading section 6 literally cannot reintroduce
+' the bug - which the ledger records almost happening with "hide".
 Private Function AnyPlacementCode(map As Object) As Boolean
     Dim k As Variant
     For Each k In map.Keys
@@ -3788,12 +3789,22 @@ Private Function ParseCode(ByVal code As String, ByRef tabNum As Long, _
     ParseCode = True
 End Function
 
-' "" | "hide" | "page" | "anchor" - the SINGLE place a placement value's form is
-' decided. Every reader goes through this rather than testing for "!" itself.
+' "" | "hide" | "page" | "anchor" - the SINGLE place a placement value's FORM is
+' classified. Every reader goes through this rather than testing for "!" itself.
+' (The "hide" FILTER is a separate concern applied one funnel above, in
+' GatherButtons via IsHideCoded - this does not own that funnel and does not
+' replace it.)
 '
-' The "!" discriminator is safe because Excel forbids "!" in a sheet name, so an
-' anchor can never be confused with a page code - not even for a sheet
-' legitimately named "1A".
+' The "!" discriminator is safe for two reasons, and NEITHER is "Excel forbids !
+' in a sheet name" - it does not. The forbidden set is : \ / ? * [ ], so a sheet
+' really can be called "Sales!Q1".
+'   1. A valid PAGE CODE can never contain "!": ParseCode's grammar is digits
+'      then letters with a trailing-junk guard, so "1A!" is already rejected.
+'      That is what makes the two forms unconfusable - even for a sheet named "1A".
+'   2. ParseAnchor splits on the LAST "!" (InStrRev), so "Sales!Q1!B4" and
+'      "'Sales!Q1'!B4" both resolve to sheet "Sales!Q1", cell "B4".
+' Do NOT "simplify" that InStrRev to InStr - it would silently break every anchor
+' onto a sheet whose name legitimately contains "!".
 Private Function CodeKind(ByVal code As String) As String
     Dim s As String
     s = Trim(code)
@@ -3816,7 +3827,7 @@ End Function
 ' it.
 Private Function ParseAnchor(ByVal code As String, ByRef sheetName As String, _
                              ByRef cellRef As String) As Boolean
-    Dim s As String, p As Long, sh As String, cl As String
+    Dim s As String, p As Long, sh As String, cl As String, canon As String
     sheetName = ""
     cellRef = ""
     s = Trim(code)
@@ -3833,9 +3844,9 @@ Private Function ParseAnchor(ByVal code As String, ByRef sheetName As String, _
     End If
     sh = Trim(sh)
     If Len(sh) = 0 Then Exit Function
-    If Not IsA1Ref(cl) Then Exit Function
+    If Not IsA1Ref(cl, canon) Then Exit Function
     sheetName = sh
-    cellRef = UCase(Replace(cl, "$", ""))
+    cellRef = canon
     ParseAnchor = True
 End Function
 
@@ -3845,7 +3856,12 @@ End Function
 ' Row bounds beyond the digit cap are NOT checked here - a 7-digit row that
 ' exceeds the sheet's real last row simply fails to resolve when the caller asks
 ' for the Range, which is the one place that knows the platform's limit.
-Private Function IsA1Ref(ByVal s As String) As Boolean
+' On success, canonical receives the normalised form: upper-cased letters (as
+' already accumulated below), no "$", and CLng-round-tripped digits so a
+' leading-zero row like "0004" comes back "4" - form-valid must mean
+' syntactically resolvable, not merely "matches the grammar", and a caller
+' handing "B0004" to Range would find that out the hard way instead.
+Private Function IsA1Ref(ByVal s As String, Optional ByRef canonical As String) As Boolean
     Dim t As String, i As Long, ch As String, letters As String, digits As String
     t = UCase(Trim(s))
     If Len(t) = 0 Then Exit Function
@@ -3868,6 +3884,7 @@ Private Function IsA1Ref(ByVal s As String) As Boolean
     If Len(letters) = 0 Or Len(letters) > 3 Then Exit Function
     If Len(digits) = 0 Or Len(digits) > 7 Then Exit Function
     If CLng(digits) < 1 Then Exit Function
+    canonical = letters & CStr(CLng(digits))
     IsA1Ref = True
 End Function
 
