@@ -129,7 +129,9 @@ Private Const CHAIN_CARD_CHARS As Long = 120     ' composed-text length cap befo
 Private Const VSPLIT_MULT As Long = 100000
 ' ---- Sheet!Cell anchored buttons (v0.4.0) ----
 ' Shape-name prefix for every button this engine places on a user's OWN sheet.
-' RESERVED (contract section 7): nothing else in the workbook may use it.
+' Task 9 RESERVES it in contract section 7 ("nothing else in the workbook may use
+' this prefix"); until that lands the reservation is a convention this engine
+' keeps rather than a documented guarantee - spec/ does not mention SFPlaced_ yet.
 ' SweepPlacedButtons finds and removes buttons by this prefix alone - it is the
 ' only handle the engine has on a sheet it must otherwise never touch.
 Private Const PLACED_PREFIX As String = "SFPlaced_"
@@ -2694,7 +2696,7 @@ End Sub
 ' rebuilds the panel itself and shows its own combined message).
 Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object, layout As Object, manual As Boolean
-    Dim paged As Collection, anchored As Collection, nPlaced As Long
+    Dim paged As Collection, anchored As Collection, nPlaced As Long, nSkipped As Long
     Dim placedNote As String
     mLastBuildOk = False    ' reset FIRST, every call - see the flag's own declaration comment
     InvalidateRegistry              ' a build begins here - see InvalidateRegistry
@@ -2723,19 +2725,33 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     End If
     RenderAllPages layout
     BuildAdminPanel                         ' Create/Finalize controls on their own hideable tab
-    nPlaced = PlaceAnchoredButtons(anchored, codeMap)
+    nPlaced = PlaceAnchoredButtons(anchored, codeMap, nSkipped)
     LandOnFirstPage layout                  ' LAST: the build's deliberate landing place
     mLastBuildOk = True     ' the whole pipeline finished - only set here, never in Fail:
     Core_SpeedOff
     If Not silent Then
         If nPlaced > 0 Then _
             placedNote = vbCrLf & vbCrLf & nPlaced & " button(s) placed on your own sheets."
+        ' A skipped anchor leaves that action with NO button anywhere - not on a
+        ' generated page (SplitAnchored kept it out of "paged") and not on the
+        ' user's sheet. That has to be said out loud, with a repair instruction.
+        If nSkipped > 0 Then _
+            placedNote = placedNote & vbCrLf & vbCrLf & nSkipped & " anchored button(s) could NOT " & _
+                         "be placed - the sheet or cell no longer exists, or the sheet is protected. " & _
+                         "Those actions have no button anywhere. Fix the placement on the Setup tab " & _
+                         "and Finalize again."
         ' "Built 0 macro page(s)" is true but reads as a failure, and zero pages
         ' is a real, reachable state: every button can be hidden, switched Off,
         ' or anchored onto one of the user's own tabs.
+        '
+        ' Says "anchored to", NOT "placed on": with nPlaced = 0 and nSkipped > 0
+        ' nothing was actually placed anywhere, and "placed on one of your own
+        ' sheets" would then be a flat lie in the one state the user most needs
+        ' the truth. "Anchored" is true whether or not the anchor resolved, and
+        ' the skipped note directly below gives the count and the repair.
         If layout.Count = 0 Then
             MsgBox "No macro pages were built - every button is hidden, switched Off, or " & _
-                   "placed on one of your own sheets." & placedNote, _
+                   "anchored to one of your own sheets." & placedNote, _
                    vbInformation, "Setup Complete"
         Else
             ' paged.Count, NOT buttons.Count: an anchored button is not on a
@@ -3753,14 +3769,39 @@ End Function
 ' Cells.UnMerge, Hyperlinks.Delete, Cells.RowHeight, six column widths, tab
 ' colour and interior fill. A user's own sheet must never be treated that way.
 '
-' Returns how many buttons were actually placed, for the completion message.
+' Returns how many buttons were actually placed, and hands back how many were
+' SKIPPED via "skipped", for the completion message.
 '
-' A failure skips that one button rather than raising. Finalize has already
-' blocked on a missing sheet, an engine-owned sheet, a duplicate target and a
-' malformed anchor, so anything still failing here is a workbook that changed
-' underneath its own config - and a build must not die on its last step because
-' one anchor went stale.
-Private Function PlaceAnchoredButtons(anchored As Collection, codeMap As Object) As Long
+' A failure skips that one button rather than raising, and is reported through
+' the skipped count. A build must not die on its last step because one anchor
+' went stale.
+'
+' Both counts are needed because a skipped anchor leaves that action with NO
+' button anywhere: it is CodeKind "anchor", so SplitAnchored kept it out of
+' "paged" and no generated page carries it either. Silently discarding
+' anchored.Count - n would make the action unreachable from the workbook surface
+' with nothing on screen saying so.
+'
+' EVERY failure mode here is a live one, and the sweep does NOT cover them:
+'   - the target sheet was renamed or deleted after Finalize -> AnchorSheet
+'     returns Nothing;
+'   - the cell reference no longer resolves -> ws.Range(aCell) raises;
+'   - the sheet is PROTECTED -> ws.Buttons.Add raises 1004, because Sheet
+'     Protect's DEFAULT includes DrawingObjects, and protected sheets are
+'     routine in a multi-entity finance workbook. SweepPlacedButtons cannot
+'     delete the old button on that sheet either, so the stale one stays put.
+' The AddBtn call is therefore wrapped in its own On Error Resume Next. Do NOT
+' re-tighten that to cover only the Range resolution: this procedure has no
+' error handler of its own, so an unguarded raise inside AddBtn propagates to
+' Core_BuildControlPanel's "On Error GoTo Fail" and aborts the ENTIRE rebuild -
+' mLastBuildOk stays False, LandOnFirstPage never runs, and the user is told the
+' whole build failed because one anchor pointed at a protected tab.
+'
+' Task 9's Finalize checks reduce how often this fires, but cannot remove it:
+' Finalize validates at Finalize time, and a sheet can be renamed, deleted or
+' protected at any point afterwards.
+Private Function PlaceAnchoredButtons(anchored As Collection, codeMap As Object, _
+                                      ByRef skipped As Long) As Long
     Dim e As Variant, id As String, code As String, aCell As String
     Dim ws As Worksheet, target As Range, n As Long
     For Each e In anchored
@@ -3774,11 +3815,18 @@ Private Function PlaceAnchoredButtons(anchored As Collection, codeMap As Object)
             Set target = ws.Range(aCell)
             On Error GoTo 0
             If Not target Is Nothing Then
+                On Error Resume Next
                 AddBtn ws, PLACED_PREFIX & SafeShapeName(CStr(e(0))), _
                        CStr(e(1)), CStr(e(2)), _
                        target.Left, target.Top, ANCHOR_BTN_W, BTN_H, xlMove
-                n = n + 1
+                If Err.Number = 0 Then n = n + 1 Else skipped = skipped + 1
+                Err.Clear
+                On Error GoTo 0
+            Else
+                skipped = skipped + 1
             End If
+        Else
+            skipped = skipped + 1
         End If
     Next e
     PlaceAnchoredButtons = n
