@@ -278,7 +278,11 @@ prompts (e.g. a range picker) and error dialogs are not suppressible.
 letters** (v1.2.0, normative; matches Excel's own column-letter grammar, whose
 last real column is `XFD`) — or the explicit code **`hide`**, which omits a
 button and — normative, v1.2.0 — is **not** a placement: it does not count
-toward "any code is present" below in either direction. Semantics: if NO
+toward "any code is present" below in either direction. The reference
+implementation heads this column **Placement** on its authoring surface
+(renamed from `Page code` at v1.2.0, when the value stopped being only a page
+code). The column caption is presentation, not data: no conforming reader may
+key off it. Semantics: if NO
 button anywhere has a **placement** code (no codes at all, or `hide` codes
 only, are both "none"), a single default button page is built (legacy
 behavior; **superseded for the uncoded case by Auto-layout (v1.2.0) below** —

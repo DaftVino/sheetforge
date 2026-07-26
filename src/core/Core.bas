@@ -59,6 +59,19 @@ Private Const AVAIL_OFF      As String = "off"
 ' empty map, and every action the user switched Off goes live again.
 Private Const AVAIL_HEADER   As String = "Availability"
 
+' Column header caption for the action catalog's and the Chains block's placement
+' column. Introduced as a Const in v0.4.0 because the caption was written from
+' two independent literals - the exact coupling closed for AVAIL_HEADER above.
+'
+' Unlike AVAIL_HEADER this one is NOT load-bearing, and that was checked rather
+' than assumed: no check anywhere reads this caption back. The old caption
+' appeared only as a written value, at two sites. Kept as a Const anyway,
+' because two literals for one visible string is how they drift.
+'
+' Relabelled from the old caption because a placement value is no longer only
+' a page code: it may also be a "Sheet!Cell" anchor onto a user's own tab.
+Private Const PLACE_HEADER   As String = "Placement"
+
 ' Config-format marker, written into the hidden RID column of the action catalog's
 ' key row - a machine-owned cell, not a visible header. A display label is
 ' presentation, is user-editable, and must never decide whether saved config is
@@ -1106,9 +1119,9 @@ End Function
 ' Clears the Action catalog block's cells in _Config so a rebuild's prior-value
 ' reads (ReadCodeMap/ReadAvailMap) find nothing for the cleared rows, instead
 ' of carrying an unreadable value forward unchanged. idsToClear Is Nothing
-' clears the WHOLE block (marker, every id, every Availability/Page-code
+' clears the WHOLE block (marker, every id, every Availability/Placement
 ' cell) - nothing in it can be trusted. A Dictionary clears only the
-' Page-code cell of a row whose lower-cased id is a key in it; every other
+' Placement cell of a row whose lower-cased id is a key in it; every other
 ' row is untouched - used when exactly which values are bad is known.
 Private Sub ClearCatalogBlock(cfgWs As Worksheet, idsToClear As Object)
     Dim cKr As Long, cNk As Long, ci As Long, cid As String
@@ -1182,7 +1195,7 @@ End Function
 ' untouched either way. schemaState's meaning is ConfigSchemaStatus's to
 ' document; the one thing worth repeating here is WHY "invalid" and "damaged"
 ' get different treatment even though both are unreadable: "invalid"'s bad
-' value is a VISIBLE, user-editable Page-code cell that ComposeReport does not
+' value is a VISIBLE, user-editable Placement cell that ComposeReport does not
 ' block on, so fixing it on the Setup tab genuinely works when the tab exists.
 ' "damaged"'s bad value is the HIDDEN marker cell itself, which the user
 ' cannot see or edit, and which - since _Config is a straight ws.Copy of the
@@ -1209,7 +1222,7 @@ Private Function GateConfigMigration() As Boolean
             If Core_SheetExists(SETUP_SHEET) Then
                 MsgBox schemaDetail & vbCrLf & vbCrLf & _
                        "The Setup tab is still open with your other answers on it. Correct " & _
-                       "the page code(s) named above there, then click 'Finalize Setup Tab'. " & _
+                       "the placement code(s) named above there, then click 'Finalize Setup Tab'. " & _
                        "Nothing has been changed." & vbCrLf & vbCrLf & _
                        "This is the faster fix. If you delete the Setup tab instead, 'Create " & _
                        "Setup Tab' can still recover: it will clear just the unreadable " & _
@@ -1219,13 +1232,13 @@ Private Function GateConfigMigration() As Boolean
                 GateConfigMigration = False
             Else
                 GateConfigMigration = ConfirmAndClear(schemaDetail, _
-                    "the page code(s) named above (those actions return to automatic " & _
-                    "placement); every other saved page code is kept.", schemaBadIds)
+                    "the placement code(s) named above (those actions return to automatic " & _
+                    "placement); every other saved placement is kept.", schemaBadIds)
             End If
 
         Case "damaged"
             GateConfigMigration = ConfirmAndClear(schemaDetail, _
-                "every saved page-code and Availability choice in the Action catalog (every " & _
+                "every saved placement and Availability choice in the Action catalog (every " & _
                 "action returns as a plain Button with automatic placement).", Nothing)
     End Select
 End Function
@@ -1623,7 +1636,7 @@ End Function
 Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     r = SectionHeader(ws, r, "COMPOSE YOUR BUTTONS")
     r = TintRow(ws, r, "Build multi-step buttons (Chains) and arrange buttons " & _
-                "onto pages (Page code). Leave every code blank for the automatic, " & _
+                "onto pages (Placement). Leave every code blank for the automatic, " & _
                 "category-packed layout.", _
                 10, False, True, RGB(90, 90, 90))
     r = r + 1
@@ -1765,11 +1778,11 @@ End Function
 Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim existing As Collection, ch As Object, i As Long
     r = BlockIntro(ws, r, "Chains  -  one button that runs several actions in order", _
-                   "Button name + Steps (paste tokens from the Actions list, one per line) + Page code.")
+                   "Button name + Steps (paste tokens from the Actions list, one per line) + Placement.")
     ws.Cells(r, KEY_COL).Value = CHAINS_KEY
     ws.Cells(r, VAL_COL).Value = "Button name"
     ws.Cells(r, VAL_COL + 1).Value = "Steps (one token per line)"
-    ws.Cells(r, VAL_COL + 2).Value = "Page code"
+    ws.Cells(r, VAL_COL + 2).Value = PLACE_HEADER
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
     r = r + 1
 
@@ -1958,7 +1971,7 @@ Private Sub AvailDropdown(rng As Range)
 End Sub
 
 ' One row per registry action: hidden id in RID_COL, "caption [id]" (grey) in C, a
-' yellow Availability cell with a validated dropdown in D, a yellow Page-code cell
+' yellow Availability cell with a validated dropdown in D, a yellow Placement cell
 ' in E. Prior answers are preserved from CfgSheet() by id. Unavailable actions STAY
 ' listed here - that is the owner's hard requirement: turning a button off must
 ' never make the action undiscoverable.
@@ -1972,13 +1985,13 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     r = BlockIntro(ws, r, "Action catalog  -  what each action is available as, and where it goes", _
                    "Availability: 'Button' shows a button; 'Chains only' hides the button but a " & _
                    "Chain can still run it; 'Off' hides it and stops it running anywhere. " & _
-                   "Page code: leave every code blank for the automatic layout; fill in even one " & _
+                   "Placement: leave every code blank for the automatic layout; fill in even one " & _
                    "placement code and codes take over - number = page, letters = column (e.g. 1A). " & _
                    "Type  hide  to leave any one button off, whether or not you use placement codes.")
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
     ws.Cells(r, VAL_COL + 1).Value = AVAIL_HEADER
-    ws.Cells(r, VAL_COL + 2).Value = "Page code"
+    ws.Cells(r, VAL_COL + 2).Value = PLACE_HEADER
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
     ' The machine-owned schema marker, in the hidden id column of the key row -
     ' NOT in the visible header. See Task 4 / contract section 5. Force Text so a
@@ -2208,7 +2221,7 @@ Private Function ConfigSchemaStatus(ByRef detail As String, ByRef badIds As Obje
                 End If
             Next i
             If Len(detail) > 0 Then
-                detail = "These saved page codes could not be read from the older " & _
+                detail = "These saved placements could not be read from the older " & _
                          "configuration format:" & vbCrLf & detail
                 ConfigSchemaStatus = "invalid"
             Else
@@ -2476,7 +2489,7 @@ End Function
 ' would then flip the whole workbook into manual mode (every other,
 ' still-uncoded button reads as manually placed, landing in page 1's
 ' Unassigned column, and the Setup tab's own help text would tell them their
-' page codes control a layout they never authored). "hide" omits a button; it
+' placement codes control a layout they never authored). "hide" omits a button; it
 ' does not place one, so it must not count as a placement here.
 ' Core_BuildControlPanel (Task 8) uses THIS helper, and only this one, both to
 ' choose BuildAutoLayout vs BuildManualLayout.
@@ -3415,7 +3428,7 @@ Private Function CardHelp(ByVal helpText As String, ByVal btnId As String) As St
     CardHelp = "Chain: " & shown & "  +" & (n - usedSteps) & " more - see the " & SETUP_SHEET & " tab"
 End Function
 
-' Auto-layout: no button carries a page code, so distribute buttons by display
+' Auto-layout: no button carries a placement code, so distribute buttons by display
 ' category. A page is a CAPACITY unit, not a category unit: up to CARD_COLS
 ' category-headed columns per page, up to AUTO_COL_MAX buttons per column. Small
 ' categories share a page. A category that does not fit in the remaining columns
