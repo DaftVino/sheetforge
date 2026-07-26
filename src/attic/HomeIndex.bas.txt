@@ -1,0 +1,295 @@
+'================================================================
+' ATTIC - Macros Home, the generated index surface.  NOT BUILT.
+'================================================================
+' WHAT THIS WAS
+'   The "Macros Home" tab: a generated index built LAST in
+'   Core_BuildControlPanel's pipeline. Three parts - a page summary
+'   (one row per generated page, with its button count and a link),
+'   the full button catalog (every button, its page, and its
+'   unabbreviated description), and a legend explaining the
+'   placement code and the Availability states. It was also the only
+'   thing in the whole pipeline that activated a sheet and selected
+'   a cell, so it doubled as the build's landing place.
+'
+' IT NEVER REACHED A RELEASE.
+'   Built during v0.4.0 track 1 (tasks 6-9) on branch
+'   feat/finish-excel-track1. main is still v0.3.0. No shipped
+'   deployment has ever had this tab, so nothing in the field
+'   depends on it.
+'
+' WHY IT WAS WITHDRAWN - the owner, at the v0.4.0 manual gate:
+'   "macros home tab is basically useless and shouldn't exist. its
+'   needless clutter and since most folks will only ever load a
+'   handful of macros or 1 or 2 chains into a workbook, there's
+'   really no use for it other than as a demo. save the work for
+'   later reference, but remove from the bundle."
+'   This reversed their own earlier decision, made before they could
+'   see it built. That is what a manual gate is for. Do not re-argue
+'   it; if it comes back, it comes back because the owner asks.
+'
+' THE FILE EXTENSION IS LOAD-BEARING.
+'   ".bas.txt", not ".bas": build/build.ps1 discovers packages with a
+'   src/packages/Pkg*.bas glob, and runs its ASCII and reserved-word
+'   gates over that same glob plus src/core/Core.bas. Nothing under
+'   src/attic/ can reach a bundle or a gate, and nobody can mistake
+'   this for a live module.
+'
+' WHAT A RESTORE WOULD HAVE TO RE-WIRE (all removed in v0.4.0):
+'   1. The pipeline call. Core_BuildControlPanel ended with
+'        BuildHomePage layout, manual
+'      as its LAST step, after BuildAdminPanel. It is now
+'        LandOnFirstPage layout
+'      which activates the first generated page instead. Restoring
+'      means putting BuildHomePage back LAST (it activates and
+'      selects, so anything after it changes where the user lands)
+'      and deciding what happens to LandOnFirstPage.
+'   2. The nav link. RenderNavRow wrote an unconditional
+'        NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
+'      and put "< Previous" in cell D and "Next >" in cell F. Those
+'      two now sit in B and D. Restoring means shifting them back.
+'      Do NOT re-add a Core_SheetExists guard on the Home link - one
+'      was tried and, because BuildHomePage runs last, it made every
+'      link dead text on a first build. See the deleted comment.
+'   3. IsPanelName's carve-out. "Macros Home" starts with PANEL_BASE
+'      but has a non-numeric tail, so IsPanelName returns False and
+'      DeletePanels spares it - which is what let a rebuild REUSE
+'      rather than recreate the sheet. That rule is still in place
+'      and unchanged. But DeleteHomePanel now deletes the tab
+'      unconditionally on every build (it retires any index a
+'      pre-removal build left behind, exactly as DeleteLegacyPanel
+'      retires the pre-v0.4.0 single "Macros" tab). A restore must
+'      remove DeleteHomePanel or the index is deleted every build.
+'   4. Contract section 6. The "Generated index" clause used to say
+'      the engine ALWAYS generates an index surface. It now says a
+'      platform MAY provide one. The previous/next navigation
+'      requirement was kept unconditional either way. The sheet name
+'      "Macros Home" is still RESERVED in section 7 - deliberately,
+'      so a restore can have the name back.
+'   5. PageButtonCount. Included below because BuildHomePage was its
+'      only caller; it was removed from Core.bas with the rest.
+'
+' The bodies below are byte-for-byte as they stood at the last commit
+' before removal. They reference Core-private helpers that still
+' exist (EnsurePanelSheet, NavLink, SortedKeys, HOME_SHEET,
+' PANEL_BASE, ADMIN_SHEET, CARD_COLS), so a restore is a paste-back
+' plus the five wiring points above.
+'================================================================
+
+' The generated index - ALWAYS built, even for a single page, so the workbook has
+' one shape at every scale (owner's call). Three parts: a page summary, the full
+' action catalog, and the legend. Built last and activated, so any rebuild lands
+' the user here. Fix round 1, fix 4: totalButtons is no longer a caller-supplied
+' parameter - it had undefined semantics (does it count hide-coded buttons? the
+' filers drop those before layout is ever built, so the only honest source is
+' layout itself), and the natural thing for Task 8 to pass, buttons.Count from
+' GatherButtons, would over-count against both the page list above and the
+' catalog below. Summing PageButtonCount over every page is the SAME quantity
+' the page-summary rows above already show per page, so there is exactly one
+' definition of "how many buttons are on this workbook" and no way for a caller
+' to get it wrong. isManual (fix 3) reports which filer built this layout, so
+' HomeLegend can describe the truth instead of a generic capability.
+Private Sub BuildHomePage(layout As Object, ByVal isManual As Boolean)
+    Dim ws As Worksheet, r As Long, tabKeys As Variant, ti As Long, tabNum As Long
+    Dim page As Object, totalButtons As Long
+    Set ws = EnsurePanelSheet(HOME_SHEET, True)
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = 40
+    ws.Columns("C").ColumnWidth = 9
+    ws.Columns("D").ColumnWidth = 62
+    ws.Columns("E").ColumnWidth = 16
+
+    With ws.Range("B2")
+        .Value = "Macro Toolkit"
+        .Font.Size = 18
+        .Font.Bold = True
+        .Font.Color = RGB(31, 78, 121)
+    End With
+    ' Fix round 2, fix 1: EnsurePanelSheet's row-height reset pins row 2 at
+    ' StandardHeight, which does not grow for an 18pt title the way a
+    ' never-explicitly-sized row implicitly would - set literally, right after
+    ' the title is written, so it clears the font instead of clipping it.
+    ' Correction (Task 9): 23 was possibly already short for an 18pt title
+    ' (needs ~23.25); bumped to 25 for real headroom.
+    ws.Rows(2).RowHeight = 25
+    With ws.Range("B3")
+        .Value = "Pick a page below, or find an action in the catalog. Every page has a  << Home  link back here."
+        .Font.Italic = True
+    End With
+
+    r = 5
+    ws.Cells(r, 2).Value = "PAGE"
+    ws.Cells(r, 3).Value = "BUTTONS"
+    ws.Cells(r, 4).Value = "CATEGORIES ON IT"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 217, 240)
+    End With
+    r = r + 1
+
+    tabKeys = SortedKeys(layout)
+    If UBound(tabKeys) < LBound(tabKeys) Then
+        ws.Cells(r, 2).Value = "No actions are available as buttons yet."
+        ws.Cells(r, 2).Font.Italic = True
+        r = r + 1
+    Else
+        For ti = LBound(tabKeys) To UBound(tabKeys)
+            tabNum = CLng(tabKeys(ti))
+            Set page = layout(tabNum)
+            NavLink ws.Cells(r, 2), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+            ws.Cells(r, 3).Value = PageButtonCount(page)
+            totalButtons = totalButtons + PageButtonCount(page)   ' fix 4: one definition, summed here
+            ws.Cells(r, 4).Value = CStr(page("title"))
+            ws.Cells(r, 4).Font.Color = RGB(90, 90, 90)
+            r = r + 1
+        Next ti
+    End If
+
+    r = r + 1
+    NavLink ws.Cells(r, 2), "Setup Menu  -  first-time setup / re-configure", ADMIN_SHEET
+    r = r + 2
+    r = HomeCatalog(ws, r, layout)
+    r = r + 1
+    r = HomeLegend(ws, r, totalButtons, isManual)
+
+    ' Fix round 1, fix 4: Activate raises 1004 on a hidden sheet, and hiding a
+    ' generated tab is a supported habit here - BuildAdminPanel explicitly
+    ' invites the user to hide Setup Menu, so a user hiding Macros Home too is
+    ' not misuse. Unhide before activating; a rebuild should always be able to
+    ' bring the user back to the index, hidden or not.
+    ws.Visible = xlSheetVisible
+    ws.Activate                     ' Range.Select needs its sheet active
+    ws.Range("A1").Select
+End Sub
+
+' Every button, with its full description and the page it is on. This is the one
+' screen that answers "what can this workbook do?" - and unlike a card, a cell
+' here is as wide as it needs to be, so nothing is abbreviated. Deliberately reads
+' it(3) directly (not CardHelp) - this is where a bounded chain card points a
+' user for the full recipe, so it must never itself be bounded.
+Private Function HomeCatalog(ws As Worksheet, ByVal r As Long, layout As Object) As Long
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
+    Dim items As Collection, ii As Long, it As Variant, firstRow As Long
+    ' Contract's term (section 6): "button catalog", not "all actions" - this
+    ' lists only actions that became buttons (off / chains-only ones are
+    ' absent), and chains, which are not actions, are present.
+    ws.Cells(r, 2).Value = "BUTTON CATALOG"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    ws.Cells(r, 2).Value = "ACTION"
+    ws.Cells(r, 3).Value = "PAGE"
+    ws.Cells(r, 4).Value = "WHAT IT DOES"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 4))
+        .Font.Bold = True
+        .Font.Size = 10
+        .Interior.Color = RGB(240, 240, 245)
+    End With
+    r = r + 1
+    firstRow = r
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set cols = page("cols")
+        colKeys = SortedKeys(cols)
+        For ci = LBound(colKeys) To UBound(colKeys)
+            colIx = CLng(colKeys(ci))
+            Set items = cols(colIx)
+            For ii = 1 To items.Count
+                it = items(ii)
+                ws.Cells(r, 2).Value = CStr(it(1))
+                NavLink ws.Cells(r, 3), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+                With ws.Cells(r, 4)
+                    .Value = CStr(it(3))
+                    .Font.Size = 10
+                    .Font.Color = RGB(90, 90, 90)
+                    .WrapText = True
+                    .VerticalAlignment = xlTop
+                End With
+                r = r + 1
+            Next ii
+        Next ci
+    Next ti
+    ' Nothing here is merged, so AutoFit gives every description its full height.
+    If r > firstRow Then ws.Rows(firstRow & ":" & (r - 1)).AutoFit
+    HomeCatalog = r
+End Function
+
+' The legend. This is the only place the page-code convention and Availability are
+' explained where a daily user will actually see them. Fix round 1, fix 3: this is
+' now mode-aware - it used to always claim "laid out automatically" and invite the
+' user to "take charge of the layout", which is false and actively misleading the
+' moment even one Page code exists (that code is already in charge). isManual
+' reports which filer actually built this layout (BuildAutoLayout vs
+' BuildManualLayout), so the first two lines describe the truth for THIS build,
+' not a generic capability. Also folds in the related minor: the mechanism line
+' used to promise a blank-coded button "lands on page 1", which CapManualColumns
+' can now falsify (it relocates to a continuation page once page 1 is already at
+' the column cap) - corrected below so the legend matches where the button
+' actually went.
+Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long, _
+                            ByVal isManual As Boolean) As Long
+    ws.Cells(r, 2).Value = "HOW THESE PAGES ARE BUILT"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    ' Fix wave: two corrections. (1) A Page code chooses where a button STARTS,
+    ' not a guarantee of the page/column it lands on - the column cap (contract
+    ' section 6) can still relocate it. (2) A chain's Page code lives in the
+    ' Chains block, not the action catalog (which enumerates registry actions
+    ' only) - the old wording sent a chain-author to the wrong place.
+    If isManual Then
+        r = HomeLine(ws, r, totalButtons & " button(s). Your Page codes choose where each button starts - " & _
+                             "for an action, the code in the action catalog on the Setup tab; for a chain, " & _
+                             "the code in the Chains block. A full page or column can still move a button to " & _
+                             "a continuation one.")
+        r = HomeLine(ws, r, "To go back to automatic packing, clear every Page code - with none set, categories " & _
+                             "are packed onto pages for you again.")
+    Else
+        r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to " & _
+                             CARD_COLS & " per page.")
+        r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' - for an action, in the action " & _
+                             "catalog on the Setup tab; for a chain, in the Chains block:")
+    End If
+    r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
+    ' Fix round 3, fix 3: "hide" places nothing, so it does not switch this
+    ' workbook to manual mode by itself - a store with only "hide" codes still
+    ' packs automatically (fix round 2's fix 5 / this line used to say ANY code
+    ' switches the layout, which was true for "hide" too and is not).
+    r = HomeLine(ws, r, "As soon as ONE placement code (not counting hide) is filled in, the codes take " & _
+                         "over; a blank-coded button lands in page 1's Unassigned area, or a continuation " & _
+                         "page once the page has no free column slot left. hide always omits a button, in " & _
+                         "either mode.")
+    r = HomeLine(ws, r, "Availability on the Setup tab: 'Button' = shown here. 'Chains only' = no button, but a Chain can run it.")
+    r = HomeLine(ws, r, "'Off' = no button and it will not run at all; Finalize refuses to activate a Chain that uses one.")
+    HomeLegend = r
+End Function
+
+Private Function HomeLine(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
+    ws.Cells(r, 2).Value = txt
+    ws.Cells(r, 2).Font.Size = 10
+    ws.Cells(r, 2).Font.Color = RGB(90, 90, 90)
+    HomeLine = r + 1
+End Function
+
+' Frameless textbox label (ported from MacroLayout ML_AddText).
+Private Function AddText(ws As Worksheet, ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
+                         ByVal txt As String, ByVal sz As Single, ByVal bold As Boolean, ByVal colr As Long) As Shape
+    Dim sh As Shape
+    Set sh = ws.Shapes.AddTextbox(1, l, t, w, h)
+    sh.Fill.Visible = msoFalse
+    sh.Line.Visible = msoFalse
+    With sh.TextFrame2.TextRange
+        .Text = txt
+        .Font.Size = sz
+        .Font.Bold = bold
+        .Font.Fill.ForeColor.RGB = colr
+    End With
+    Set AddText = sh
+End Function
+Private Function PageButtonCount(page As Object) As Long
+    Dim cols As Object, k As Variant
+    Set cols = page("cols")
+    For Each k In cols.Keys
+        PageButtonCount = PageButtonCount + cols(k).Count
+    Next k
+End Function
