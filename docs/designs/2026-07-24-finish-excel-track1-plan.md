@@ -2218,11 +2218,11 @@ Import `dist/MacrosBundle.fixture.bas` into a scratch workbook, then
 `Debug ▸ Compile VBAProject`. Expected: clean. A missing-argument or undefined-name
 error here is exactly what the structural gates cannot see.
 
-- [ ] **Step 2: Fixture pass — packing and geometry**
+- [x] **Step 2: Fixture pass — packing and geometry**
 
 Run `Core_BuildSetup`, then `Finalize Setup Tab`, and confirm:
 
-- [ ] **Two modules feed one category, and that category wraps to a second column.**
+- [x] **Two modules feed one category, and that category wraps to a second column.**
       The fiddliest case in the build. Full expected result immediately below.
 
 **What you should see** — two adjacent columns, somewhere on `Macros 1`:
@@ -2248,7 +2248,7 @@ the numbered ones are fixtures. Fixture numbering runs across *all* categories a
 titled categories, e.g. `Clean & Standardize` *and* `CLEAN & STANDARDIZE` (the merge
 failed); or a bare `(cont.)` with no number (see the `Reconcile` item below).
 
-- [ ] **Ten categories, 82 buttons in total.** Count the column headers across all
+- [x] **Ten categories, 82 buttons in total.** Count the column headers across all
       the `Macros N` tabs against this — the counts are per *category*, which may
       span more than one column:
 
@@ -2269,29 +2269,29 @@ failed); or a bare `(cont.)` with no number (see the `Reconcile` item below).
 That 82 is 74 fixture actions plus the 8 real ones (5 from `PkgImportExport`, 3 from
 `PkgClean`). Only `Import / Export` and `Clean & Standardize` contain anything real.
 
-- [ ] **Small categories share pages** — no page has one 3-button category alone
+- [x] **Small categories share pages** — no page has one 3-button category alone
       while a neighbouring page has room.
-- [ ] `Validate` (5 buttons) sits in **one** column with **no** `(cont.)` in its
+- [x] `Validate` (5 buttons) sits in **one** column with **no** `(cont.)` in its
       header. 5 is under the 6-per-column cap, so it must not wrap.
-- [ ] `Reconcile` (9) wraps to a second column headed `Reconcile (cont. 2)` —
+- [x] `Reconcile` (9) wraps to a second column headed `Reconcile (cont. 2)` —
       6 buttons then 3. **The number matters:** a bare `(cont.)` with no number is
       old behaviour and is a **failure**, because without it one page could show two
       identically-titled columns.
-- [ ] `Bulk Fixture Set` (26) spans **more than one tab**. At 6 per column and 3
+- [x] `Bulk Fixture Set` (26) spans **more than one tab**. At 6 per column and 3
       columns per tab, one tab holds at most 18, so 26 cannot fit on one.
-- [ ] **No other category is split across two tabs.** A category only splits when it
+- [x] **No other category is split across two tabs.** A category only splits when it
       needs more than 18 buttons; `Bulk Fixture Set` is the only one that does. A
       category wrapping to a second *column* on the same tab is normal and expected
       (`Clean & Standardize` and `Reconcile` both do).
-- [ ] Page titles name the categories on that page, joined by `|` when packed —
+- [x] Page titles name the categories on that page, joined by `|` when packed —
       no bare `Macros - Page N` anywhere.
-- [ ] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
+- [x] **Descriptions do not clip.** Every card shows its full sentence, wrapped, at
       9pt — **except `Fixture 1 - Ingest & Import`, whose description is
       deliberately empty** (it is the test that the minimum-height floor holds a
       card with no text). A single blank card description is correct. Every other
       description must show in full; if one is cut off, see the AutoFit check
       immediately below — that is the likely cause.
-- [ ] **THE AUTOFIT CHECK — look for this one deliberately; it is the single most
+- [x] **THE AUTOFIT CHECK — look for this one deliberately; it is the single most
       likely thing to be wrong on first open. The primary check is
       `Macros 1!F3`: `Clean & Standardize (cont. 2)`, 29 characters, 11pt bold,
       in the 30-character-wide card column, with no height floor.**
@@ -2324,27 +2324,27 @@ That 82 is 74 fixture actions plus the 8 real ones (5 from `PkgImportExport`, 3 
       first build and on every rebuild alike. There is no "only from the second
       build onward" caveat any more, and no reused sheet to blame. If
       `Macros 1!F3` wraps correctly, tick this.
-- [ ] Cards align across all three columns — button tops and description tops line
+- [x] Cards align across all three columns — button tops and description tops line
       up on every row.
-- [ ] `< Previous` and `Next >` sit in cells **B1** and **D1** on every page
+- [x] `< Previous` and `Next >` sit in cells **B1** and **D1** on every page
       (`<< Home` no longer exists to occupy B1), work, and are absent on the
       first/last page.
-- [ ] No `Macros` tab remains.
-- [ ] **Timed build.** Note the wall-clock time from clicking `Create Setup Tab` to
+- [x] No `Macros` tab remains.
+- [x] **Timed build.** Note the wall-clock time from clicking `Create Setup Tab` to
       the Setup tab appearing, and again for `Finalize`. The owner measured
       **several minutes** for the first build before the registry was memoized.
       Anything still in minutes means the cache is not being hit - check that
       `InvalidateRegistry` was not also wired into `Core_Run`.
-- [ ] The action catalog's third column header reads **`Placement`**, not
+- [x] The action catalog's third column header reads **`Placement`**, not
       `Page code`, in BOTH the Action catalog block and the Chains block.
-- [ ] The `Availability` cells still have a working dropdown offering exactly
+- [x] The `Availability` cells still have a working dropdown offering exactly
       `Button` / `Chains only` / `Off`. It is now applied to the whole block in one
       call instead of cell by cell, so this is confirming a refactor did not drop it.
-- [ ] No `Macros Home` tab exists. If you are rebuilding a workbook that had one
+- [x] No `Macros Home` tab exists. If you are rebuilding a workbook that had one
       from an earlier build, confirm it has been **deleted**, not left behind.
-- [ ] The build lands you on **`Macros 1`**, cell A1.
-- [ ] The completion dialog does **not** mention an index.
-- [ ] **The nav row on a SINGLE-page build.** `RenderNavRow` still sets row 1 to
+- [x] The build lands you on **`Macros 1`**, cell A1.
+- [x] The completion dialog does **not** mention an index.
+- [x] **The nav row on a SINGLE-page build.** `RenderNavRow` still sets row 1 to
       18pt unconditionally, but with only one page there is no `< Previous` and no
       `Next >` — and `<< Home` no longer occupies B1 — so row 1 renders as a blank
       18pt band. Behaviourally correct, but your original complaint was clutter and
@@ -2352,17 +2352,21 @@ That 82 is 74 fixture actions plus the 8 real ones (5 from `PkgImportExport`, 3 
       as wasted space, suppressing the row height when both links are absent is a
       two-line change.
 
-- [ ] **Step 3: Fixture pass — the three availability states**
+- [x] **Step 3: Fixture pass — the three availability states**
 
-- [ ] The catalog block reads `Action | Availability | Placement`, every row
+- [x] The catalog block reads `Action | Availability | Placement`, every row
       `Button`, and the Availability cell has a **working dropdown** offering
       exactly `Button`, `Chains only`, `Off`.
-- [ ] Set `fixture.a1` to `Off`, Finalize: its button disappears, **its row stays**
+- [x] Set `fixture.a1` to `Off`, Finalize: its button disappears, **its row stays**
       in the catalog.
-- [ ] Run `Core_Run "fixture.a1"` via Alt+F8: it **refuses** with the "switched
-      Off" message and does not run.
-- [ ] Set `fixture.a7` to `Chains only`, Finalize: no button. Alt+F8 `Core_Run
-      "fixture.a7"` refuses with the "Chains only" message.
+- [ ] Run `Core_Run "fixture.a1"` — it **refuses** with the "switched Off" message
+      and does not run. **Not via Alt+F8:** that dialog lists only `Public Sub`s
+      taking no arguments (just `Core_BuildSetup`, `Core_FinalizeSetup`,
+      `Core_SpeedOn`, `Core_SpeedOff`), and `Core_Run` takes an action id. Use the
+      VBA editor's Immediate window instead — **Alt+F11**, then **Ctrl+G**, type the
+      line, press Enter. The dialog appears exactly as it would from a button.
+- [ ] Set `fixture.a7` to `Chains only`, Finalize: no button. In the Immediate
+      window, `Core_Run "fixture.a7"` refuses with the "Chains only" message.
 - [ ] Build a chain containing `fixture.a7`: it **runs** as a step, one combined
       summary, no per-step dialogs.
 - [ ] Build a chain containing `fixture.a1` (which is `Off`): Finalize **BLOCKS**
@@ -2502,9 +2506,12 @@ That 82 is 74 fixture actions plus the 8 real ones (5 from `PkgImportExport`, 3 
 - [ ] Set every button to `hide` except one anchored button, then Finalize. Confirm
       the `Configuration activated.` dialog ends with
       `1 button(s) placed on your own sheets.` - a success dialog, not an error.
-      **Then, without changing anything, run `Core_BuildControlPanel` from
-      Alt+F8** (Excel ▸ Developer ▸ Macros, or Alt+F8, pick `Core_BuildControlPanel`,
-      Run). That is the *non-silent* path, and only it shows the zero-pages wording:
+      **Then, without changing anything, run `Core_BuildControlPanel` from the
+      Immediate window** — **Alt+F11**, **Ctrl+G**, type `Core_BuildControlPanel`,
+      Enter. It will **not** be in the Alt+F8 list: it takes an optional argument,
+      and Excel's Macro dialog hides any procedure that takes arguments at all,
+      optional included. That is the *non-silent* path, and only it shows the
+      zero-pages wording:
       `No macro pages were built - every button is hidden, switched Off, or anchored
       to one of your own sheets.` followed by the same
       `1 button(s) placed on your own sheets.` - not `Built 0 macro page(s)`.

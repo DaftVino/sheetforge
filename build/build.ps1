@@ -236,7 +236,10 @@ foreach ($src in $sources) {
     $rel = $src.Substring($Root.Length).TrimStart('\', '/') -replace '\\', '/'
     [void]$sb.Append("'    $rel$nl")
 }
-[void]$sb.Append("'  Import this ONE .bas, then run Core_BuildControlPanel (Alt+F8).$nl")
+[void]$sb.Append("'  Import this ONE .bas, then run Core_BuildSetup (Alt+F8) to create the$nl")
+[void]$sb.Append("'  Setup tab. Core_BuildControlPanel is NOT in the Alt+F8 list - it takes an$nl")
+[void]$sb.Append("'  optional argument, and Excel hides any macro that takes arguments. To run$nl")
+[void]$sb.Append("'  it directly: Alt+F11, Ctrl+G, type the name, Enter.$nl")
 [void]$sb.Append("'============================================================================$nl$nl")
 
 foreach ($src in $sources) {
@@ -318,5 +321,5 @@ $pkgNames = ($pkgFiles | ForEach-Object { Split-Path $_ -Leaf }) -join ', '
 Write-Host "Built $Out" -ForegroundColor Green
 Write-Host "  Core + $($pkgFiles.Count) package(s): $pkgNames"
 Write-Host "  $lines lines | Sub $subO/$subC | Function $fnO/$fnC | unique procedures: $($seen.Count)"
-Write-Host "  Import this ONE .bas, then run Core_BuildControlPanel."
+Write-Host "  Import this ONE .bas, then run Core_BuildSetup (Alt+F8)."
 exit 0

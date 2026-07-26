@@ -1022,8 +1022,10 @@ End Function
 
 ' The single public dispatch entry. Resolves an action id or a reserved chain.* id.
 ' A DIRECT invocation of anything not available as a button is refused here: with
-' the button gone the only ways to arrive are a stale shape or Alt+F8, and neither
-' should be able to run something the user switched off. Chain steps do not pass
+' the button gone the only ways to arrive are a stale shape, the VBE's Immediate
+' window, or Application.Run - and none should be able to run something the user
+' switched off. (NOT Alt+F8: Excel's Macro dialog lists only Public Subs taking no
+' arguments, so this one never appears there.) Chain steps do not pass
 ' through here - Core_RunChain calls RunAction, which independently refuses Off.
 Public Sub Core_Run(ByVal actionId As String)
     Dim res As Object, availMap As Object, t As String
@@ -2816,9 +2818,12 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     ' silent". Core_FinalizeSetup - the normal user path - calls this Sub silent and
     ' prints its own message, so a note built only for the MsgBox below was thrown
     ' away with the local on exactly the path where it matters most. mLastPlacedNote
-    ' carries it out; the non-silent MsgBox below still reads the local, so running
-    ' Core_BuildControlPanel directly from Alt+F8 is unchanged and the note is never
-    ' doubled (that path shows it, Finalize's path is not running).
+    ' carries it out; the non-silent MsgBox below still reads the local, so a direct
+    ' run of Core_BuildControlPanel is unchanged and the note is never doubled (that
+    ' path shows it, Finalize's path is not running). "Direct" means the VBE's
+    ' Immediate window, NOT Alt+F8: Excel's Macro dialog lists only Public Subs
+    ' taking no arguments, and this one's Optional silent parameter is enough to
+    ' hide it.
     If nPlaced > 0 Then _
         placedNote = vbCrLf & vbCrLf & nPlaced & " button(s) placed on your own sheets."
     ' A skipped anchor usually leaves that action with NO button anywhere - not on a
