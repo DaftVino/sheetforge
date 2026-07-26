@@ -2405,18 +2405,33 @@ outright.
 
 - [x] **Step 4: Fixture pass — the collapsed band**
 
-- [ ] With `fixture.a1` set to `Off`, run `Create Setup Tab` and scroll to the
-      bottom of the Setup tab. Three things to confirm:
-      **(a)** a band headed **SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON** exists and
-      the row `Used by Fixture 1 only` (`fx_a1`) is inside it — that field belongs to
-      `fixture.a1`, so switching that action off relegates its setting;
-      **(b)** the band is **collapsed**, with a `+` in Excel's left margin (the row
-      outline gutter, left of the row numbers) that expands it when clicked;
-      **(c)** whatever was in `fx_a1`'s yellow cell is **still there**. Out of the
-      box that is the default `one`, so seeing `one` is a pass. To test it properly,
-      type something else into that cell, Finalize, then re-run `Create Setup Tab`
-      and confirm your text survived — the point is that relegating a setting never
-      discards it.
+- [ ] **The band exists, is collapsed, and holds the right field.** Set `fixture.a1`
+      to `Off`, click `Finalize Setup Tab`, then click `Create Setup Tab` and scroll
+      to the bottom. Confirm **(a)** a band headed **SETTINGS FOR ACTIONS YOU HAVEN'T
+      TURNED ON** exists, with the row labelled `Used by Fixture 1 only` inside it;
+      and **(b)** the band is **collapsed** — there is a `+` in Excel's outline
+      gutter (the narrow strip left of the row numbers) that expands it when clicked.
+
+- [ ] **A relegated setting keeps its value.** This is the point of the whole
+      feature: switching an action off must never throw away what you typed. Run
+      these **in order** — the middle step is the one that matters:
+
+**Step 1.** Expand the band and find the row labelled `Used by Fixture 1 only`. **The
+cell to edit is the yellow one on that row** (column C, the same column every other
+setting's value sits in). It currently reads `one`. Replace it with `two`.
+
+**Step 2. Click `Finalize Setup Tab`.** ← **Do not skip this.**
+
+**Step 3.** Click `Create Setup Tab`, accept the rebuild prompt, expand the band
+again. **Expected: that cell still reads `two`.**
+
+**If you skip step 2, the cell correctly reverts to `one` — and that is not a
+failure.** `Create Setup Tab` rebuilds from your last *finalized* settings, never
+from what is on screen, and the rebuild prompt says exactly that: *"DISCARDED:
+anything you have typed on the Setup tab since the last 'Finalize Setup Tab'."* So
+skipping step 2 tests the discard rule instead, which is also correct behaviour —
+just not this check. `one` is the shipped default, which is what an unset field falls
+back to.
 **What this step is testing, in one sentence.** A setting that belongs *only* to
 actions you have switched `Off` is moved into a collapsed band at the bottom of the
 Setup tab — **never deleted**. A setting still reachable by anything stays in the
@@ -2503,6 +2518,14 @@ see one small Unassigned column; the fixture makes it look dramatic.
       workbook that already has one and answer **No** to the rebuild prompt. The
       Setup tab is left exactly as it was, including anything you had typed but not
       yet finalized.
+- [ ] **Accepting a rebuild discards unfinalized typing — and warns you first.** The
+      other half of the same prompt. Type something into any yellow settings cell,
+      do **not** Finalize, then click `Create Setup Tab` and answer **Yes**.
+      Expected: the prompt states plainly that unfinalized typing will be
+      **DISCARDED** and your last finalized settings **KEPT**, it defaults to **No**,
+      and after answering Yes your untyped-over value is back to whatever you last
+      finalized. Losing unsaved typing here is correct; losing it *silently* would
+      not be.
 - [ ] **Finalize twice in a row.** Click `Finalize Setup Tab`, let it finish, click
       it again. Expected: it just works. Specifically **no** *"That name is already
       taken"* error, and **no** stray `Setup (2)` or `Setup (3)` tab left behind —
