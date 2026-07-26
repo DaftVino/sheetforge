@@ -2333,8 +2333,10 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     Dim chainOnly As String, nOff As Long, t As String
     Dim layoutKR As Long, verdict As String, vDetail As String
     Dim aSheet As String, aCell As String
+    Dim aKey As String, placedList As String, seenTargets As Object
     Set ids = ActionIdSet()                        ' lowercased set of valid action ids
     Set chains = ReadChains(ws)
+    Set seenTargets = CreateObject("Scripting.Dictionary")
 
     s = "CHAINS:" & vbCrLf
     If chains.Count = 0 Then s = s & "  (none)" & vbCrLf
@@ -2380,11 +2382,41 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
                 If Not ParseCode(code, tabNum, colIx, colL) Then _
                     s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf: structural = structural + 1
             Case "anchor"
-                ' Form only here. The sheet-exists, reserved-sheet and
-                ' duplicate-target checks are added in the next task, and they
-                ' all run AFTER this one has confirmed the anchor parses.
-                If Not ParseAnchor(code, aSheet, aCell) Then _
-                    s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf: structural = structural + 1
+                If Not ParseAnchor(code, aSheet, aCell) Then
+                    s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf
+                    structural = structural + 1
+                ElseIf Not Core_SheetExists(aSheet) Then
+                    s = s & "NO SUCH SHEET for " & k & ": '" & code & "' - this workbook " & _
+                        "has no tab named " & Chr(34) & aSheet & Chr(34) & "." & vbCrLf
+                    structural = structural + 1
+                ElseIf IsEngineOwnedSheet(aSheet) Then
+                    s = s & "RESERVED SHEET for " & k & ": '" & code & "' - the engine " & _
+                        "rebuilds that tab on every build; pick one of your own." & vbCrLf
+                    structural = structural + 1
+                Else
+                    ' Normalise through the resolved absolute address so "B4" and
+                    ' "$B$4" collide correctly. Runs only after the sheet-exists
+                    ' check has passed, so an empty key here means a cell part
+                    ' that parses but does not resolve (a row past the sheet's
+                    ' last) - a bad code, not a duplicate.
+                    aKey = LCase(aSheet) & "!" & AnchorAddrKey(aSheet, aCell)
+                    If Right$(aKey, 1) = "!" Then
+                        s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf
+                        structural = structural + 1
+                    ElseIf seenTargets.Exists(aKey) Then
+                        ' Two buttons drawn at identical coordinates means one
+                        ' physically covers the other and is unclickable. Blocking
+                        ' is consistent with how a bad page code is already
+                        ' treated: every placement error here is structural.
+                        s = s & "DUPLICATE TARGET: " & CStr(seenTargets(aKey)) & " and " & _
+                            k & " both point at " & code & "." & vbCrLf
+                        structural = structural + 1
+                    Else
+                        seenTargets(aKey) = CStr(k)
+                        placedList = placedList & "  - " & HiddenTokenFor(CStr(k), chains) & _
+                                     "  ->  " & code & vbCrLf
+                    End If
+                End If
         End Select
     Next k
 
@@ -2514,6 +2546,8 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     ' "hide" is honoured in EITHER mode now (fix 1), so this is no longer
     ' conditional on AnyPlacementCode.
     If Len(hidden) > 0 Then s = s & "Hidden (not placed, in either mode):" & vbCrLf & hidden
+    If Len(placedList) > 0 Then _
+        s = s & "Placed on your own sheets (not on a generated page):" & vbCrLf & placedList
     ComposeReport = s
 End Function
 
@@ -3852,6 +3886,39 @@ Private Function IsPanelName(ByVal nm As String) As Boolean
     tail = Mid(nm, Len(PANEL_BASE) + 1)
     If Len(tail) = 0 Then Exit Function
     IsPanelName = IsNumeric(tail)
+End Function
+
+' Every sheet name this engine owns and rebuilds, in ONE place so a future
+' generated surface is added once rather than four times.
+'
+' An anchor pointing at one of these is blocked at Finalize: the engine deletes
+' or clears these tabs on every build, so a button placed there would vanish -
+' silently - on the very next rebuild, which is the worst possible way for a
+' placement to fail.
+Private Function IsEngineOwnedSheet(ByVal nm As String) As Boolean
+    Select Case LCase(Trim(nm))
+        Case LCase(SETUP_SHEET), LCase(ADMIN_SHEET), LCase(MACRO_SHEET), _
+             LCase(HOME_SHEET), LCase(CONFIG_SHEET), LCase(PACKAGES_SHEET)
+            IsEngineOwnedSheet = True
+        Case Else
+            IsEngineOwnedSheet = IsPanelName(nm)      ' every generated "Macros <n>"
+    End Select
+End Function
+
+' The resolved ABSOLUTE address of an anchor's cell ("$B$4"), or "" when the cell
+' part does not resolve on that sheet. Normalising through Range.Address is what
+' makes "B4" and "$B$4" collide correctly in the duplicate-target check - two
+' spellings of one cell are one target.
+' Callers must have confirmed the sheet exists first; a missing sheet yields ""
+' here, which the caller reports as a bad code rather than as a duplicate.
+Private Function AnchorAddrKey(ByVal sheetName As String, ByVal cellRef As String) As String
+    Dim ws As Worksheet, rng As Range
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(sheetName)
+    If Not ws Is Nothing Then Set rng = ws.Range(cellRef)
+    On Error GoTo 0
+    If rng Is Nothing Then Exit Function
+    AnchorAddrKey = rng.Address(True, True)
 End Function
 
 '================================================================

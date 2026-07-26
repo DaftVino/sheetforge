@@ -293,6 +293,41 @@ default page)'s **Unassigned** area. `hide` omits a button the same way in
 either mode. Same-code buttons stack in authoring order. Core's own admin
 controls are never user-placeable.
 
+**Anchored placement (v1.2.0).** A placement value may instead take the form
+`<sheet>!<cell>` (e.g. `TabName!B4`), which anchors that one button to a single cell on a
+surface the user owns, rather than filing it onto a generated page. The
+discriminator is `!`. The two forms can never be confused — not because the platform
+forbids `!` in a surface name (Excel, for one, does not) but because a valid **page
+code** cannot contain `!` under the grammar above, so even a surface legitimately
+named `1A` is unambiguous. An implementation MUST split on the **last** `!`, so a
+surface whose own name contains one still resolves. The sheet part may
+be quoted (`'TabName Data'!B4`) or bare even when it contains spaces (`TabName Data!B4`); an
+embedded apostrophe is doubled inside the quotes. The cell part is a single A1
+reference with optional `$` (`TabName!$B$4`); a range (a colon) is rejected.
+
+- **Normative: an anchor is NOT a placement code for the mode decision.** It does not
+  count toward "any code is present" in either direction — the same carve-out `hide`
+  already has. A store whose only non-blank values are anchors is a store with **no**
+  placement codes, and auto-layout applies to every other button unchanged. Stated in
+  both directions because reading this clause literally in the other direction is how
+  an implementation dumps every uncoded button into Unassigned the moment one button
+  is anchored.
+- **Normative: the engine MUST NOT modify the target surface** beyond adding and
+  removing its own control. No clearing, no resizing, no writing a value, no
+  formatting, no row or column sizing. The target is a surface the user owns; the
+  engine is a guest on it.
+- **Normative: an implementation MUST remove its previously-placed controls on
+  rebuild**, across the whole deployment, before placing from the current values — so
+  a moved cell, a cleared value, a renamed sheet, or a build that died halfway cannot
+  leave a live orphan behind.
+- **Blocking conditions.** Finalize MUST refuse to activate, naming the button, when:
+  the named surface does not exist; the named surface is one the engine itself
+  generates and rebuilds; two buttons resolve to the same target cell (two controls at
+  identical coordinates means one covers the other and is unreachable); or the value is
+  malformed.
+- Both the action catalog and the chains block use this same grammar, so a **chain**
+  may be anchored exactly like an action.
+
 **Column-cap overflow (v1.2.0).** A rendered page draws at most the same three
 columns Auto-layout is capped at below, and a column draws at most the same six
 buttons a same-code stack is capped at there too — regardless of whether that
@@ -450,6 +485,11 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
   alerts suppressed on every rebuild, so a package or a user relying on one of
   these names for anything else loses it silently. A platform reserves the
   equivalent generated-page names on its own surface.
+- **Reserved (v1.2.0):** in the Excel reference implementation, the shape-name prefix
+  `SFPlaced_`. Every control the engine anchors onto a user's own surface carries it,
+  and the engine removes controls by that prefix alone on every rebuild — so anything
+  else in the workbook using the prefix is deleted without warning. A platform
+  reserves its own equivalent namespace for the same purpose.
 - Reference-implementation binding names (`Pkg<Name>_<Verb>` entry points,
   `Pkg<Name>_Manifest`, `Core_*` API) are an Excel/VBA detail, not part of the
   portable contract.
@@ -596,13 +636,17 @@ port realizes them per platform rather than re-deriving them:
   the code is preserved unbuilt at `src/attic/HomeIndex.bas.txt` and the `Macros Home`
   name stays reserved in §7), the unconditional previous/next page navigation,
   the no-clipping rule for descriptions, the config schema marker with fail-closed
-  migration, and the reserved `Chains` category + `Macros Home` name. No `key`,
+  migration, the anchored `<sheet>!<cell>` placement form with its engine-must-not-modify and
+  must-sweep-on-rebuild rules, and the reserved `Chains` category + `Macros Home` name. No `key`,
   action `id`, kind, value encoding, or **action** semantics changed, so
   v1.0.0/v1.1.0 configs remain valid and read as all-actions-`button`. The
   *behaviours* replaced are engine layout for the uncoded case (single page →
   capacity-packed pages) and, for the coded case, an over-capacity column now
   overflowing instead of being silently undrawn — both engine presentation
   under the two-axis rule above, not stored-config compatibility, so both stay
-  additive. Owner-approved; see
+  additive. The anchored placement form adds no stored `key`, `id` or `kind`; it extends an
+  existing value's grammar with a form no valid v1.1.0 config could contain (a value
+  containing `!` was previously invalid and blocked Finalize), so no existing config is
+  reinterpreted. **Additive.** Owner-approved; see
   the Provenance section of `docs/designs/2026-07-24-finish-excel-track1-plan.md`
   for the three contested calls and who lost them.
