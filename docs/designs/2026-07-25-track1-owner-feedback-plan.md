@@ -1682,9 +1682,16 @@ the placement parsers sit together:
 ' "" | "hide" | "page" | "anchor" - the SINGLE place a placement value's form is
 ' decided. Every reader goes through this rather than testing for "!" itself.
 '
-' The "!" discriminator is safe because Excel forbids "!" in a sheet name, so an
-' anchor can never be confused with a page code - not even for a sheet
-' legitimately named "1A".
+' The "!" discriminator is safe for two reasons, and NEITHER is "Excel forbids !
+' in a sheet name" - it does not. The forbidden set is : \ / ? * [ ], so a sheet
+' really can be called "Sales!Q1".
+'   1. A valid PAGE CODE can never contain "!": ParseCode's grammar is digits
+'      then letters with a trailing-junk guard, so "1A!" is already rejected.
+'      That is what makes the two forms unconfusable - even for a sheet named "1A".
+'   2. ParseAnchor splits on the LAST "!" (InStrRev), so "Sales!Q1!B4" and
+'      "'Sales!Q1'!B4" both resolve to sheet "Sales!Q1", cell "B4".
+' Do NOT "simplify" that InStrRev to InStr - it would silently break every anchor
+' onto a sheet whose name legitimately contains "!".
 Private Function CodeKind(ByVal code As String) As String
     Dim s As String
     s = Trim(code)
@@ -1992,9 +1999,11 @@ New CodeKind is the single place a placement value's form is decided
 ('' | hide | page | anchor), so no site re-derives the rule. New ParseAnchor is
 a SIBLING of ParseCode, not a branch inside it: ParseCode's four call sites keep
 their page-code meaning and its hardening (digit cap, 3-letter cap, VSPLIT_MULT
-guard) is untouched. The '!' discriminator is safe because Excel forbids '!' in
-a sheet name, so an anchor can never be confused with a page code - not even for
-a sheet named '1A'.
+guard) is untouched. The '!' discriminator is safe because a valid PAGE CODE can
+never contain '!' (ParseCode's grammar rejects it), and because ParseAnchor
+splits on the LAST '!' - so an anchor can never be confused with a page code,
+not even for a sheet named '1A', and a sheet whose name legitimately contains
+'!' still resolves.
 
 Anchors are their own axis: AnyPlacementCode now ignores them exactly as it
 ignores 'hide', so typing MIC!B4 on one action does NOT flip the workbook into
@@ -2500,8 +2509,11 @@ grammar, insert:
 **Anchored placement (v1.2.0).** A placement value may instead take the form
 `<sheet>!<cell>` (e.g. `MIC!B4`), which anchors that one button to a single cell on a
 surface the user owns, rather than filing it onto a generated page. The
-discriminator is `!`, which Excel forbids in a sheet name — so the two forms can
-never be confused, not even for a sheet legitimately named `1A`. The sheet part may
+discriminator is `!`. The two forms can never be confused — not because the platform
+forbids `!` in a surface name (Excel, for one, does not) but because a valid **page
+code** cannot contain `!` under the grammar above, so even a surface legitimately
+named `1A` is unambiguous. An implementation MUST split on the **last** `!`, so a
+surface whose own name contains one still resolves. The sheet part may
 be quoted (`'MIC Data'!B4`) or bare even when it contains spaces (`MIC Data!B4`); an
 embedded apostrophe is doubled inside the quotes. The cell part is a single A1
 reference with optional `$` (`MIC!$B$4`); a range (a colon) is rejected.
