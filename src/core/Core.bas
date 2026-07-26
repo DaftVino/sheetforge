@@ -65,11 +65,12 @@ Private Const AVAIL_HEADER   As String = "Availability"
 '
 ' Unlike AVAIL_HEADER this one is NOT load-bearing, and that was checked rather
 ' than assumed: no check anywhere reads this caption back. The old caption
-' appeared only as a written value, at two sites. Kept as a Const anyway,
-' because two literals for one visible string is how they drift.
+' ('Page code') appeared only as a written value, at two sites. Kept as a
+' Const anyway, because two literals for one visible string is how they drift.
 '
-' Relabelled from the old caption because a placement value is no longer only
-' a page code: it may also be a "Sheet!Cell" anchor onto a user's own tab.
+' Relabelled from the old caption ('Page code') because a placement value is no
+' longer only a page code: it may also be a "Sheet!Cell" anchor onto a user's
+' own tab.
 Private Const PLACE_HEADER   As String = "Placement"
 
 ' Config-format marker, written into the hidden RID column of the action catalog's
