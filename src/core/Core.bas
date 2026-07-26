@@ -3558,12 +3558,17 @@ End Sub
 ' button can be hidden or switched Off (and, from v0.4.0, placed on a user's own
 ' sheet).
 '
-' Does nothing either when the target sheet is not xlSheetVisible. Hiding a
-' generated tab is a supported habit here, and Activate raises 1004 on a hidden
-' sheet. Deliberately does NOT unhide it the way BuildHomePage unhid the index:
-' the index was the one surface a user had to be able to get back to; a numbered
-' page is not, and silently unhiding a tab the user hid is worse than landing
-' wherever they already were.
+' The xlSheetVisible check is INSURANCE, not a supported-workflow guard. A
+' numbered page cannot normally be hidden at all: DeletePanels removes every
+' "Macros N" at the top of every build and EnsurePanelSheet recreates it via
+' Worksheets.Add, which always yields a visible sheet. The check is here
+' because DeletePanels deletes under On Error Resume Next - a delete that
+' failed silently could leave a hidden page behind, and Activate raises 1004
+' on one, on this pipeline's LAST statement, which would flip mLastBuildOk to
+' False after everything else had actually succeeded.
+' (Hiding IS a supported habit for Setup Menu, which BuildAdminPanel reuses
+' rather than recreates, and was for the withdrawn index - but not for a
+' generated page, which is rebuilt from scratch every time.)
 '
 ' The Core_SheetExists check here is NOT the banned nav-link guard (see
 ' RenderNavRow). That one fired at RENDER time against a sheet built later in the
