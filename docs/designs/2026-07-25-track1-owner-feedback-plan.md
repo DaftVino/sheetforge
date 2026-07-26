@@ -2752,6 +2752,26 @@ Add a new **Step 5b: anchored placements** after Step 5:
       - `MIC!B4:C9` (a range, not a cell) -> `BAD CODE`
       - also confirm `MIC!$B$4` and `MIC!B4` on two different actions **do** collide
         (they are the same cell spelled two ways)
+- [ ] **`Macros 1!B4` on a workbook that has NOT been built yet** (a fresh import,
+      before any `Macros N` tab exists). Finalize must say **`RESERVED SHEET`**, not
+      `NO SUCH SHEET`. The wrong message here would tell you to create a tab called
+      `Macros 1`, which `DeletePanels` destroys on the very next build.
+- [ ] **A PROTECTED target sheet.** Right-click `MIC` ▸ Protect Sheet ▸ OK (the
+      default protects `DrawingObjects`), then Finalize. Expected: **the build
+      COMPLETES** — it must not die with "rebuilding the Macros pages failed" — and
+      the completion dialog reports `1 anchored button(s) could NOT be placed`.
+      **This is the single most important item in this section**: it is the one
+      assumption that could not be verified without Excel (`ws.Buttons.Add` raising
+      1004 on a protected sheet), and before the fix it took down the whole build.
+      **Known residual, not a bug to report:** a button placed on that sheet by an
+      *earlier* build survives, because the sweep cannot delete it either. Removing
+      it would mean the engine unprotecting your sheet, which it must never do.
+      Unprotect and re-Finalize to clear it.
+- [ ] **A RENAMED target sheet.** Anchor a button to `MIC!B4`, Finalize, then rename
+      `MIC` to something else and Finalize again. Expected: the completion dialog
+      says `1 anchored button(s) could NOT be placed - the sheet or cell no longer
+      exists...`. Confirm that action now has **no** button anywhere; that is
+      correct and is what the message exists to tell you.
 - [ ] With an anchor active, the Finalize report shows a soft
       `Placed on your own sheets` list in the same `caption [id]` format the
       `Hidden` and `Unassigned` lists use, and it does **not** block.
