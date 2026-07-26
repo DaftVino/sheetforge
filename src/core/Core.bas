@@ -1779,7 +1779,7 @@ End Function
 Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim existing As Collection, ch As Object, i As Long
     r = BlockIntro(ws, r, "Chains  -  one button that runs several actions in order", _
-                   "Button name + Steps (paste tokens from the Actions list, one per line) + Placement.")
+                   "Button name + Steps (paste tokens from the Actions list, one per line) + Placement (1A, hide, or MIC!B4).")
     ws.Cells(r, KEY_COL).Value = CHAINS_KEY
     ws.Cells(r, VAL_COL).Value = "Button name"
     ws.Cells(r, VAL_COL + 1).Value = "Steps (one token per line)"
@@ -1988,6 +1988,9 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                    "Chain can still run it; 'Off' hides it and stops it running anywhere. " & _
                    "Placement: leave every code blank for the automatic layout; fill in even one " & _
                    "placement code and codes take over - number = page, letters = column (e.g. 1A). " & _
+                   "Or put a button on one of your OWN tabs with  Sheet!Cell  - " & _
+                   "for example  MIC!B4  places it on cell B4 of the MIC tab, and " & _
+                   "does not change where any other button goes. " & _
                    "Type  hide  to leave any one button off, whether or not you use placement codes.")
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
@@ -2189,6 +2192,7 @@ End Function
 Private Function ConfigSchemaStatus(ByRef detail As String, ByRef badIds As Object) As String
     Dim ws As Worksheet, kr As Long, nk As Long, i As Long
     Dim id As String, code As String, tn As Long, cx As Long, cl As String
+    Dim aSheet As String, aCell As String
     Dim verdict As String
     detail = ""
     Set badIds = CreateObject("Scripting.Dictionary")
@@ -2213,12 +2217,24 @@ Private Function ConfigSchemaStatus(ByRef detail As String, ByRef badIds As Obje
                 id = Trim(CStr(ws.Cells(i, RID_COL).Value))
                 If Len(id) > 0 Then
                     code = Trim(CStr(ws.Cells(i, VAL_COL + 1).Value))
-                    If Len(code) > 0 And LCase(code) <> "hide" Then
-                        If Not ParseCode(code, tn, cx, cl) Then
-                            detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
-                            badIds(LCase(id)) = True
-                        End If
-                    End If
+                    ' Route through CodeKind so an anchor is never classified
+                    ' "invalid". That path CLEARS the offending rows, so getting
+                    ' this wrong would silently delete every anchor on a marker
+                    ' recovery. A legacy store predates anchors, so this branch
+                    ' is defensive rather than reachable today - which is exactly
+                    ' why it has to be right, because nothing will exercise it.
+                    Select Case CodeKind(code)
+                        Case "page"
+                            If Not ParseCode(code, tn, cx, cl) Then
+                                detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
+                                badIds(LCase(id)) = True
+                            End If
+                        Case "anchor"
+                            If Not ParseAnchor(code, aSheet, aCell) Then
+                                detail = detail & "  - " & id & ": '" & code & "'" & vbCrLf
+                                badIds(LCase(id)) = True
+                            End If
+                    End Select
                 End If
             Next i
             If Len(detail) > 0 Then
@@ -2301,6 +2317,7 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     Dim availMap As Object, offList As String, badAvail As String
     Dim chainOnly As String, nOff As Long, t As String
     Dim layoutKR As Long, verdict As String, vDetail As String
+    Dim aSheet As String, aCell As String
     Set ids = ActionIdSet()                        ' lowercased set of valid action ids
     Set chains = ReadChains(ws)
 
@@ -2320,10 +2337,14 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
             Next stepId
         End If
         code = CStr(ch("code"))
-        If Len(code) > 0 And LCase(code) <> "hide" Then
-            If Not ParseCode(code, tabNum, colIx, colL) Then _
-                s = s & "  {bad code '" & code & "'}": structural = structural + 1
-        End If
+        Select Case CodeKind(code)
+            Case "page"
+                If Not ParseCode(code, tabNum, colIx, colL) Then _
+                    s = s & "  {bad code '" & code & "'}": structural = structural + 1
+            Case "anchor"
+                If Not ParseAnchor(code, aSheet, aCell) Then _
+                    s = s & "  {bad code '" & code & "'}": structural = structural + 1
+        End Select
         s = s & vbCrLf
     Next ch
 
@@ -2331,17 +2352,25 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
     Set map = ReadCodeMap(ws)
     For Each k In map.Keys
         code = CStr(map(k))
-        If LCase(code) = "hide" Then
-            hidden = hidden & "  - " & HiddenTokenFor(CStr(k), chains) & vbCrLf
-        ElseIf Len(code) = 0 Then
-            ' Fix round 2, fix 2: was the bare lowercased key - same
-            ' inconsistency fix round 1's fix 5 removed from the HIDDEN list
-            ' just above, now closed here too so both lists in one report
-            ' agree on "caption [id]".
-            unassigned = unassigned & "  - " & HiddenTokenFor(CStr(k), chains) & vbCrLf
-        ElseIf Not ParseCode(code, tabNum, colIx, colL) Then
-            s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf: structural = structural + 1
-        End If
+        Select Case CodeKind(code)
+            Case "hide"
+                hidden = hidden & "  - " & HiddenTokenFor(CStr(k), chains) & vbCrLf
+            Case ""
+                ' Fix round 2, fix 2: was the bare lowercased key - same
+                ' inconsistency fix round 1's fix 5 removed from the HIDDEN list
+                ' just above, now closed here too so both lists in one report
+                ' agree on "caption [id]".
+                unassigned = unassigned & "  - " & HiddenTokenFor(CStr(k), chains) & vbCrLf
+            Case "page"
+                If Not ParseCode(code, tabNum, colIx, colL) Then _
+                    s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf: structural = structural + 1
+            Case "anchor"
+                ' Form only here. The sheet-exists, reserved-sheet and
+                ' duplicate-target checks are added in the next task, and they
+                ' all run AFTER this one has confirmed the anchor parses.
+                If Not ParseAnchor(code, aSheet, aCell) Then _
+                    s = s & "BAD CODE for " & k & ": '" & code & "'" & vbCrLf: structural = structural + 1
+        End Select
     Next k
 
     ' (a) no package action id may live in the reserved chain.* namespace
@@ -2494,11 +2523,18 @@ End Function
 ' does not place one, so it must not count as a placement here.
 ' Core_BuildControlPanel (Task 8) uses THIS helper, and only this one, both to
 ' choose BuildAutoLayout vs BuildManualLayout.
+' v0.4.0: a "Sheet!Cell" ANCHOR gets the same carve-out, and for the same reason.
+' An anchor does not place a button on a generated page at all - it puts one on a
+' sheet the engine otherwise never touches - so it is not a page-layout decision.
+' Without this, typing "MIC!B4" on ONE action would flip the workbook into manual
+' mode and dump the other 81 buttons into page 1's Unassigned column. This is the
+' third carve-out of the same shape; the contract clause is written to match, in
+' both directions, so a port reading section 6 literally cannot reintroduce the bug -
+' which the ledger records almost happening with "hide".
 Private Function AnyPlacementCode(map As Object) As Boolean
-    Dim k As Variant, v As String
+    Dim k As Variant
     For Each k In map.Keys
-        v = Trim(CStr(map(k)))
-        If Len(v) > 0 And LCase(v) <> "hide" Then AnyPlacementCode = True: Exit Function
+        If CodeKind(CStr(map(k))) = "page" Then AnyPlacementCode = True: Exit Function
     Next k
 End Function
 
@@ -3750,6 +3786,89 @@ Private Function ParseCode(ByVal code As String, ByRef tabNum As Long, _
         colIndex = colIndex * 26 + (Asc(Mid(letters, i, 1)) - Asc("A") + 1)
     Next i
     ParseCode = True
+End Function
+
+' "" | "hide" | "page" | "anchor" - the SINGLE place a placement value's form is
+' decided. Every reader goes through this rather than testing for "!" itself.
+'
+' The "!" discriminator is safe because Excel forbids "!" in a sheet name, so an
+' anchor can never be confused with a page code - not even for a sheet
+' legitimately named "1A".
+Private Function CodeKind(ByVal code As String) As String
+    Dim s As String
+    s = Trim(code)
+    If Len(s) = 0 Then CodeKind = "": Exit Function
+    If LCase(s) = "hide" Then CodeKind = "hide": Exit Function
+    If InStr(1, s, "!") > 0 Then CodeKind = "anchor": Exit Function
+    CodeKind = "page"
+End Function
+
+' "MIC!B4" / "'MIC Data'!$B$4" / "MIC Data!B4" -> sheetName "MIC Data",
+' cellRef "B4". Returns False on anything malformed.
+'
+' The sheet part may be quoted; an embedded apostrophe is doubled inside the
+' quotes, matching Excel's own spelling. The cell part is a SINGLE A1 reference.
+' A colon (a multi-cell range) is rejected: this anchors one button, not a block.
+'
+' Deliberately a SIBLING of ParseCode, not a branch inside it. ParseCode's four
+' call sites keep their page-code meaning and its hard-won hardening - the digit
+' cap, the 3-letter cap, the VSPLIT_MULT guard - stays exactly as the ledger left
+' it.
+Private Function ParseAnchor(ByVal code As String, ByRef sheetName As String, _
+                             ByRef cellRef As String) As Boolean
+    Dim s As String, p As Long, sh As String, cl As String
+    sheetName = ""
+    cellRef = ""
+    s = Trim(code)
+    p = InStrRev(s, "!")
+    If p < 2 Then Exit Function              ' no "!", or nothing before it
+    If p = Len(s) Then Exit Function         ' nothing after it
+    sh = Left$(s, p - 1)
+    cl = Mid$(s, p + 1)
+    If Left$(sh, 1) = "'" Then
+        If Len(sh) < 3 Then Exit Function
+        If Right$(sh, 1) <> "'" Then Exit Function
+        sh = Mid$(sh, 2, Len(sh) - 2)
+        sh = Replace(sh, "''", "'")
+    End If
+    sh = Trim(sh)
+    If Len(sh) = 0 Then Exit Function
+    If Not IsA1Ref(cl) Then Exit Function
+    sheetName = sh
+    cellRef = UCase(Replace(cl, "$", ""))
+    ParseAnchor = True
+End Function
+
+' A single A1-style cell reference: optional "$", 1-3 column letters, optional
+' "$", 1-7 row digits, and nothing else. Rejects a colon (a range), a
+' whole-column reference, and any trailing character.
+' Row bounds beyond the digit cap are NOT checked here - a 7-digit row that
+' exceeds the sheet's real last row simply fails to resolve when the caller asks
+' for the Range, which is the one place that knows the platform's limit.
+Private Function IsA1Ref(ByVal s As String) As Boolean
+    Dim t As String, i As Long, ch As String, letters As String, digits As String
+    t = UCase(Trim(s))
+    If Len(t) = 0 Then Exit Function
+    i = 1
+    If Mid$(t, i, 1) = "$" Then i = i + 1
+    Do While i <= Len(t)
+        ch = Mid$(t, i, 1)
+        If ch >= "A" And ch <= "Z" Then letters = letters & ch Else Exit Do
+        i = i + 1
+    Loop
+    If i <= Len(t) Then
+        If Mid$(t, i, 1) = "$" Then i = i + 1
+    End If
+    Do While i <= Len(t)
+        ch = Mid$(t, i, 1)
+        If ch >= "0" And ch <= "9" Then digits = digits & ch Else Exit Do
+        i = i + 1
+    Loop
+    If i <= Len(t) Then Exit Function                     ' trailing junk, or a ":"
+    If Len(letters) = 0 Or Len(letters) > 3 Then Exit Function
+    If Len(digits) = 0 Or Len(digits) > 7 Then Exit Function
+    If CLng(digits) < 1 Then Exit Function
+    IsA1Ref = True
 End Function
 
 Private Function IndexToCol(ByVal idx As Long) As String
