@@ -563,6 +563,40 @@ Public Function Core_SheetExists(ByVal nm As String) As Boolean
     On Error GoTo 0
 End Function
 
+' "MIC!M2:M12", or "'MIC Data'!M2:M12" when the sheet name needs quoting.
+' Range.Address omits the sheet name BY DESIGN, so every message that names a
+' range must qualify it here or a cross-tab run is indistinguishable from a
+' same-tab one - which is exactly what the owner hit at the v0.4.0 gate: three
+' PkgClean actions reported "M2:M12" whether they had acted on MIC or on the
+' button's own tab.
+' Lives in Core, not PkgClean: CLAUDE.md rule 4 puts shared helpers only in Core,
+' and a copy in a package would be a standards deviation.
+Public Function Core_RangeRef(rng As Range) As String
+    Dim nm As String
+    If rng Is Nothing Then Exit Function
+    nm = rng.Parent.Name
+    If NeedsSheetQuotes(nm) Then nm = "'" & Replace(nm, "'", "''") & "'"
+    Core_RangeRef = nm & "!" & rng.Address(False, False)
+End Function
+
+' Excel's own rule: a sheet name is written bare only when it is entirely
+' A-Z / a-z / 0-9 / "_" and does not begin with a digit. Anything else is
+' quoted, and an embedded apostrophe is doubled inside the quotes.
+Private Function NeedsSheetQuotes(ByVal nm As String) As Boolean
+    Dim i As Long, ch As String
+    If Len(nm) = 0 Then NeedsSheetQuotes = True: Exit Function
+    ch = Left$(nm, 1)
+    If ch >= "0" And ch <= "9" Then NeedsSheetQuotes = True: Exit Function
+    For i = 1 To Len(nm)
+        ch = Mid$(nm, i, 1)
+        If Not ((ch >= "A" And ch <= "Z") Or (ch >= "a" And ch <= "z") _
+                Or (ch >= "0" And ch <= "9") Or ch = "_") Then
+            NeedsSheetQuotes = True
+            Exit Function
+        End If
+    Next i
+End Function
+
 ' Robust last data row: End(xlUp) on a column, widened by the used-range
 ' last cell (SpecialCells), which catches trailing formatted/blank rows.
 Public Function Core_LastRow(ws As Worksheet, Optional ByVal col As Long = 1) As Long
