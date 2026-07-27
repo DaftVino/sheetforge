@@ -2921,6 +2921,109 @@ reserved-word list: `place`, `out`, `flag`, `raw`, `target`, `paged`, `anchored`
 
 ## Handoff log
 
+### 2026-07-26 — all ten tasks built and reviewed; owner's Excel gate IN PROGRESS
+
+**Branch.** `feat/finish-excel-track1`, **71 commits, NOT pushed, no PR.** Nothing
+merged. `main` is still v0.3.0 / contract v1.1.0. This plan contributed **31** of
+those commits (`f9436e6..HEAD`). Contract on the branch is v1.2.0, unreleased,
+deliberately never bumped.
+
+**What shipped.** All four owner-gate items, Tasks 1-10, each with a dedicated
+spec+quality review; five needed one fix round, all resolved. Then a whole-branch
+review (verdict: *blocked on the verification instrument, not the code*), one
+consolidated fix wave of nine findings, and one scoped re-review — all addressed.
+
+Test count before and after: **n/a, and not an omission.** No VBA runner exists and
+`test-driven-development` is formally off (CLAUDE.md, "Off"). Verification is
+`pwsh build/build.ps1` on both bundles plus `node scripts/vba-syntax-check.mjs` on
+both — structural only — plus the owner's manual import.
+
+**TWO REAL CODE DEFECTS found by the manual gate. Do not revert either fix.**
+
+1. **`AddBtn` was not atomic** (`816fd47`). It has no error handler and runs under
+   the caller's `On Error Resume Next`; in VBA an error inside a handler-less
+   procedure resumes at the statement *after* the call, abandoning the rest of the
+   callee. `Buttons.Add` had already created the shape, so every failed placement
+   left a button carrying Excel's **default** name (`Button 11`), no caption and no
+   `OnAction` — and because `SweepPlacedButtons` matches on the `SFPlaced_` name
+   prefix, it could never remove it. **Permanent orphan, one per failed placement.**
+   Now all-or-nothing: delete the partial shape, re-raise the original error.
+2. **`eNum` IS the reserved word `Enum`** (`8f3a719`). VBA identifiers are
+   case-insensitive. I introduced it in the fix for (1) and it broke
+   `Debug ▸ Compile` on import. **Second instance of this class after `any`**, found
+   the same way — by a human importing the bundle, after both automated gates passed
+   it clean. `'enum'` added to `build.ps1`'s reserved list and **demonstrated**
+   failing on a reintroduced `eNum` / passing clean, matching how the `any` gate was
+   proven. That list's rule stands: add a word when Excel rejects one, never on
+   suspicion.
+
+**What the plan got wrong — do not revert these corrections.**
+
+1. **`'MIC Data'!B4` could never work in Excel.** A leading apostrophe is Excel's
+   "treat as text" prefix: consumed by the cell, stripped from `.Value`, still shown
+   in the formula bar. The engine received `MIC Data'!B4` and reported `NO SUCH
+   SHEET` for a tab in plain view. That spelling was listed **first** in contract §6
+   and in the checklist. Owner chose accept-and-repair; `ParseAnchor` now treats an
+   orphaned closing quote as the eaten pair, and §6 carries a normative clause for
+   platforms whose cells do not eat the character. **NOT YET VERIFIED IN EXCEL.**
+2. **"Excel forbids `!` in a sheet name" is FALSE.** The forbidden set is
+   `: \ / ? * [ ]`. The claim came from the design doc, propagated into the plan and
+   the landed comment, and was headed for `spec/contract.md` as normative text for
+   the Apps Script port. The conclusion still holds for two other reasons: a valid
+   page code can never contain `!` (`ParseCode`'s grammar rejects it), and
+   `ParseAnchor` splits on the **last** `!`. **Do not "simplify" `InStrRev` to
+   `InStr`** — it would silently break anchors onto a sheet whose name contains `!`.
+   The design doc is annotated in place; its body is deliberately unedited.
+3. **`Core_Run` and `Core_BuildControlPanel` are NOT in Alt+F8** (`055d24b`).
+   Excel's Macro dialog lists only `Public Sub`s taking **no arguments** — an
+   *optional* argument is enough to hide one. Two checklist steps and `build.ps1`'s
+   shipped bundle header all told users to run them that way. Use the VBE Immediate
+   window (Alt+F11, Ctrl+G).
+4. **The Finalize check order was wrong** (Task 9 fix round). `Macros <n>` tabs are
+   created *after* Finalize, so `Macros 1!B4` on a new deployment reported `NO SUCH
+   SHEET` and the obvious fix — create that tab — is something `DeletePanels`
+   destroys next build. Order is now malformed → engine-owned → sheet-missing →
+   duplicate.
+
+**What was discovered — empirical, with evidence.**
+
+- The macros-disabled banner the owner hit was **Mark-of-the-Web** (file in
+  `D:\Downloads\`), not a settings change. Unblock via file Properties.
+- Chain anchors failed during the gate with "couldn't be placed" while actions never
+  did. **On current code the chain places correctly**, and a step-by-step diagnostic
+  showed `Buttons.Add` / `.Name` / `.Caption` / `.OnAction` / `.Font` / `.Placement`
+  all OK (shape name 26 chars — the name-length hypothesis was **wrong**). Both
+  defects above were live at the time and that workbook had accumulated orphans.
+  **Cause not determined; deliberately left unattributed. Do not invent one.** If it
+  recurs on clean code it is a new finding.
+- The checklist itself was the main source of friction: **six items** could not be
+  executed or judged as written. Root cause was naming internal identifiers where
+  the Setup tab shows labels. Now rewritten and consolidated (37 remaining items →
+  24) and filed as GitHub **issue #3** with a proposed blind-dry-run gate.
+
+**What is still open, and what needs a human.**
+
+- **The gate itself.** Steps 1-5 pass; 5b partly. **24 items remain** across
+  5b/6/7/7b. Only the owner can run them.
+- **Never verified in Excel:** the apostrophe repair, the sweep-on-clear, the four
+  blocking conditions, and — highest value — the **protected-sheet** item, which is
+  the one assumption nothing agent-side can execute (`ws.Buttons.Add` raising 1004)
+  and which took down the whole build before `816fd47`.
+- **Needs the owner's eyes:** `ANCHOR_BTN_W` at 110pt was judged acceptable once;
+  worth a second look against real data.
+- **Blocking Task 11** (teardown + ship): the remaining 24 items.
+
+**Next phase.** Finish the manual gate, then Task 11. Read manifest:
+
+| File | Size | Why |
+|---|---|---|
+| `docs/designs/2026-07-24-finish-excel-track1-plan.md` | 140K | **Task 10 section only** (~line 2168+) — the live checklist; Task 11 follows it |
+| `.superpowers/sdd/2026-07-25-track1-owner-feedback-plan/progress.md` | 32K | the ledger: every review, fix round, parked finding and gate result |
+| `docs/designs/2026-07-25-track1-owner-feedback-plan.md` | 129K | **this file's handoff log only** unless a task needs re-reading |
+| `spec/contract.md` | 42K | normative; §3, §6, §7, §8, §10 all amended by this work |
+| `docs/code-map.md` | 29K | grep for an anchor, then read the slice |
+| `src/core/Core.bas` | 208K | **grep, never read whole** |
+
 ### 2026-07-25 — plan written, implementation not started
 
 **Branch.** `feat/finish-excel-track1`, 40 commits, NOT pushed, no PR. `main` is still
