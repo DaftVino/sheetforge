@@ -14,42 +14,87 @@ written against that failure.
 
 ---
 
-## Status — partial pass, shipped deliberately (2026-07-27)
+## Status — sections 3-6 ARE THE RUN SHEET (2026-07-27, PR #7 merged)
 
-**Run by the owner in Excel. Sections 1 and 2 pass; sections 3-6 are deferred to a
-later review pass at the owner's call, and the branch ships without them.** This is
-recorded here rather than in the PR alone so the next session cannot mistake an
-unticked box for one nobody looked at.
+Sections 1 and 2 passed and are done. **PR #7 has since merged, so sections 3-6 are now
+verifying code that is already on `main` at v0.5.0.** They are no longer deferred: this
+is the outstanding run, to be completed before Part A starts.
 
 | Section | State |
 |---|---|
 | **1. The Setup surface** | **Pass.** Item 4 asserted the wrong outcome and was corrected — see the item itself; the code was never wrong. |
-| **2. The three prompts** | **Pass**, except item 5 (the completion message's interpretation line), not run. |
-| **3. Cancel paths** | **Deferred.** Five items, none run. |
-| **4. Key-column validation** | **Deferred.** Three items, none run. |
-| **5. v0.4.0 refusal** | **Deferred.** Three items, none run. **Highest residual risk** — see below. |
-| **6. Inside a chain** | **Deferred.** One item, not run. |
+| **2. The three prompts** | **Pass**, except item 5 (the completion message's interpretation line) — folded into the run below. |
+| **3. Cancel paths** | **TO RUN.** Five items. |
+| **4. Key-column validation** | **TO RUN.** Three items. |
+| **5. v0.4.0 refusal** | **TO RUN — do this one first.** Three items. Highest risk; see below. |
+| **6. Inside a chain** | **TO RUN.** One item. |
 
-**What that leaves unverified.** Section 5 is the one to weigh: the `other-major`
-refusal has never been reached by a genuine version bump, only by a hand-edited marker
-in the v0.4.0 gate, and its neighbour — a v0.3.0-era workbook with no marker at all
-still taking the legacy path — is the case that would fail *silently*. Nothing in
-sections 3, 4 or 6 can corrupt data: each is a stop-early path whose failure mode is a
-runtime-error dialog rather than a wrong edit. Section 2's item 5 is cosmetic wording
-on a dialog whose behaviour item 4 already confirmed.
+**Run section 5 first.** It is the only one whose failure is *silent*. The `other-major`
+refusal has never been reached by a genuine version bump — only by a hand-edited marker
+during the v0.4.0 gate — and its neighbour, a v0.3.0-era workbook with no marker still
+taking the legacy path, would fail without any visible symptom. Sections 3, 4 and 6 are
+stop-early paths whose failure mode is a runtime-error dialog: annoying, but loud, and
+incapable of corrupting data.
 
-**Before the next release, run sections 3-6.** They are not cancelled, only deferred.
+**Why now rather than later.** Part A changes this same `_Config` surface. Verifying it
+first means any later failure is unambiguously Part A's doing rather than something
+inherited from v0.5.0.
+
+**Section 5 needs two old workbooks that do not exist yet — Q (v0.4.0) and C (v0.3.0).**
+`dist/` is gitignored and there are no release tags, so neither the workbooks nor the old
+bundles survive anywhere. **The Setup section below now builds both from their release
+commits**, and the bundles are already sitting in `dist/`. Do not substitute a v0.5.0
+workbook for either: a v0.5.0 config reads as `same-major`, never reaches the branch under
+test, and the section would pass vacuously.
 
 ---
 
 ## Setup
 
-You need **two workbooks**:
+### First: build the old bundles you will need
 
-| # | Workbook | How |
+**You almost certainly do not have a v0.4.0 or v0.3.0 workbook lying around, and `dist/`
+is gitignored so no old `.bas` survives either.** You have to build them. There are no
+release tags, so the release commits are named directly:
+
+```sh
+# from the repo root, on any branch — these use throwaway worktrees and touch nothing
+git worktree add /tmp/wt-v040 3e586cf     # chore(release): v0.4.0
+git worktree add /tmp/wt-v030 cc59695     # chore: release v0.3.0
+
+(cd /tmp/wt-v040 && pwsh build/build.ps1) && cp /tmp/wt-v040/dist/MacrosBundle.bas dist/MacrosBundle-v0.4.0.bas
+(cd /tmp/wt-v030 && pwsh build/build.ps1) && cp /tmp/wt-v030/dist/MacrosBundle.bas dist/MacrosBundle-v0.3.0.bas
+
+git worktree remove /tmp/wt-v040 --force && git worktree remove /tmp/wt-v030 --force
+```
+
+**Already done for you — both files are in `dist/` now.** They are gitignored, so rebuild
+them with the above if they go missing. Verify before use, because the whole of §5 turns
+on these three markers being different:
+
+| Bundle | `SCHEMA_VER` | Reads as under v0.5.0 |
 |---|---|---|
-| **P** | A fresh scratch copy. Tests the new behaviour on a clean install. | Import `dist/MacrosBundle.bas`, `Debug ▸ Compile VBAProject`, Alt+F8 → `Core_BuildSetup`, then `Finalize Setup Tab`. |
-| **Q** | A workbook **already finalized under v0.4.0** — tests that an existing `_Config` carrying the two withdrawn keys upgrades cleanly. | Take any workbook finalized before this change. Alt+F11, right-click the `MacrosBundle` module ▸ Remove ▸ **No** to the export prompt, import the new `dist/MacrosBundle.bas`, then run `Core_BuildSetup`. |
+| `dist/MacrosBundle-v0.3.0.bas` | **no constant at all** | `absent` → legacy path |
+| `dist/MacrosBundle-v0.4.0.bas` | `"v1.2"` | `other-major` → **refused** |
+| `dist/MacrosBundle.bas` | `"v2.0"` | `same-major` → normal |
+
+```sh
+grep -c 'SCHEMA_VER' dist/MacrosBundle-v0.3.0.bas   # expect 0
+grep -n 'SCHEMA_VER     As String' dist/MacrosBundle-v0.4.0.bas dist/MacrosBundle.bas
+```
+
+### Then: the three workbooks
+
+| # | Workbook | How to build it |
+|---|---|---|
+| **P** | Fresh scratch copy — the new behaviour on a clean install. | New workbook → import `dist/MacrosBundle.bas` → `Debug ▸ Compile VBAProject` → Alt+F8 `Core_BuildSetup` → `Finalize Setup Tab`. |
+| **Q** | Finalized under **v0.4.0**, then upgraded. Tests the refusal. | New workbook → import **`dist/MacrosBundle-v0.4.0.bas`** → Alt+F8 `Core_BuildSetup` → **`Finalize Setup Tab`** (this is the step that writes the `v1.2` marker — without it there is no `_Config` and the test is void). Save. Then Alt+F11, right-click the `MacrosBundle` module ▸ Remove ▸ **No** to the export prompt, import `dist/MacrosBundle.bas`, and run `Core_BuildSetup`. |
+| **C** | Finalized under **v0.3.0**, then upgraded. Tests the legacy path. | Same as Q but with **`dist/MacrosBundle-v0.3.0.bas`**. Note the entry point differs in that era: the v0.3.0 build says **`Core_BuildControlPanel`**, not `Core_BuildSetup`. Finalize, save, then swap the module for `dist/MacrosBundle.bas` and run `Core_BuildSetup`. |
+
+**Finalizing is not optional for Q and C.** `Core_BuildSetup` alone only draws the Setup
+tab; `Finalize Setup Tab` is what copies it to the hidden `_Config` that carries the
+marker. An unfinalized workbook has no `_Config`, reads as `none`, and would pass §5
+vacuously.
 
 If a copy lands in `Downloads`, unblock it first (right-click ▸ Properties ▸ Unblock) —
 that is Mark-of-the-Web, not a macro-settings problem.
@@ -104,13 +149,13 @@ Leave `M1` empty. Click **Remove Duplicates**.
 - [x] **It runs.** Answer `No` then accept `1`. Expected: **ten rows remain** — `M5`
       removed because `M2` participated. Eleven remaining means the first row was
       skipped and the original symptom is back.
-- [ ] **DEFERRED — The completion message states the interpretation.** It ends
+- [ ] **The completion message states the interpretation.** It ends
       `Every row was compared, including the first.` Run it again answering `Yes` and
       it ends `The first row was treated as a header and left alone.` This is the
       point of the change: the answer is invisible in the result, so the report has
       to carry it.
 
-## 3. Cancel is clean at all three points (workbook P) — DEFERRED
+## 3. Cancel is clean at all three points (workbook P)
 
 Each of these must stop with **nothing changed and no error dialog**:
 
@@ -124,7 +169,7 @@ Each of these must stop with **nothing changed and no error dialog**:
 - [ ] **Clear the key-column box and press OK.** An empty answer is NOT a cancel — it
       means "use the default", so it proceeds with column `1`.
 
-## 4. Key-column validation (workbook P) — DEFERRED
+## 4. Key-column validation (workbook P)
 
 - [ ] **Multiple columns.** Select `M2:N12` and answer `1,2`. Both columns decide a
       duplicate — two rows are duplicates only when they match in both.
@@ -137,7 +182,7 @@ Each of these must stop with **nothing changed and no error dialog**:
 - [ ] **Non-numeric input falls back rather than failing.** Answer `abc`. Expected: it
       proceeds on column `1` (`ParseCols` drops non-numeric entries and defaults).
 
-## 5. A v0.4.0 workbook is REFUSED, on purpose (workbook Q) — DEFERRED
+## 5. A v0.4.0 workbook is REFUSED, on purpose (workbook Q)  — RUN THIS FIRST
 
 **This section inverted after the version decision. Read it before you run it.**
 `SCHEMA_VER` is now `"v2.0"`, so `CurrentSchemaMajor()` is 2 and workbook Q's marker
@@ -151,12 +196,20 @@ false refusal costs nothing, and one version number beats two. See
       written by a different version, and says to re-import that version's bundle.
       **No rebuild prompt, no Yes/No** — this is the `other-major` path, and it must
       not offer a choice. Your Setup tab is left exactly as it was.
-- [ ] **A v0.3.0-era workbook still upgrades cleanly**, if you still have one from the
-      v0.4.0 gate (workbook C). Its `_Config` has **no** marker at all, so it reads as
-      `absent` and takes the legacy migration path, which is unaffected.
+- [ ] **A v0.3.0-era workbook still upgrades cleanly — workbook C, buildable, no longer
+      conditional.** Its `_Config` has **no** marker at all (the v0.3.0 bundle has no
+      `SCHEMA_VER` constant to write one), so it reads as `absent` and takes the legacy
+      path, which is unaffected.
       **This asymmetry is correct, not a bug:** older-with-no-marker is accepted where
       newer-but-not-current is refused, because only the marker-less case has a defined
       legacy layout to migrate *from*.
+
+      **This item is now load-bearing for Part A, which it was not when it was written.**
+      ADR 0003 decides to leave the legacy path untouched, on the premise that it still
+      works. That premise is *this test*. If it fails, Part A's design is built on sand
+      and ADR 0003 has to be reopened before any code is written — so do not tick it
+      unless you actually ran it, and do not skip it because workbook C is extra effort.
+      The Setup section above now tells you how to build one.
 - [ ] **The recovery route works.** On workbook Q, delete the whole `_Config` sheet
       (Alt+F11 → `Visible` = `-1 - xlSheetVisible`, then right-click the tab ▸ Delete),
       and run `Create Setup Tab` again. Expected: it builds a fresh Setup tab with
@@ -167,7 +220,7 @@ false refusal costs nothing, and one version number beats two. See
 marker bump did not take effect — check `SCHEMA_VER` really is `"v2.0"` in the bundle
 you imported, and that you removed the old module before importing.
 
-## 6. Inside a chain (workbook P) — DEFERRED
+## 6. Inside a chain (workbook P)
 
 - [ ] **A chain containing `clean.dupes` still prompts.** Build a two-step chain with
       `clean.dupes` in it and run it. All three prompts appear. This is correct and not
