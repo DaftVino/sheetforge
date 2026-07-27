@@ -183,6 +183,22 @@ Private mLastBuildOk As Boolean
 ' successful build can never leak into a later call that fails before composing one.
 Private mLastPlacedNote As String
 
+' The zero-pages sentence, in ONE place because two callers say it: the direct-run
+' MsgBox in Core_BuildControlPanel and Core_FinalizeSetup's own success dialog. Two
+' literals would be two places to disagree.
+Private Const NO_PAGES_MSG As String = "No macro pages were built - every button is " & _
+    "hidden, switched Off, or anchored to one of your own sheets."
+
+' Same class of bug as mLastPlacedNote above, and found the same way - by a human
+' running the gate. Finalize calls Core_BuildControlPanel SILENT, so the zero-pages
+' sentence reached nobody on the normal path: a user who switches every action Off
+' through Finalize was told "The Macros pages have been rebuilt to match your Setup
+' answers" and then found no pages at all. Zero pages is a legitimate, deliberately
+' reachable configuration, so the dialog has to say the true thing about it. Reset
+' False at the very top of every Core_BuildControlPanel call, alongside mLastBuildOk,
+' so a verdict from a PRIOR build can never leak into a later one.
+Private mLastNoPages As Boolean
+
 ' ---- memoized package registry (v0.4.0 performance) ----
 ' BuildRegistry re-runs CoreCandidates, one Application.Run "Pkg<Name>_Manifest"
 ' per candidate, and a _Packages worksheet scan per candidate. It is called from
@@ -2748,10 +2764,20 @@ Public Sub Core_FinalizeSetup()
     ' already telling the user the rebuild did not finish, and a placement tally
     ' from a half-finished build would only muddy it.
     If mLastBuildOk Then
-        MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
-               "The Macros pages have been rebuilt to match your Setup answers." & _
-               mLastPlacedNote, _
-               vbInformation, "Finalize Setup Tab"
+        ' "The Macros pages have been rebuilt" is FALSE when none were built, and
+        ' zero pages is a legitimate configuration a user reaches on purpose (every
+        ' action Off, hidden, or anchored). Saying it anyway sends them looking for
+        ' tabs that were never meant to exist - see mLastNoPages' declaration comment.
+        If mLastNoPages Then
+            MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
+                   NO_PAGES_MSG & mLastPlacedNote, _
+                   vbInformation, "Finalize Setup Tab"
+        Else
+            MsgBox "Configuration activated." & vbCrLf & vbCrLf & _
+                   "The Macros pages have been rebuilt to match your Setup answers." & _
+                   mLastPlacedNote, _
+                   vbInformation, "Finalize Setup Tab"
+        End If
     Else
         MsgBox "Configuration activated, but rebuilding the Macros pages failed - see the error " & _
                "shown just now." & vbCrLf & vbCrLf & _
@@ -2784,6 +2810,7 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim placedNote As String
     mLastBuildOk = False    ' reset FIRST, every call - see the flag's own declaration comment
     mLastPlacedNote = ""    ' same reason, same place - see the variable's declaration comment
+    mLastNoPages = False    ' same reason, same place - see the variable's declaration comment
     InvalidateRegistry              ' a build begins here - see InvalidateRegistry
     On Error GoTo Fail
     Core_SpeedOn
@@ -2845,6 +2872,10 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
                      "- If the sheet is protected, unprotect it and Finalize again. Any button " & _
                      "an earlier build left there is still on it and may be out of date."
     mLastPlacedNote = placedNote
+    ' Carried out for the same reason mLastPlacedNote is, and set BEFORE the silent
+    ' check so Finalize's dialog sees it on the very path that suppresses the MsgBox
+    ' below - see the flag's declaration comment.
+    mLastNoPages = (layout.Count = 0)
     If Not silent Then
         ' "Built 0 macro page(s)" is true but reads as a failure, and zero pages
         ' is a real, reachable state: every button can be hidden, switched Off,
@@ -2857,9 +2888,7 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
         ' placedNote - composed just above, and appended to both branches below -
         ' gives the count and the repair.
         If layout.Count = 0 Then
-            MsgBox "No macro pages were built - every button is hidden, switched Off, or " & _
-                   "anchored to one of your own sheets." & placedNote, _
-                   vbInformation, "Setup Complete"
+            MsgBox NO_PAGES_MSG & placedNote, vbInformation, "Setup Complete"
         Else
             ' paged.Count, NOT buttons.Count: an anchored button is not on a
             ' generated page and must not be counted against one. This is the
