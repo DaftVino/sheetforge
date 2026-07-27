@@ -5,12 +5,14 @@ touching Core or more than one package go through `writing-plans` first. Verify 
 `pwsh build/build.ps1`; there is no headless VBA test, so also import
 `dist/MacrosBundle.bas` and run the workbook, recorded in the PR/notes.
 
-Current: **v0.3.0** on `main` (Compose Your Buttons — chains + grouping,
-contract **v1.1.0** — merged and owner-verified in Excel). Remote: `origin` =
-`github.com/DaftVino/sheetforge` (private). Next phase is **Finish Excel**,
-designed in `docs/designs/2026-07-24-finish-excel-design.md`: the built-page
-polish pass first, then the catalog build-out in waves. The Apps Script port is
-deferred to last, deliberately.
+Current: **v0.4.0** (Finish Excel track 1 — packed auto-layout, three-state
+availability, `Sheet!Cell` anchored placements, fail-closed config migration,
+contract **v1.2.0** — owner-verified in Excel across three workbooks). Remote:
+`origin` = `github.com/DaftVino/sheetforge` (private). Next is **track 2**, the
+catalog build-out in waves (`docs/macro-catalog-plug-and-play.md`), and the
+**Setup-surface redesign** designed in
+`docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md`. The
+Apps Script port is deferred to last, deliberately.
 
 ## Before the remote (blocker) — DONE (2026-07-24)
 
@@ -25,18 +27,38 @@ deferred to last, deliberately.
 
 ## Next — active
 
-- [ ] **Built-page polish pass (`v0.4.0`, contract `v1.2.0`)** — design §2.
-      Core-only. Generated `Macros Home` (legend + one card per category with
-      action counts), `Macros N` pages titled by category with descriptions,
-      `← Home` and Previous/Next nav, auto-layout so no-codes stops meaning one
-      giant tab, tighter spacing. Plus **per-action enable/disable** on the
-      placement block (which becomes `Action | Enabled | Page code`) and the
-      `usedBy` field attribute, so Setup collapses settings for actions that are
-      turned off instead of walling the user with them. Verified against a
-      throwaway `PkgFixture` of ~60 no-op actions so the 60-button layout is
-      exercised while only 7 real actions exist. Needs `writing-plans` first.
+- [ ] **Setup-surface progressive disclosure** — designed in
+      `docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md`,
+      out of the v0.4.0 owner gate. Two separable parts. **Part B** (small,
+      package-level, do first): move `clean.dupes`' two settings — the header
+      question and the key columns — off Setup and into a prompt at run time,
+      because both describe the range you just picked, not the deployment.
+      **Part A** (Core, contract, migration): Action catalog to the top of Setup,
+      actions default `Off`, `usedBy`-driven hide/unhide, the Chains block
+      appearing on demand, and a pending-changes formula plus Refresh button —
+      click-driven, because a live handler would need VBIDE trust (banned) or a
+      class module (the bundle is one `.bas`). The `Off` default reverses a
+      decided position and needs an **ADR** plus an outbox note. Needs
+      `brainstorming` → `writing-plans` first.
+
+- [ ] **Catalog build-out, track 2** — the macro waves in
+      `docs/macro-catalog-plug-and-play.md`. Package-level, no Core changes
+      expected.
 
 ## Done (recent)
+
+- [x] **Finish Excel, track 1** — DONE (2026-07-27, `v0.4.0`, contract
+      **v1.2.0**). Capacity-packed auto-layout replacing the single `Macros` tab;
+      the unmerged cell-card grid so descriptions are legible; three-state
+      per-action availability (`Button` / `Chains only` / `Off`) with `Off`
+      refused by the dispatcher and blocking Finalize inside a chain; `usedBy`
+      and `category` on the manifest; `Sheet!Cell` anchored placements onto the
+      user's own tabs, with Finalize blocking a malformed, reserved, missing or
+      duplicated target; a machine-owned config schema marker with fail-closed
+      v0.3.0 migration, refusing outright on a newer major and asking before
+      discarding on a damaged one. Owner-verified in Excel across three workbooks
+      (fixture, real, and one finalized under v0.3.0). The throwaway `PkgFixture`
+      (74 no-op actions) that exercised the layout was removed on the way out.
 
 - [x] **"Compose your buttons" feature** — DONE (2026-07-24, contract **v1.1.0**).
       One Core-owned Setup section, two capabilities: **Chains** (compose several
