@@ -14,31 +14,36 @@ written against that failure.
 
 ---
 
-## Status — partial pass, shipped deliberately (2026-07-27)
+## Status — sections 3-6 ARE THE RUN SHEET (2026-07-27, PR #7 merged)
 
-**Run by the owner in Excel. Sections 1 and 2 pass; sections 3-6 are deferred to a
-later review pass at the owner's call, and the branch ships without them.** This is
-recorded here rather than in the PR alone so the next session cannot mistake an
-unticked box for one nobody looked at.
+Sections 1 and 2 passed and are done. **PR #7 has since merged, so sections 3-6 are now
+verifying code that is already on `main` at v0.5.0.** They are no longer deferred: this
+is the outstanding run, to be completed before Part A starts.
 
 | Section | State |
 |---|---|
 | **1. The Setup surface** | **Pass.** Item 4 asserted the wrong outcome and was corrected — see the item itself; the code was never wrong. |
-| **2. The three prompts** | **Pass**, except item 5 (the completion message's interpretation line), not run. |
-| **3. Cancel paths** | **Deferred.** Five items, none run. |
-| **4. Key-column validation** | **Deferred.** Three items, none run. |
-| **5. v0.4.0 refusal** | **Deferred.** Three items, none run. **Highest residual risk** — see below. |
-| **6. Inside a chain** | **Deferred.** One item, not run. |
+| **2. The three prompts** | **Pass**, except item 5 (the completion message's interpretation line) — folded into the run below. |
+| **3. Cancel paths** | **TO RUN.** Five items. |
+| **4. Key-column validation** | **TO RUN.** Three items. |
+| **5. v0.4.0 refusal** | **TO RUN — do this one first.** Three items. Highest risk; see below. |
+| **6. Inside a chain** | **TO RUN.** One item. |
 
-**What that leaves unverified.** Section 5 is the one to weigh: the `other-major`
-refusal has never been reached by a genuine version bump, only by a hand-edited marker
-in the v0.4.0 gate, and its neighbour — a v0.3.0-era workbook with no marker at all
-still taking the legacy path — is the case that would fail *silently*. Nothing in
-sections 3, 4 or 6 can corrupt data: each is a stop-early path whose failure mode is a
-runtime-error dialog rather than a wrong edit. Section 2's item 5 is cosmetic wording
-on a dialog whose behaviour item 4 already confirmed.
+**Run section 5 first.** It is the only one whose failure is *silent*. The `other-major`
+refusal has never been reached by a genuine version bump — only by a hand-edited marker
+during the v0.4.0 gate — and its neighbour, a v0.3.0-era workbook with no marker still
+taking the legacy path, would fail without any visible symptom. Sections 3, 4 and 6 are
+stop-early paths whose failure mode is a runtime-error dialog: annoying, but loud, and
+incapable of corrupting data.
 
-**Before the next release, run sections 3-6.** They are not cancelled, only deferred.
+**Why now rather than later.** Part A changes this same `_Config` surface. Verifying it
+first means any later failure is unambiguously Part A's doing rather than something
+inherited from v0.5.0.
+
+**Workbook Q is required for section 5** and must be finalized under **v0.4.0**, not
+v0.5.0 — see the Setup table above. If workbook Q no longer exists, say so rather than
+substituting a v0.5.0 workbook: a v0.5.0 config is `same-major` and will not exercise
+the refusal at all, so the section would pass vacuously.
 
 ---
 
@@ -104,13 +109,13 @@ Leave `M1` empty. Click **Remove Duplicates**.
 - [x] **It runs.** Answer `No` then accept `1`. Expected: **ten rows remain** — `M5`
       removed because `M2` participated. Eleven remaining means the first row was
       skipped and the original symptom is back.
-- [ ] **DEFERRED — The completion message states the interpretation.** It ends
+- [ ] **The completion message states the interpretation.** It ends
       `Every row was compared, including the first.` Run it again answering `Yes` and
       it ends `The first row was treated as a header and left alone.` This is the
       point of the change: the answer is invisible in the result, so the report has
       to carry it.
 
-## 3. Cancel is clean at all three points (workbook P) — DEFERRED
+## 3. Cancel is clean at all three points (workbook P)
 
 Each of these must stop with **nothing changed and no error dialog**:
 
@@ -124,7 +129,7 @@ Each of these must stop with **nothing changed and no error dialog**:
 - [ ] **Clear the key-column box and press OK.** An empty answer is NOT a cancel — it
       means "use the default", so it proceeds with column `1`.
 
-## 4. Key-column validation (workbook P) — DEFERRED
+## 4. Key-column validation (workbook P)
 
 - [ ] **Multiple columns.** Select `M2:N12` and answer `1,2`. Both columns decide a
       duplicate — two rows are duplicates only when they match in both.
@@ -137,7 +142,7 @@ Each of these must stop with **nothing changed and no error dialog**:
 - [ ] **Non-numeric input falls back rather than failing.** Answer `abc`. Expected: it
       proceeds on column `1` (`ParseCols` drops non-numeric entries and defaults).
 
-## 5. A v0.4.0 workbook is REFUSED, on purpose (workbook Q) — DEFERRED
+## 5. A v0.4.0 workbook is REFUSED, on purpose (workbook Q)  — RUN THIS FIRST
 
 **This section inverted after the version decision. Read it before you run it.**
 `SCHEMA_VER` is now `"v2.0"`, so `CurrentSchemaMajor()` is 2 and workbook Q's marker
@@ -167,7 +172,7 @@ false refusal costs nothing, and one version number beats two. See
 marker bump did not take effect — check `SCHEMA_VER` really is `"v2.0"` in the bundle
 you imported, and that you removed the old module before importing.
 
-## 6. Inside a chain (workbook P) — DEFERRED
+## 6. Inside a chain (workbook P)
 
 - [ ] **A chain containing `clean.dupes` still prompts.** Build a two-step chain with
       `clean.dupes` in it and run it. All three prompts appear. This is correct and not
