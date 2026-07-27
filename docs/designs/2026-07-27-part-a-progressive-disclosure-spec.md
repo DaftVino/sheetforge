@@ -175,9 +175,17 @@ still exists, §4 is untestable dead code and should not be built — see §8.
 
 ## Handoff log
 
-- **2026-07-27** — Spec written from the 3-0 panel. Branch created, no code changed.
-  Two of the panel's revisit triggers were discharged immediately by reading Core: the
-  Finalize hard-block already exists (§2), and no atomic `_Config` helper exists — the
-  activate is delete-then-copy (§4.1). Panel record:
+- **2026-07-27** — Spec written from the 3-0 panel. Branch created and pushed, **no VBA
+  changed**. Two of the panel's revisit triggers were discharged immediately by reading
+  Core: the Finalize hard-block already exists (§2), and no atomic `_Config` helper
+  exists — the activate is delete-then-copy (§4.1, now filed as issue #8). Panel record:
   `docs/panels/2026-07-27-part-a-availability-default.md`.
-  **Blocked on §8, question 1.**
+
+  **Blocked on §8 question 1, which the repo may already answer.** ADR 0002 records "there
+  is no installed base — the bundle exists only in test workbooks". If that covers
+  v0.3.0-era workbooks, §4 guards nobody and should be replaced by an outright refusal,
+  matching how v0.4.0 configs are already handled. That reverses three unanimous panel
+  resolutions on a fact the panel never saw, so it was flagged, not taken.
+
+  **Next session:** get §8 answered first — it decides whether §4 is built or deleted.
+  Then `writing-plans` over whichever shape survives. Do not start with §4.
