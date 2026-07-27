@@ -2814,7 +2814,7 @@ is not done.
 
 ### Task 11: Tear down the fixture, refresh docs, ship v0.4.0
 
-- [ ] **Step 1: Remove the fixture and its two hooks**
+- [x] **Step 1: Remove the fixture and its two hooks**
 
 ```bash
 git rm src/packages/PkgFixture.bas
@@ -2831,7 +2831,7 @@ silently:
 }
 ```
 
-- [ ] **Step 2: Verify the fixture is gone everywhere**
+- [x] **Step 2: Verify the fixture is gone everywhere**
 
 ```bash
 grep -rn "Fixture" src/ build/ ; rm -f dist/MacrosBundle.fixture.bas
@@ -2841,13 +2841,13 @@ node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 
 Expected: `grep` prints **nothing**; the build reports `Core + 2 package(s)`.
 
-- [ ] **Step 3: Bump `VERSION`**
+- [x] **Step 3: Bump `VERSION`**
 
 ```bash
 echo -n "0.4.0" > VERSION
 ```
 
-- [ ] **Step 4: Add the `CHANGELOG.md` entry**
+- [x] **Step 4: Add the `CHANGELOG.md` entry**
 
 Under `## [Unreleased]`, insert:
 
@@ -2905,13 +2905,13 @@ Under `## [Unreleased]`, insert:
   happens to activate it. Selection now happens once, on `Macros Home`.
 ```
 
-- [ ] **Step 5: Refresh `TODOS.md`**
+- [x] **Step 5: Refresh `TODOS.md`**
 
 Rewrite the `Current:` paragraph (`TODOS.md:8-13`) for v0.4.0 / contract v1.2.0
 with track 2 (the catalog waves) next; move the track-1 line from
 `## Next — active` into `## Done (recent)`.
 
-- [ ] **Step 6: Regenerate the code map**
+- [x] **Step 6: Regenerate the code map**
 
 ```bash
 node scripts/code-map.mjs
@@ -2920,7 +2920,7 @@ node scripts/code-map.mjs
 Generated output — never hand-edit. Committing it in the same PR keeps its
 freshness stamp honest.
 
-- [ ] **Step 7: Final gate, then commit**
+- [x] **Step 7: Final gate, then commit**
 
 ```bash
 pwsh build/build.ps1
