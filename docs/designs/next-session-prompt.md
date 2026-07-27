@@ -1,92 +1,110 @@
 # Next session — paste this into a fresh chat
 
-> Delete this file once the v0.4.0 gate is finished; it is a launch pad, not a document.
+> Delete this file once the Part B gate is done; it is a launch pad, not a document.
 
 ## Start here
 
-Run `/orient` before anything else, including clarifying questions. Then continue the
-owner's manual Excel gate — Task 10 of the track-1 plan, 24 items remaining — and when
-it passes, do Task 11 (tear down the fixture, refresh docs, ship v0.4.0).
+Run `/orient` before anything else, including clarifying questions. Then walk the owner
+through `docs/designs/2026-07-27-part-b-manual-gate.md` — Part B is implemented,
+committed and pushed, but **never run in Excel**. When it passes, open the PR and ship
+it, then start planning Part A (issue #6). The contract version question is already
+settled — do not reopen it.
+
+**Model and agent routing, owner's instruction.** Offload as much as possible to
+**codex via the CLI** (`/codex`): `luna` and `terra` for lighter tasks, `sol` for
+heavier ones. Use Sonnet subagents for mechanical work. **Opus reviews everything**, and
+Opus implements anything critical or sensitive — the contract, the migration path, and
+anything touching `_Config`.
 
 ## Read first
 
 Read nothing else until you have these, in order:
 
-1. `docs/designs/2026-07-24-finish-excel-track1-plan.md` (139.7K) — the phase contract.
-   **Never read whole.** Grep for `### Task 10` and read only that slice (~line 2168
-   onward); it is the live checklist the owner is working through, and Task 11 follows
-   it. Its "Before you start" preamble names the three workbooks the gate needs.
-2. `.superpowers/sdd/2026-07-25-track1-owner-feedback-plan/progress.md` (31.8K) — the
-   execution ledger. Every review, fix round, parked finding, deferred minor, and the
-   gate results so far. Records several places a prior session was wrong and corrected.
-3. `docs/designs/2026-07-25-track1-owner-feedback-plan.md` (135.7K) — **read only the
-   `## Handoff log` slice** (grep for it, read from there). Entry 1 is dated 2026-07-26
-   and carries the do-not-revert list. The task bodies above it are already implemented
-   and reviewed; do not re-read them unless a specific task needs revisiting.
-4. `spec/contract.md` (42.4K) — normative for the Apps Script port. **Read in slices**:
-   §3, §6, §7, §8 and §10 were all amended by this work. Grep for the section heading
-   you need rather than reading front to back.
-5. `docs/code-map.md` (28.6K) — current as of `8f3a719`. Grep it for a symbol, then read
-   only the lines around the anchor. This is how you avoid opening `src/core/Core.bas`,
-   which is 208K.
+1. `docs/designs/2026-07-27-part-b-manual-gate.md` (7.4K) — the phase contract: the
+   manual checklist for work already built, plus the two-workbook setup it needs.
+2. `docs/adr/0002-contract-version-vs-schema-marker.md` (5.3K) — **Rejected**, and read
+   the top of it before touching any version number. It records why `SCHEMA_VER` moves
+   with the contract to major 2 and what that costs.
+3. `src/packages/PkgClean.bas` (11K) — the whole implementation under test; small
+   enough to read entire.
+4. `spec/contract.md` (46K) — **read in slices from anchors; never front to back.**
+   Grep for the anchor, then read only the lines around it. Three amendments to find:
+   `VERSION DECISION PENDING` in §8, `UNRELEASED, VERSION UNDECIDED` in §10, and the
+   new no-visible-fields rule at the end of §2.
+5. `docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md` (13K) — the
+   design both parts come from; Part A's section is what the next plan expands.
+6. `docs/code-map.md` (28K) — current as of `4170ba5`. Grep for a symbol, then read only
+   the lines around the anchor; `src/core/Core.bas` is 210K and must never be read whole.
 
 ## Branch
 
-`feat/finish-excel-track1` — 72 commits ahead of `main`, unpushed, no PR, nothing
-merged. Every piece of v0.4.0 lives here. Stay on it. Do not branch from `main`: it is
-still v0.3.0 with contract v1.1.0 and has none of this work.
+`feat/prompt-per-selection-settings` — two commits, pushed, **no PR yet**, branched from
+the merge commit of PR #4. It carries all of Part B: the run-time prompts, the Core
+empty-band guard, the contract amendments, the gate checklist and the ADR draft. Stay on
+it until the gate passes. `main` is v0.4.0 and does **not** have this work. Branch again
+off `main` only when starting Part A, and only after Part B lands.
 
 ## Constraints
 
-- **Do not revert `AddBtn`'s all-or-nothing error handling.** It has no handler of its
-  own and runs under the caller's `On Error Resume Next`; without the fix a failure
-  abandoned the rest of the procedure after `Buttons.Add` had already created the
-  shape, leaving a permanently unsweepable orphan named `Button 11`.
-- **Do not use `eNum` or any case-variant of a VBA keyword as an identifier.** VBA is
-  case-insensitive, so `eNum` IS `Enum`. This broke `Debug ▸ Compile` and is the second
-  instance after `any`. `build.ps1`'s reserved-word list is empirical: add a word only
-  when Excel rejects one, never on suspicion.
-- **Excel does NOT forbid `!` in a sheet name** (the set is `: \ / ? * [ ]`). Do not
-  "simplify" `InStrRev` to `InStr` in `ParseAnchor` — it would silently break anchors
-  onto a sheet whose name contains `!`.
-- **`hide` is filtered in `GatherButtons` and nowhere else.** Do not add a second
-  filter; `SplitAnchored` runs strictly downstream of that funnel.
-- **No contract version bump.** v1.2.0 is unreleased.
-- **TDD is formally off** (CLAUDE.md, "Off"): no VBA runner, no headless Excel. Do not
-  propose adding a test suite. The gates are structural only; the owner's import is the
-  real verification.
-- **Never read an `.xlsm`**, and never read `src/core/Core.bas` whole.
+- **Do not reintroduce `clean_keycols` or `clean_hasheader` as remembered settings.**
+  Asking every time is the feature — it is what keeps the answer matched to the
+  selection the user just made. This is now a normative rule in contract §8.
+- **The version question is settled: contract v2.0.0, `SCHEMA_VER` `"v2.0"`.** Do not
+  reopen it, and do not "fix" the resulting refusal of v0.4.0 configs — that refusal is
+  the decision, taken because no installed base exists. ADR 0002 is Rejected and holds
+  the reasoning; revisit only before a *future* breaking bump, and only if real
+  deployments exist by then.
+- **`AskHasHeader` uses `vbYesNoCancel` on purpose.** On a two-button `vbYesNo` MsgBox
+  the title-bar X returns `vbNo`, which here silently means "compare every row" and
+  deletes a header row. Do not simplify it to two buttons.
+- **`AskKeyCols` uses `Application.InputBox`, not VBA's `InputBox`.** VBA's returns `""`
+  for both Cancel and an empty OK; those must not mean the same thing.
+- Carried forward from v0.4.0 and still binding: `AddBtn`'s all-or-nothing placement; no
+  `eNum` or any case-variant of a VBA keyword as an identifier; `InStrRev` not `InStr`
+  in `ParseAnchor`; `hide` filtered only in `GatherButtons`; `NO_PAGES_MSG` stays one
+  constant.
+- TDD is formally off (CLAUDE.md, "Off") — no VBA runner, no headless Excel. Do not
+  propose a test suite. The gates are structural; the owner's import is the verification.
+- Never read an `.xlsm`, and never read `src/core/Core.bas` whole.
 
 ## Exit criteria
 
-- `pwsh build/build.ps1` exits 0 with balanced Sub/Function counts, and
-  `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` reports no diagnostics
-- All 24 remaining Task 10 checkboxes in `docs/designs/2026-07-24-finish-excel-track1-plan.md`
-  are ticked, including the protected-sheet item
-- `src/packages/PkgFixture.bas` is removed and its two registration hooks are gone
-  (Task 11 Step 1)
-- `CHANGELOG.md` contains a released `[0.4.0]` entry
-- A PR exists with the completed checklist pasted into its body
-- `docs/designs/2026-07-25-track1-owner-feedback-plan.md` has a new dated handoff entry
+- `pwsh build/build.ps1` exits 0 reporting `Core + 2 package(s)` with balanced
+  `Sub`/`Function` counts, and `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas`
+  reports no diagnostics
+- Every checkbox in `docs/designs/2026-07-27-part-b-manual-gate.md` is ticked, including
+  section 5, where a workbook finalized under v0.4.0 must be **refused, not migrated**
+- `grep -n 'SCHEMA_VER     As String' dist/MacrosBundle.bas` shows `"v2.0"` in the
+  bundle actually imported for the gate
+- A PR exists for `feat/prompt-per-selection-settings` with the completed checklist in
+  its body, and `VERSION` is bumped with the `## [Unreleased]` entry moved under a
+  dated release heading in `CHANGELOG.md`
 
 ## Unknowns and risks
 
-- **The protected-sheet check is the highest-value item left and has never been run.**
-  It rests on `ws.Buttons.Add` raising 1004 on a `DrawingObjects`-protected sheet — the
-  one assumption nothing agent-side can execute. Before the fix it took down the whole
-  build rather than skipping one button.
-- **Three fixes have never been verified in Excel**: the leading-apostrophe repair for
-  `'Sheet Name'!B4`, the sweep-on-clear, and the four Finalize-blocking conditions.
-- **A chain-placement failure seen during the gate is NOT reproducible** on current code
-  and is deliberately left unattributed in the ledger. A step-by-step diagnostic showed
-  every property assignment succeeding. Do not invent a cause; if it recurs, it is a new
-  finding.
-- **`ANCHOR_BTN_W` at 110pt** was judged acceptable once and may want a second look
-  against real data. Owner's call, one-line change.
-- `.vscode/` is untracked and unrelated to this work — left alone deliberately, not an
-  oversight. Nothing else is uncommitted.
-- GitHub issue #3 proposes a blind-dry-run gate for manual checklists, assigned to the
-  owner. Not blocking, but it is the systemic fix for the six unusable checklist items
-  this phase produced.
-- The SDD workspace at `.superpowers/sdd/2026-07-25-track1-owner-feedback-plan/` was
-  deliberately NOT deleted. Delete it only after the gate passes and the PR lands.
+- **Nothing in Part B has been run in Excel.** Both structural gates pass, but they
+  cannot see a dialog. The three prompts, the cancel paths, the out-of-range column
+  rejection and the empty-band guard are all unverified against a real workbook.
+- **The empty-band guard is the riskiest change**, because it is in Core and affects
+  every package, not just PkgClean. If it is wrong, a package that *should* show a band
+  loses it. Section 1 of the gate tests both directions deliberately — the zero-field
+  package and the all-actions-Off package.
+- **The refusal path is untested from this direction.** `SCHEMA_VER` `"v2.0"` means a
+  v0.4.0 `_Config` now reads as `other-major`. That branch was verified in the v0.4.0
+  gate by hand-editing a marker; it has never been reached by a genuine version bump,
+  which is the only way real users will meet it.
+- **A v0.3.0-era workbook must still migrate cleanly** — no marker at all reads as
+  `absent`, not `other-major`. If the bump broke that, the legacy path is gone and
+  nobody would notice from the v0.4.0 test alone.
+- **`.vscode/` is untracked** and unrelated to this work — left alone deliberately
+  across several sessions, not an oversight.
+- **Leftover SDD files could not be deleted.** `.superpowers/sdd/` still holds
+  `2026-07-24-finish-excel-track1-plan/` and about 37 loose files from an older
+  workspace layout; two delete commands were refused by the permission classifier. The
+  directory is gitignored, so nothing is recoverable through git once removed — the
+  owner should delete it manually.
+- **Part A (issue #6) is not started and should not be started casually.** It needs
+  `brainstorming` → `writing-plans` → an ADR, and it carries a migration trap: flipping
+  the Availability default to `Off` silently zeroes every upgraded v0.3.0 deployment
+  unless the format marker is used to tell "absent because old" from "absent because
+  new".

@@ -85,6 +85,14 @@ field is the following record:
   evaluated independently, but off-ness wins: a field relegated to the off band
   goes there regardless of its `tier`, and the `advanced` band (§4) contains
   only fields that are still in use. A field never renders in both bands.
+- **No visible fields, no band (v2.0.0).** A package contributing no
+  field to the working area MUST NOT have a configuration band rendered for it —
+  neither its banner nor an empty body. This holds whether the package declares
+  no fields at all or has had every one of them relegated to the off band. A
+  heading over nothing reads as a defect, and the engine already applies the same
+  judgement to an empty `advanced` band and to a section header that merely
+  repeats its package banner. The package is still registered and its actions
+  still appear in the action catalog; it simply has no configuration surface.
 
 ---
 
@@ -101,7 +109,7 @@ it.
 | `int` | integer | decimal string (e.g. `-1`) | coerced with the platform's integer parse | Universal. |
 | `sheet` | a worksheet/tab name | the tab name string | validated at Finalize to exist in the workbook | Excel worksheet ↔ Sheets tab. |
 | `file` | a **filename prefix** | the prefix string | newest file in the deployment's data location whose name **starts with** the value, ignoring a trailing ` (1)`/` (2)` copy suffix | The data location is the workbook's containing folder in Excel; a Drive folder in Sheets. See §7. |
-| `bool` | yes/no | `yes` / `no` (canonical tokens; a reader MUST be case-insensitive) | validated Yes/No dropdown; a **blank** cell means "never set" and reads as the field's declared default | Encoding fixed at v1.2.0 by `clean_hasheader`, the kind's first use. Like `availability` (§6), the tokens are abstract, not a mandated on-screen spelling: the Excel reference implementation presents and stores `Yes` / `No`. A port MAY accept only `yes` / `no`; the reference additionally tolerates `y` / `true` / `1` and `n` / `false` / `0`. An unrecognised non-blank value MUST block Finalize, naming the field — it MUST NOT fall back to either state. |
+| `bool` | yes/no | `yes` / `no` (canonical tokens; a reader MUST be case-insensitive) | validated Yes/No dropdown; a **blank** cell means "never set" and reads as the field's declared default | Encoding fixed at v1.2.0 by `clean_hasheader`, the kind's first use — **since withdrawn** (§8), which does NOT reopen the reservation: an encoding is fixed once and stays fixed, or a later field would silently mean something different from what shipped. The kind is currently declared and unused. Like `availability` (§6), the tokens are abstract, not a mandated on-screen spelling: the Excel reference implementation presents and stores `Yes` / `No`. A port MAY accept only `yes` / `no`; the reference additionally tolerates `y` / `true` / `1` and `n` / `false` / `0`. An unrecognised non-blank value MUST block Finalize, naming the field — it MUST NOT fall back to either state. |
 | `list` | ordered single values | one value per row | consecutive value cells (column C), one per row | Ordered rows on any grid. |
 | `table` | ordered N-column rows | each row `"a\|b\|c"`; up to 3 columns | value cells across columns C/D/E, one row per record | Ordered rows on any grid. |
 
@@ -570,10 +578,23 @@ Demo default rows (`|`-delimited): `IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N
 
 **Fields**
 
-| key | kind | tier | default | semantics |
-|---|---|---|---|---|
-| `clean_keycols` | text | simple | `1` | Which column(s) decide duplicates, numbered `1,2,3…` from the LEFT of the picked range. One number or several (`1,2,4`). |
-| `clean_hasheader` | bool | simple | `yes` | Whether the picked range's first row is a header. `yes` (default) excludes it from the duplicate comparison and never removes it; `no` considers every row in the selection. |
+**None (v2.0.0).** `clean` declares no configuration fields at all, and a
+conforming implementation MUST therefore render no configuration band for it —
+see §2's rule on a package with no visible fields.
+
+It previously declared `clean_keycols` and `clean_hasheader`. Both were withdrawn
+because each describes **the range the caller selects**, not the
+deployment: the key columns are numbered from the left of a selection that does
+not exist until the action runs, and whether a first row is a header is a
+property of that selection. A stored answer forced a re-activation cycle between
+two runs of the same action, and was not discoverable at the moment of use. They
+are now **run-time inputs** of `clean.dupes` (see Actions below).
+
+**Normative rule this establishes.** A setting that describes the selection the
+caller is about to make MUST be a run-time input, not a config field. A setting
+that describes the deployment MUST be a config field. Run-time inputs MUST NOT be
+persisted between invocations: asking each time is what keeps the answer matched
+to the selection.
 
 `clean` configures no target range — each action prompts for its range at run
 time (see §3, `range` note).
@@ -582,7 +603,7 @@ time (see §3, `range` note).
 
 | id | caption | semantics |
 |---|---|---|
-| `clean.dupes` | Remove Duplicates | Prompt for a range; remove duplicate rows using `clean_keycols`. `clean_hasheader` decides whether the range's first row is treated as a header (excluded from comparison and never removed) or as data. |
+| `clean.dupes` | Remove Duplicates | Prompt for a range; then prompt for **(a)** whether that range's first row is a header and **(b)** which column(s), numbered from the LEFT of that range, decide a duplicate. Remove duplicate rows accordingly; a header row is excluded from comparison and never removed. Each of the three prompts MUST offer a cancel that abandons the action having changed nothing, and MUST be distinguishable from an empty answer. A column number outside the selected range MUST be rejected before any edit, naming the range's width. The completion report MUST state which header interpretation was applied, since it is not recoverable from the result. |
 | `clean.trim` | Trim & Clean Text | Prompt for a range; strip leading/trailing spaces, collapse double spaces, remove non-printing characters. |
 | `clean.filldown` | Fill Blanks Down | Prompt for a range; fill each blank cell with the value from the cell above it. |
 
@@ -639,7 +660,30 @@ port realizes them per platform rather than re-deriving them:
 - **Reserved for first use — DISCHARGED at v1.2.0.** The `bool` kind (§3) had its
   encoding reserved until first use. `clean_hasheader` (package `clean`, §8) is that
   first use, so §3's row now states the fixed encoding and this bullet is a record,
-  not an outstanding obligation.
+  not an outstanding obligation. `clean_hasheader` has since been withdrawn; the
+  discharge stands regardless. A reservation is discharged by the first use, not
+  held open by that use continuing to exist — reopening it would let a later field
+  pick a different encoding from the one already shipped and read.
+- **v2.0.0 (BREAKING):** withdraws the `clean_keycols` and `clean_hasheader` fields
+  and changes `clean.dupes` to take both as run-time inputs (§8); adds §8's normative
+  selection-vs-deployment rule and §2's no-visible-fields-no-band rule. Removing a
+  `key` and changing an action's semantics are breaking by the rules above.
+- **The stored-format marker moves with it, deliberately.** `SCHEMA_VER` goes to
+  `"v2.0"`, so `CurrentSchemaMajor()` is 2 and every `_Config` written by v0.4.0
+  (marker `v1.2`) reads as `other-major` and is **refused**. This is stricter than
+  the data requires — the Action catalog block layout is byte-identical across this
+  change — and it was accepted on the ground that **no deployment exists yet**: the
+  bundle is in test workbooks only, so there is no installed base to refuse. Keeping
+  one version number is simpler than decoupling the two and explaining the split in
+  every port. The alternative was analysed and rejected in `docs/adr/0002`.
+  **Revisit before the next breaking bump if an installed base exists by then** —
+  at that point, refusing every stored config to express a change that touched no
+  stored byte is a real cost, and decoupling becomes the better trade.
+- **Asymmetry this creates, which is correct and not a defect.** A v1.1.0-era config
+  has *no* marker, reads as `absent`, and still migrates cleanly through the legacy
+  path. A v1.2.0 config has `v1.2`, reads as `other-major`, and is refused. Older is
+  accepted where newer-but-not-current is not, because only the marker-less case has
+  a defined legacy layout to migrate *from*.
 - **v1.1.0 (additive):** adds the `chain` config entity, the reserved `chain.*`
   id namespace, engine-owned config, the grouping/layout placement code, and the
   quiet/dispatch convention. No existing key, action id, kind, value encoding, or

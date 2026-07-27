@@ -4,6 +4,34 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-27
+
+### Changed
+
+- **BREAKING — `Remove Duplicates` now asks, instead of remembering.** The two
+  settings it used to read from the Setup tab — which column(s) decide a duplicate,
+  and whether the selected range's first row is a header — are now asked at run time,
+  after you pick the range and naming it. Both describe *the range you just picked*,
+  not the deployment: the key columns are numbered from the left of a selection that
+  does not exist until you make it. Storing them meant editing Setup and re-Finalizing
+  between two runs of the same button, and nobody discovered the setting at the moment
+  they acted. Each prompt cancels cleanly, an empty column answer means "use the
+  default", and a column outside the selected range is refused before anything is
+  edited. The completion message states which header interpretation was applied,
+  because that is not recoverable from the result.
+- **A package with nothing to configure no longer draws an empty band on Setup.**
+  `Clean & Standardize` now has no settings at all, and so has no section — its
+  buttons are unaffected. The same applies to any package whose every setting has
+  relegated to the "actions you haven't turned on" band.
+- Contract **v2.0.0** (breaking): removes the `clean_keycols` and `clean_hasheader`
+  fields, changes `clean.dupes` semantics, and adds two normative rules — a setting
+  describing the caller's selection must be a run-time input rather than a config
+  field, and a package with no visible fields must render no band.
+- **Configurations saved by v0.4.0 are not readable by this version.** The stored
+  format marker moves to `v2.0` with the contract, so `Create Setup Tab` refuses a
+  v0.4.0 `_Config` and asks you to re-import that version's bundle rather than
+  rebuilding over it. Delete the hidden `_Config` sheet to start fresh.
+
 ## [0.4.0] - 2026-07-27
 
 ### Added
