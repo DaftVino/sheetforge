@@ -88,12 +88,7 @@ if ($Packages) {
         (Get-Item -LiteralPath $full).FullName
     }
 } else {
-    # Fixture/harness packages are never part of a shipped bundle. They stay
-    # excluded from the default glob rather than relying on someone remembering,
-    # and are still buildable on purpose via -Packages PkgFixture.
-    $excludeByDefault = @('PkgFixture.bas')
     $pkgFiles = Get-ChildItem -LiteralPath $pkgDir -Filter 'Pkg*.bas' |
-                Where-Object { $excludeByDefault -notcontains $_.Name } |
                 Sort-Object Name | ForEach-Object { $_.FullName }
 }
 $sources = @($corePath) + @($pkgFiles)

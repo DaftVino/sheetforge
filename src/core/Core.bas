@@ -840,7 +840,6 @@ Private Function CoreCandidates() As Collection
     Dim c As New Collection
     c.Add "ImportExport"            ' probes PkgImportExport_Manifest
     c.Add "Clean"                   ' probes PkgClean_Manifest
-    c.Add "Fixture"                 ' TEMPORARY (v0.4.0 verification) - remove with PkgFixture
     Set CoreCandidates = c
 End Function
 
