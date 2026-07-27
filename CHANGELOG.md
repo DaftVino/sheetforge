@@ -4,6 +4,51 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-27
+
+### Changed
+
+- **BREAKING — an action now arrives switched off, and you turn it on.** A fresh
+  install shows the Action catalog with every `Availability` cell reading `Off` and
+  no buttons drawn, instead of every button at once. Set the ones you want to
+  `Button` and click `Create Setup Tab`. The old default handed a first-time user
+  eight live buttons — several of them destructive — before they had read what any
+  of them did. **Your existing deployments are unaffected**: a default only applies
+  where nothing was ever stored, so every choice already saved still means exactly
+  what it said. A configuration saved by v0.5.0 keeps all of it verbatim, and a
+  pre-v0.4.0 configuration — which predates the Availability column entirely — still
+  reads as everything on.
+- **A newly-registered action arrives off on an existing deployment too.** When a
+  package upgrade adds an action your saved config has never seen, it appears in the
+  catalog switched `Off` rather than turning itself into a live button on your next
+  rebuild.
+- **Settings now follow the actions that use them.** Turn off every `Import / Export`
+  action and the whole `IMPORT / EXPORT` band moves into
+  `SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON` at the bottom — collapsed, kept, and
+  still saved. Turn off just `Export Dashboard` and only its four export settings move;
+  the master-list settings stay put. Nothing you typed is lost either way: set the
+  action back to `Button` and its settings come back up. This is what
+  `Clean & Standardize` losing its band in v0.5.0 was the first half of.
+- Contract **v2.1.0** (additive): `availability` defaults to `off` (§6); the
+  pre-v1.2.0 legacy default is pinned to `button` independently of it (§5), so moving
+  one cannot move the other; reserves the `core.*` action-id namespace (§7); restates
+  relegation presentation (§3).
+- **Configurations saved by v0.5.0 remain readable.** The stored format marker does
+  **not** move — `SCHEMA_VER` stays `"v2.0"`. Nothing about your stored data is being
+  reinterpreted, so there is nothing to refuse.
+
+### Fixed
+
+- **A damaged `Availability` value is no longer quietly turned back into a live
+  button** (#10). Typing something the dropdown does not offer — `maybe`, or `of` for
+  `off` — used to block activation once, then get rewritten as `Button` by the next
+  `Create Setup Tab`, which destroyed the evidence so the block never fired again. The
+  cell now comes back blank and keeps blocking until you fix it. A **blank** cell blocks
+  too: it used to read as `Button`, which was defensible while `Button` was the default,
+  but with the default at `Off` either reading is wrong and neither is visible in the
+  result. The message reads
+  `MISSING or UNRECOGNISED Availability (use Button, Chains only, or Off)`.
+
 ## [0.5.0] - 2026-07-27
 
 ### Changed
