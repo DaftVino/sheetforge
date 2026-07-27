@@ -47,7 +47,7 @@ This repo is **source-first**, not export-first (`docs/adr/0001-source-first-vba
 
 ## Context budget
 
-- **Never read an `.xlsm`** (binary archive — wastes the window). Read the `src/` module you are changing, not the whole toolkit; `docs/code-map.md` (from `/code-map`) indexes `src/` once it grows. Roadmap: `docs/macro-catalog-plug-and-play.md`; VBA patterns: `docs/excel-macro-examples-2026.md`; decided already: `docs/handoff.md`.
+- **Never read an `.xlsm`** (binary archive — wastes the window). Read the `src/` module you are changing, not the whole toolkit; **grep `docs/code-map.md` first, then read the slice** — it anchors every proc, section and module-level `Const` in `src/`, and `Core.bas` is 77KB. Refresh it with `node scripts/code-map.mjs` (a repo-local generator: the shared daftplate one indexes no `.bas` at all). Roadmap: `docs/macro-catalog-plug-and-play.md`; VBA patterns: `docs/excel-macro-examples-2026.md`; decided already: `docs/handoff.md`.
 - Session start: `/orient`. Phase or session end: `/handoff`.
 
 ## Subagent defaults

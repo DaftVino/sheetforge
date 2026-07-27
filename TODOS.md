@@ -5,11 +5,14 @@ touching Core or more than one package go through `writing-plans` first. Verify 
 `pwsh build/build.ps1`; there is no headless VBA test, so also import
 `dist/MacrosBundle.bas` and run the workbook, recorded in the PR/notes.
 
-Current: **v0.2.1** on `main`, **Compose Your Buttons (chains + grouping,
-contract v1.1.0) shipped on `feat/compose-your-buttons`, pending merge**
-(config-driven engine + PkgImportExport + PkgClean + build script + full Setup
-UX). Remote configured: `origin` = `github.com/DaftVino/sheetforge` (private);
-`main` pushed at the sanitized tip.
+Current: **v0.4.0** (Finish Excel track 1 — packed auto-layout, three-state
+availability, `Sheet!Cell` anchored placements, fail-closed config migration,
+contract **v1.2.0** — owner-verified in Excel across three workbooks). Remote:
+`origin` = `github.com/DaftVino/sheetforge` (private). Next is **track 2**, the
+catalog build-out in waves (`docs/macro-catalog-plug-and-play.md`), and the
+**Setup-surface redesign** designed in
+`docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md`. The
+Apps Script port is deferred to last, deliberately.
 
 ## Before the remote (blocker) — DONE (2026-07-24)
 
@@ -24,9 +27,38 @@ UX). Remote configured: `origin` = `github.com/DaftVino/sheetforge` (private);
 
 ## Next — active
 
-Nothing active right now — next up is Roadmap, below.
+- [ ] **Setup-surface progressive disclosure** — designed in
+      `docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md`,
+      out of the v0.4.0 owner gate. Two separable parts. **Part B** (small,
+      package-level, do first): move `clean.dupes`' two settings — the header
+      question and the key columns — off Setup and into a prompt at run time,
+      because both describe the range you just picked, not the deployment.
+      **Part A** (Core, contract, migration): Action catalog to the top of Setup,
+      actions default `Off`, `usedBy`-driven hide/unhide, the Chains block
+      appearing on demand, and a pending-changes formula plus Refresh button —
+      click-driven, because a live handler would need VBIDE trust (banned) or a
+      class module (the bundle is one `.bas`). The `Off` default reverses a
+      decided position and needs an **ADR** plus an outbox note. Needs
+      `brainstorming` → `writing-plans` first.
+
+- [ ] **Catalog build-out, track 2** — the macro waves in
+      `docs/macro-catalog-plug-and-play.md`. Package-level, no Core changes
+      expected.
 
 ## Done (recent)
+
+- [x] **Finish Excel, track 1** — DONE (2026-07-27, `v0.4.0`, contract
+      **v1.2.0**). Capacity-packed auto-layout replacing the single `Macros` tab;
+      the unmerged cell-card grid so descriptions are legible; three-state
+      per-action availability (`Button` / `Chains only` / `Off`) with `Off`
+      refused by the dispatcher and blocking Finalize inside a chain; `usedBy`
+      and `category` on the manifest; `Sheet!Cell` anchored placements onto the
+      user's own tabs, with Finalize blocking a malformed, reserved, missing or
+      duplicated target; a machine-owned config schema marker with fail-closed
+      v0.3.0 migration, refusing outright on a newer major and asking before
+      discarding on a damaged one. Owner-verified in Excel across three workbooks
+      (fixture, real, and one finalized under v0.3.0). The throwaway `PkgFixture`
+      (74 no-op actions) that exercised the layout was removed on the way out.
 
 - [x] **"Compose your buttons" feature** — DONE (2026-07-24, contract **v1.1.0**).
       One Core-owned Setup section, two capabilities: **Chains** (compose several
@@ -51,21 +83,42 @@ Nothing active right now — next up is Roadmap, below.
 
 ## Roadmap
 
-- [ ] **Apps Script port** — implement the frozen spec on Google Sheets (Apps
-      Script), same Setup layout + action ids, different engine. Only after the
-      spec is frozen.
-- [ ] **Catalog build-out** (separate track from "Compose your buttons" above) —
-      grow toward the ~60 selectable macros in `docs/macro-catalog-plug-and-play.md`
-      (Reconcile / Validate, Format & Present, Summarize, Workbook housekeeping,
-      Backup). Only 2 of ~60 are built (PkgImportExport, PkgClean); the rest were
-      always intended as user setup options, deferred by the §10 build order (now
-      complete). Each is a thin `Pkg<Name>.bas` + one line in Core's candidate list.
-- [ ] Refresh `docs/code-map.md` (`/code-map`) once `src/` grows further.
-- [ ] **Built-page polish (deferred, design §8)** — the grouped "Macros N" pages
-      are functional but plain: per-page titles/column headings/legend,
-      Previous/Next page navigation, a live placement preview during Setup, and
-      a visually distinct admin area (Setup/Finalize controls) on page 1.
-      Explicitly out of scope for "Compose your buttons" (Task 10).
+**Catalog build-out** — one wave per minor release, each its own plan. Per-item
+verdicts (wave / Later / Deferred / Declined, with the frozen action id) are
+annotated in `docs/macro-catalog-plug-and-play.md`, now the authoritative build
+queue. 35 new actions across six waves; 8 items *Later*, 5 *Deferred*, 4
+*Declined*. "Build all 60" is explicitly not the goal.
+
+- [ ] **W1 — ingest→clean path (7)** `import.combine_worksheets`,
+      `import.combine_workbooks`, `import.delimited_file`, `clean.remove_blanks`,
+      `clean.unmerge_fill`, `clean.standardize_formats`, `clean.text_to_numbers`.
+      New `PkgImport` (the two combines share one private engine) + extend
+      `PkgClean`. With the shipped trim/dupes/filldown this is a complete
+      raw-files→clean-dataset job the user can wire into one chain immediately.
+- [ ] **W2 — Validate & Reconcile (5)** `validate.reconcile` (⭐5, the
+      highest-value item in the catalog for a multi-entity close), `validate.scan`,
+      `validate.highlight_duplicates`, `validate.highlight_outliers`,
+      `validate.missing_fields`.
+- [ ] **W3 — Format & Present + Export (8)** five `format.*` plus `export.pdf`,
+      `export.per_sheet`, `export.freeze_values`.
+- [ ] **W4 — Summarize & Enrich (6)** four `summarize.*` plus `enrich.join`,
+      `enrich.mapped_columns`.
+- [ ] **W5 — Protect & Back Up (4)** four `backup.*`. Note `backup.snapshot` is
+      the unblocker for the *Deferred* destructive items — if those become wanted,
+      W5 moves up rather than the safety story being skipped.
+- [ ] **W6 — Workbook housekeeping (5)** five `workbook.*`.
+
+Wave order after W1 is deliberately revisable between ships; small waves exist
+so it can change.
+
+- [ ] **Apps Script port** — implement the frozen spec on Google Sheets, same
+      Setup layout + action ids, different engine. **Deferred to last on
+      purpose:** the frozen contract only makes the port mechanical *after* the
+      Excel feature set settles. Porting against a moving target means porting
+      twice.
+- [ ] Refresh `docs/code-map.md` (`/code-map`) — absent today, and `Core.bas` is
+      ~77KB, so it is read in slices via Grep. Worth generating before the polish
+      pass touches the renderer and the panel builder.
 
 ## Housekeeping / minor
 
