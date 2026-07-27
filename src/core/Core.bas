@@ -2035,24 +2035,30 @@ End Function
 ' An unrecognised cell is stored as "" so ComposeReport can block on it.
 ' Column layout comes from MarkerVerdict, not a decision made here - see its
 ' comment for why anything but "absent" reads the v1.2+ columns.
+'
+' THE THREE EXITS BELOW ARE THREE DIFFERENT ANSWERS - do not collapse them:
+'   ws Is Nothing  no _Config at all      -> FRESH. Off. The case Off exists for.
+'   kr = 0         _Config, but no block  -> Off, deliberately. Two very different
+'                  histories reach it and they are indistinguishable from the sheet:
+'                  a pre-v1.1 config written before the block existed, and a CURRENT
+'                  config whose block was deleted or corrupted. Flagging it legacy
+'                  was tried and reverted: it fails OPEN, turning a damaged current
+'                  config's destructive actions back into live buttons. The pre-v1.1
+'                  side costs nothing to fail closed - that era had no Availability
+'                  column AND no placements, so there are no configured buttons to
+'                  strip, and its config VALUES (separate key rows, read by Core_Cfg)
+'                  load either way, which is what contract section 10's "v1.0.0/v1.1.0
+'                  remain valid" promise is about. The user re-picks defaults that
+'                  never existed; nobody loses a stored choice.
+'   marker absent  block, no marker       -> LEGACY. Button. Real placements exist
+'                  here and reading them as Off WOULD strip a working install.
 Private Function ReadAvailMap(ws As Worksheet) As Object
     Dim map As Object, kr As Long, nk As Long, i As Long, id As String, detail As String
     Set map = CreateObject("Scripting.Dictionary")
     Set ReadAvailMap = map
     If ws Is Nothing Then Exit Function
     kr = FindKeyRow(ws, LAYOUT_KEY)
-    If kr = 0 Then
-        ' A _Config with no Action catalog block AT ALL - written before the block
-        ' existed. Same provenance conclusion as an absent marker below: there was
-        ' no Availability column, so that deployment had every action live, and
-        ' reading it as Off would strip a working installation. Contract section 10
-        ' promises v1.0.0/v1.1.0 configs stay valid; this is the branch that keeps
-        ' that promise. Distinct from the "ws Is Nothing" exit above, which is FRESH
-        ' (no _Config sheet) and must NOT be flagged - fresh is exactly the case the
-        ' new Off default is for.
-        map(AVAIL_LEGACY_KEY) = AVAIL_BUTTON
-        Exit Function
-    End If
+    If kr = 0 Then Exit Function     ' no catalog block at all: NOT flagged legacy - see below
     If MarkerVerdict(ws, kr, detail) = "absent" Then
         ' Pre-v1.2 block: the Availability column does not exist, so there are no
         ' values to read - but the map must still say WHERE it came from. Fresh
