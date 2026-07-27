@@ -41,13 +41,20 @@ Private Const PACKAGES_SHEET As String = "_Packages"   ' optional enable/disable
 
 Private Const CHAIN_CAT      As String = "Chains"      ' reserved display category for chain buttons
 
-' ---- per-action availability (contract v1.2.0) ----
+' ---- per-action availability (contract v1.2.0; default flipped v2.1.0) ----
 ' Stored in the action catalog block as the display label ("Button" / "Chains
-' only" / "Off") and parsed to these tokens. Blank means never set and reads as
-' Button, which is what makes v0.4.0 a no-op for a v0.3.0 deployment.
+' only" / "Off") and parsed to these tokens. Blank no longer reads as Button:
+' as of v2.1.0 it is not an answer at all and blocks Finalize - see ParseAvail.
 Private Const AVAIL_BUTTON   As String = "button"
 Private Const AVAIL_CHAIN    As String = "chains only"
 Private Const AVAIL_OFF      As String = "off"
+
+' Provenance sentinel inside an availability map - NOT an action id. Reserved by
+' contract section 7 (v2.1.0) as part of the core.* namespace, because section 7
+' states no character rule for action ids and a sentinel therefore cannot be
+' assumed collision-proof. Present => the map came from a pre-v1.2 block whose
+' Availability column does not exist, so an absent id means Button, not Off.
+Private Const AVAIL_LEGACY_KEY As String = "core.legacy"
 
 ' Column header caption for the action catalog's Availability column.
 ' RenderPlacementBlock writes this literal as the visible header; MarkerVerdict's
@@ -2013,8 +2020,9 @@ Private Function AvailLabel(ByVal token As String) As String
 End Function
 
 ' id(lower) -> availability token, from the action catalog block. An id with no
-' row is simply absent, and AvailFor treats absence as Button - so a v0.3.0
-' _Config (which has no Availability column at all) reads as everything on.
+' row is simply absent; what that MEANS is decided by AvailFor and depends on
+' this map's provenance - see AVAIL_LEGACY_KEY. A v0.3.0 _Config (no Availability
+' column at all) is flagged legacy here and still reads as everything on.
 ' An unrecognised cell is stored as "" so ComposeReport can block on it.
 ' Column layout comes from MarkerVerdict, not a decision made here - see its
 ' comment for why anything but "absent" reads the v1.2+ columns.
@@ -2025,7 +2033,14 @@ Private Function ReadAvailMap(ws As Worksheet) As Object
     If ws Is Nothing Then Exit Function
     kr = FindKeyRow(ws, LAYOUT_KEY)
     If kr = 0 Then Exit Function
-    If MarkerVerdict(ws, kr, detail) = "absent" Then Exit Function   ' pre-v1.2 block: all Button
+    If MarkerVerdict(ws, kr, detail) = "absent" Then
+        ' Pre-v1.2 block: the Availability column does not exist, so there are no
+        ' values to read - but the map must still say WHERE it came from. Fresh
+        ' (no _Config) and legacy are both an empty map, and they need opposite
+        ' defaults, so the emptiness alone cannot decide it.
+        map(AVAIL_LEGACY_KEY) = AVAIL_BUTTON
+        Exit Function
+    End If
     nk = NextKeyRow(ws, kr)
     For i = kr + 1 To nk - 1
         id = Trim(CStr(ws.Cells(i, RID_COL).Value))
@@ -2033,12 +2048,23 @@ Private Function ReadAvailMap(ws As Worksheet) As Object
     Next i
 End Function
 
-' Button unless the map says otherwise. Absence means Button, deliberately: an
-' unconfigured or pre-v1.2 deployment must show every button.
+' Off unless the map says otherwise (v2.1.0). Absence used to mean Button; it now
+' means Off, so a newly-registered action arrives switched off instead of
+' appearing unannounced on an existing deployment.
+'
+' The ONE exception is a legacy map, flagged by ReadAvailMap because its stored
+' block predates the Availability column. There, absence still means Button:
+' the store described a deployment in which everything was live, and reading it
+' as Off would silently strip every button from a working installation. Contract
+' section 5 pins that default independently of section 6's for exactly this reason.
 Private Function AvailFor(availMap As Object, ByVal id As String) As String
-    AvailFor = AVAIL_BUTTON
+    AvailFor = AVAIL_OFF
     If availMap Is Nothing Then Exit Function
-    If availMap.Exists(LCase(id)) Then AvailFor = CStr(availMap(LCase(id)))
+    If availMap.Exists(LCase(id)) Then
+        AvailFor = CStr(availMap(LCase(id)))
+    ElseIf availMap.Exists(AVAIL_LEGACY_KEY) Then
+        AvailFor = AVAIL_BUTTON
+    End If
 End Function
 
 ' Fail closed on both: an invalid token ("") draws no button and does not run.
