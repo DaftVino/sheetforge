@@ -1367,13 +1367,23 @@ Public Sub Core_BuildSetup()
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
         banner = UCase(CStr(reg("name")))
-        r = SectionHeader(ws, r, banner)
-        r = RenderTier(ws, r, reg, "simple", True, banner, availMap, True)   ' simple fields, with their sections
-        If HasAdvanced(reg, availMap) Then
-            r = SectionHeader(ws, r, "ADVANCED  -  most users can leave these as-is")
-            r = RenderTier(ws, r, reg, "advanced", False, banner, availMap, True)  ' advanced, collected flat
+        ' A package with nothing to configure draws no band. Skipping the header is
+        ' the same shape as HasAdvanced guarding the ADVANCED one just below, and
+        ' the same judgement v0.2.1 made when it stopped rendering a section header
+        ' identical to its banner: a heading over nothing reads as a mistake.
+        ' PkgClean reaches this state now that both of its settings describe the
+        ' range the user picks and are asked for at run time instead. The package
+        ' is still counted in nPkgs and its actions still appear in the Action
+        ' catalog - it simply has no configuration surface.
+        If HasAnyTier(reg, availMap, True) Then
+            r = SectionHeader(ws, r, banner)
+            r = RenderTier(ws, r, reg, "simple", True, banner, availMap, True)   ' simple fields, with their sections
+            If HasAdvanced(reg, availMap) Then
+                r = SectionHeader(ws, r, "ADVANCED  -  most users can leave these as-is")
+                r = RenderTier(ws, r, reg, "advanced", False, banner, availMap, True)  ' advanced, collected flat
+            End If
+            r = r + 1
         End If
-        r = r + 1
     Next reg
 
     r = RenderComposeSection(ws, r)

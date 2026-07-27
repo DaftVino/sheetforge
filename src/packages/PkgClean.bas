@@ -3,12 +3,15 @@ Option Explicit
 
 '================================================================
 ' PkgClean - a small second package, built to prove Core is a
-' platform: a brand-new package's config field and buttons appear
-' on the Setup and Macros tabs with ZERO changes to Core beyond
-' adding "Clean" to Core's candidate list. All plumbing (config,
-' speed, errors) is Core_*; the only package-specific need - "which
-' range?" - is answered ad hoc with a range picker, so Clean needs
-' no configured target sheet.
+' platform: a brand-new package's buttons appear on the Macros tabs
+' with ZERO changes to Core beyond adding "Clean" to Core's candidate
+' list. All plumbing (speed, errors, completion dialogs) is Core_*.
+'
+' As of v0.5.0 this package declares NO config fields and therefore
+' renders no band on Setup at all - it is now also the proof that a
+' package needing no configuration costs the user no Setup surface.
+' Everything it needs describes the range the user picks, so it is
+' asked for at run time. See PkgClean_Manifest.
 '
 ' Depends on: Core (required).
 '================================================================
@@ -19,13 +22,19 @@ Option Explicit
 Public Sub PkgClean_Manifest(reg As Object)
     Core_DeclarePackage reg, "clean", "Clean & Standardize", "1.0.0"
 
-    ' (No section header: the package banner already reads "CLEAN & STANDARDIZE".)
-    Core_AddField reg, "clean_keycols", "Remove-duplicates key column(s)", "text", "1", _
-        help:="Which column(s) decide whether two rows are duplicates, numbered 1,2,3... from the LEFT of the range you pick. One number, or several like 1,2,4."
-    Core_AddField reg, "clean_hasheader", "Does the range you pick include a header row?", "bool", "yes", _
-        help:="Yes: the first row of your selection is treated as a header and is never removed. No: every row in the selection is considered, including the first one."
+    ' This package declares NO fields, deliberately, so it renders no band on Setup.
+    ' Both of its former settings - the key column(s) and whether the first row is a
+    ' header - describe THE RANGE THE USER JUST PICKED, not the deployment, so they
+    ' are asked for at run time instead. The key columns are the clearer case: they
+    ' are numbered from the left of a selection that does not exist until the action
+    ' runs. Storing either on Setup meant re-editing Setup and re-Finalizing between
+    ' two runs of the same button, and the v0.4.0 owner gate found that nobody
+    ' discovers the setting at the moment they act.
+    '
+    ' Asking every time is the feature, not a cost: it is what makes the answer match
+    ' the selection. Do NOT reintroduce these as remembered settings.
 
-    Core_AddAction reg, "clean.dupes", "Remove Duplicates", "PkgClean_RemoveDupes", "Pick a range; removes duplicate rows using the key column(s) from Setup. Whether the first row is treated as a header is the 'header row' setting on Setup."
+    Core_AddAction reg, "clean.dupes", "Remove Duplicates", "PkgClean_RemoveDupes", "Pick a range, then answer two questions about it: whether its first row is a header, and which column(s) decide a duplicate."
     Core_AddAction reg, "clean.trim", "Trim & Clean Text", "PkgClean_TrimClean", "Pick a range; strips leading/trailing spaces, collapses double spaces, and removes non-printing characters."
     Core_AddAction reg, "clean.filldown", "Fill Blanks Down", "PkgClean_FillDown", "Pick a range; fills each blank cell with the value from the cell above it."
 End Sub
@@ -34,19 +43,30 @@ End Sub
 ' ACTION - Remove duplicate rows on the chosen key column(s)
 '================================================================
 Public Sub PkgClean_RemoveDupes(ctx As Object)
-    Dim rng As Range, keys As String
+    Dim rng As Range, keys As String, hasHeader As Boolean
     On Error GoTo Fail
     Set rng = AskRange("Remove Duplicates")
     If rng Is Nothing Then Exit Sub                 ' user cancelled
 
-    keys = Core_Cfg(ctx, "clean_keycols")
+    ' Both questions are asked AFTER the range, and both name it, because both are
+    ' about that selection. Each returns False on Cancel and the action then stops
+    ' having changed nothing - the range picker's own contract, extended.
+    If Not AskHasHeader(rng, hasHeader) Then Exit Sub
+    If Not AskKeyCols(rng, keys) Then Exit Sub
+
     Core_SpeedOn
     rng.RemoveDuplicates Columns:=ParseCols(keys), _
-                         Header:=IIf(Core_CfgBool(ctx, "clean_hasheader"), xlYes, xlNo)
+                         Header:=IIf(hasHeader, xlYes, xlNo)
     Core_SpeedOff
 
+    ' The message states what was ASSUMED as well as what was done: the header
+    ' answer is invisible afterwards, and "10 rows left, not 11" is only
+    ' interpretable if you know which way it was answered.
     Core_Done ctx, "Remove Duplicates complete on " & Core_RangeRef(rng) & _
-           " using key column(s) " & keys & ".", "Remove Duplicates"
+           " using key column(s) " & keys & "." & vbCrLf & _
+           IIf(hasHeader, "The first row was treated as a header and left alone.", _
+                          "Every row was compared, including the first."), _
+           "Remove Duplicates"
     Exit Sub
 Fail:
     Core_Fail ctx, "clean.dupes", Err
@@ -140,6 +160,60 @@ Private Function AskRange(ByVal title As String) As Range
         End If
     End If
     Set AskRange = rng
+End Function
+
+' Ask whether the picked range's first row is a header. Returns False on Cancel,
+' leaving hasHeader untouched and the caller responsible for stopping.
+'
+' vbYesNoCancel, not vbYesNo: a two-button dialog has no way out, and the title-bar
+' X on a vbYesNo MsgBox returns vbNo - which here would silently choose "compare
+' every row" and delete a header row. Cancel has to be reachable and distinct.
+Private Function AskHasHeader(rng As Range, ByRef hasHeader As Boolean) As Boolean
+    Dim ans As VbMsgBoxResult
+    ans = MsgBox("Does " & Core_RangeRef(rng) & " include a header row?" & vbCrLf & vbCrLf & _
+                 "Yes  -  the first row is a title row: it is kept, and never " & _
+                 "compared against the data." & vbCrLf & _
+                 "No  -  every row is data: all of them are compared, including " & _
+                 "the first one.", _
+                 vbQuestion + vbYesNoCancel + vbDefaultButton1, "Remove Duplicates")
+    If ans = vbCancel Then Exit Function
+    hasHeader = (ans = vbYes)
+    AskHasHeader = True
+End Function
+
+' Ask which column(s) decide a duplicate, numbered from the LEFT of the picked
+' range. Returns False on Cancel.
+'
+' Application.InputBox, not VBA's InputBox: the latter returns "" for BOTH Cancel
+' and an empty OK, and those must not mean the same thing. Application.InputBox
+' returns Boolean False on Cancel, which VarType can tell apart from any string.
+Private Function AskKeyCols(rng As Range, ByRef keys As String) As Boolean
+    Dim v As Variant, cols As Variant, i As Long, nCols As Long
+    nCols = rng.Columns.Count
+    v = Application.InputBox( _
+        Prompt:="Which column(s) decide whether two rows are duplicates?" & vbCrLf & vbCrLf & _
+                "Numbered from the LEFT of " & Core_RangeRef(rng) & ", which is " & _
+                nCols & " column(s) wide. One number, or several like 1,2,4.", _
+        title:="Remove Duplicates", Default:="1", Type:=2)
+    If VarType(v) = vbBoolean Then Exit Function     ' Cancel
+    keys = Trim(CStr(v))
+    If Len(keys) = 0 Then keys = "1"                 ' empty OK means the default
+
+    ' Validate against the picked range's width. A column number past the right
+    ' edge raises 1004 inside RemoveDuplicates, which surfaces through Core_Fail
+    ' as an engine error - it reads as a broken macro rather than as the typo it
+    ' is. ParseCols already drops non-numeric entries and falls back to column 1.
+    cols = ParseCols(keys)
+    For i = LBound(cols) To UBound(cols)
+        If cols(i) < 1 Or cols(i) > nCols Then
+            MsgBox "Column " & cols(i) & " is outside " & Core_RangeRef(rng) & _
+                   ", which is " & nCols & " column(s) wide." & vbCrLf & vbCrLf & _
+                   "Nothing has been changed. Run Remove Duplicates again.", _
+                   vbExclamation, "Remove Duplicates"
+            Exit Function
+        End If
+    Next i
+    AskKeyCols = True
 End Function
 
 ' "1,2,4" -> Variant array of Longs for Range.RemoveDuplicates Columns.
