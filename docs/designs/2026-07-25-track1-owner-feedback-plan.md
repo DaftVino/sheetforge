@@ -2921,6 +2921,71 @@ reserved-word list: `place`, `out`, `flag`, `raw`, `target`, `paged`, `anchored`
 
 ## Handoff log
 
+### 2026-07-27 — gate PASSED, v0.4.0 shipped to PR #4
+
+**Branch.** `feat/finish-excel-track1`, **78 commits, PUSHED, PR #4 open against
+`main`.** Not merged. `main` is still v0.3.0 / contract v1.1.0 until it lands.
+
+**The gate is complete.** All 74 Task 10 items executed and passed across three
+workbooks — fixture scratch, a fresh copy of the real workbook, and one finalized
+under v0.3.0 for the upgrade path. That includes the **protected-sheet item**, the
+one assumption nothing agent-side could execute: `ws.Buttons.Add` does raise on a
+`DrawingObjects`-protected sheet, the build completes, and the dialog reports the
+skip with a repair instruction. Also confirmed, all previously unverified: the
+leading-apostrophe repair, the sweep-on-clear, and all four Finalize-blocking
+conditions.
+
+**One code defect found and fixed this session** (`f6cdcc1`). Finalize told a user
+who had switched every action `Off` that *"The Macros pages have been rebuilt to
+match your Setup answers"* — then left them looking for tabs that were never built.
+`Core_BuildControlPanel` already had the honest sentence, but Finalize calls it
+`silent:=True` and prints its own dialog, so it reached nobody on the normal path.
+**This is the same defect class as the anchored-button note, missed in the same
+place**: `mLastPlacedNote` was added to carry that one out and the zero-pages verdict
+was not given the same treatment. `mLastNoPages` now carries it; `NO_PAGES_MSG` holds
+the sentence once so the two callers cannot disagree. Regression-checked both ways.
+
+**Twelve checklist items could not be followed as written**, all repaired in place.
+One root cause: naming a value, identifier or dialog without naming the cell, column,
+sheet or code path it belongs to. The three that cost the most time:
+
+1. **"Rename `TabName` and Finalize again"** cannot reach the "could NOT be placed"
+   dialog — Finalize re-validates and refuses with `NO SUCH SHEET` first. The only
+   route to that branch is a direct `Core_BuildControlPanel` run, which rebuilds from
+   the activated `_Config` without re-validating.
+2. **"Set every button to `hide`"** never said which column. Pasted into
+   `Availability` (dropdown-only, so typing is refused and pasting is the only way in)
+   it produces one `UNRECOGNISED Availability` block per cell. It belongs in
+   `Placement`, and the chain rows need it too.
+3. **"Import over that workbook"** never said to remove the module first. Both bundles
+   declare `Attribute VB_Name = "MacrosBundle"`, so importing gives you a second
+   module with every procedure duplicated.
+
+Filed as **issue #3** (blind-dry-run gate for manual checklists) — still the systemic
+fix, now with twelve data points instead of six.
+
+**Deferred with a design, not dropped.** The owner's report that a per-selection
+setting on Setup is undiscoverable is real. Captured in
+`docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md`: **Part B**
+moves `clean.dupes`' two settings into a run-time prompt (determination run against
+both shipping packages — only that action qualifies, and both its fields move);
+**Part A** is progressive disclosure on Setup, which is mostly assembly of the
+existing `usedBy` machinery plus one capability that is **not available** (live
+unhiding needs `Worksheet_Change`, so VBIDE trust or a class module — both barred)
+and one trap (defaulting to `Off` silently zeroes every upgraded v0.3.0 deployment
+unless the format marker distinguishes "absent because old" from "absent because
+new"). Part A needs an ADR before any code.
+
+**Still carried forward — do not revert.** The list from the entry below stands
+unchanged: `AddBtn`'s all-or-nothing placement; no `eNum` or any case-variant of a
+VBA keyword; `InStrRev` not `InStr` in `ParseAnchor`; `hide` filtered only in
+`GatherButtons`. Add to it: **`NO_PAGES_MSG` is one constant on purpose** — two
+callers say that sentence.
+
+**Next.** Land PR #4. Then delete `.superpowers/sdd/2026-07-25-track1-owner-feedback-plan/`,
+which was deliberately kept until the PR lands. Then track 2 (catalog waves) and the
+Setup-surface redesign, Part B first.
+
 ### 2026-07-26 — all ten tasks built and reviewed; owner's Excel gate IN PROGRESS
 
 **Branch.** `feat/finish-excel-track1`, **71 commits, NOT pushed, no PR.** Nothing

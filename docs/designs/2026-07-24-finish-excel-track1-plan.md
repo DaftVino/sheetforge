@@ -2805,7 +2805,7 @@ nothing and look like failures. You should be back to the fixture's packed pages
       `mLastNoPages` now carries the verdict out, and `NO_PAGES_MSG` holds the
       sentence once so the two callers cannot disagree.
 
-- [ ] **Step 8: Record the result**
+- [x] **Step 8: Record the result** — PR #4, checklist pasted into the body.
 
 Paste the completed checklist into the PR. Any failure means the corresponding task
 is not done.
