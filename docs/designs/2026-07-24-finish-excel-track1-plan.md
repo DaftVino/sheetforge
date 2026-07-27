@@ -2558,7 +2558,7 @@ sheet. Two triggers people reach for instead do **not** work and verify nothing:
 `_Config` (a missing config is handled gracefully — the build just succeeds using
 defaults).
 
-- [ ] **Step 5b: Fixture pass — Sheet!Cell anchored placements**
+- [x] **Step 5b: Fixture pass — Sheet!Cell anchored placements**
 
 - [x] **It places, and it does not disturb the layout.** `TabName!B4` on one action,
       every other code blank, Finalize: the button appears on `TabName` at B4, the other
@@ -2567,14 +2567,14 @@ defaults).
       your eyes can settle. Same again for a **chain**: identical behaviour, one
       button, one placement.
 
-- [ ] **`TabName` is a guest surface, and the button behaves like one.** Four
+- [x] **`TabName` is a guest surface, and the button behaves like one.** Four
       observations on the button you already have there: **(a)** nothing on `TabName`
       changed but the button — no cleared cells, no altered column widths or row
       heights, no formatting, no tab colour; **(b)** narrow column B — the button
       does **not** squash (`xlMove`, not `xlMoveAndSize`); **(c)** insert a row above
       row 4 — the button moves down with its cell; **(d)** click it — it runs.
 
-- [ ] **Self-healing, and every accepted spelling, in one pass.** Change the
+- [x] **Self-healing, and every accepted spelling, in one pass.** Change the
       Placement cell and Finalize after each, confirming there is **exactly one**
       button on the target each time — never two:
       `TabName!$B$4` (same cell, absolute) → `TabName!D10` (moves) → rename the tab to
@@ -2587,7 +2587,7 @@ defaults).
       bar and not in the cell. The engine repairs this; if it fails you get
       `NO SUCH SHEET` naming a tab sitting in plain view.
 
-- [ ] **What blocks Finalize.** Each must refuse to activate, name the button, and
+- [x] **What blocks Finalize.** Each must refuse to activate, name the button, and
       change nothing:
       `MICC!B4` → `NO SUCH SHEET` · `Macros 1!B4` → `RESERVED SHEET` (whether or not
       that tab currently exists — engine-owned names are checked first, deliberately,
@@ -2599,7 +2599,7 @@ defaults).
       sheets` list in the same `caption [id]` format as the `Hidden` and `Unassigned`
       lists, and does **not** block.
 
-- [ ] **A PROTECTED target sheet — the single most important item in this section.**
+- [x] **A PROTECTED target sheet — the single most important item in this section.**
       Right-click `TabName` ▸ Protect Sheet ▸ OK (the default protects `DrawingObjects`),
       then Finalize. Expected: **the build COMPLETES** — it must not die with
       "rebuilding the Macros pages failed" — and the `Configuration activated.`
@@ -2614,13 +2614,31 @@ defaults).
       because the sweep cannot delete it either. The engine must never unprotect your
       sheet. Unprotect and re-Finalize to clear it.
 
-- [ ] **A target that disappears, and the empty workbook.** Anchor to `TabName!B4`,
-      Finalize, then **rename** `TabName` and Finalize again: the dialog reports
+- [x] **A target that disappears, and the empty workbook.**
+      *You are renaming the worksheet **tab**, not the Placement cell. The cell keeps
+      saying `TabName!B4`; the point is to leave the activated config pointing at a tab
+      that is no longer there.*
+      With `TabName!B4` anchored and finalized, rename the `TabName` tab to `MIC2`. **Do not
+      Finalize** — Finalize re-validates first and correctly refuses with
+      `NO SUCH SHEET` (the item above already checked that), so it can never show
+      this dialog. Instead run `Core_BuildControlPanel` from the Immediate window
+      (**Alt+F11**, **Ctrl+G**): it rebuilds from the activated `_Config` **without**
+      re-validating, which is exactly the state a user reaches by renaming a tab some
+      time after finalizing. Expected: the `Setup Complete` dialog reports
       `1 anchored button(s) could NOT be placed.` and its **first** bullet applies —
-      that action now has **no** button anywhere, which is exactly what the message
-      exists to tell you.
-      Then set every other button to `hide`, leaving only one anchored button, and
-      Finalize: a **success** dialog ending `1 button(s) placed on your own sheets.`
+      that action now has **no** button anywhere, which is what the message exists to
+      tell you. Rename the tab back to `TabName` before continuing.
+      Then type `hide` in the **Placement** column — the third column of the Action
+      catalog block, to the right of Availability, the same column that holds
+      `TabName!B4`. **Not** Availability: that is a dropdown of `Button` / `Chains only`
+      / `Off`, it will not let you type, and pasting `hide` into it lands an
+      unrecognised token that blocks Finalize with one `UNRECOGNISED Availability`
+      error per cell. Code every action row `hide` except the anchored one, **and
+      the chain rows in the Compose Your Buttons block too** — chain buttons come
+      through the same funnel, and one left uncoded keeps a page alive and hides the
+      zero-pages wording this item exists to check. Leaving only the one anchored
+      button, Finalize: a **success** dialog ending
+      `1 button(s) placed on your own sheets.`
       To see the zero-pages wording as well, run `Core_BuildControlPanel` from the
       Immediate window (**Alt+F11**, **Ctrl+G**, type it, Enter — it is not in the
       Alt+F8 list, which shows only zero-argument macros). That non-silent path
@@ -2628,26 +2646,26 @@ defaults).
       anchored to one of your own sheets.` — not `Built 0 macro page(s)`. The note
       must appear exactly **once per dialog**, never doubled.
 
-- [ ] **Step 6: Real pass — the shipping bundle**
+- [x] **Step 6: Real pass — the shipping bundle**
 
 Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
 `Debug ▸ Compile VBAProject`, `Core_BuildSetup`, Finalize:
 
-- [ ] **Exactly ONE `Macros` tab, holding two columns** — `Import / Export`
+- [x] **Exactly ONE `Macros` tab, holding two columns** — `Import / Export`
       (5 buttons) and `Clean & Standardize` (3). All 8 fit on one tab. The point of
       this check is that a real deployment must not end up with more tabs than
       v0.3.0 had; the 7 tabs you saw with the fixture were the fixture's doing.
-- [ ] **All 8 buttons work, and cancelling is clean.** Click each one and confirm it
+- [x] **All 8 buttons work, and cancelling is clean.** Click each one and confirm it
       does its real work on real data. On every action that opens a range picker or
       file dialog, run it a second time and press **Cancel**: it should simply stop —
       no error dialog, nothing half-done.
-- [ ] **A failed action must not poison the next one.** Force a failure — point a tab
+- [x] **A failed action must not poison the next one.** Force a failure — point a tab
       setting at a tab that does not exist, or a file setting at a prefix matching no
       file — and run it. Expected: Finalize warned you beforehand, and afterwards
       **Excel still behaves normally**: the screen redraws, formulas recalculate, and
       the next button works. A macro that dies with screen updating off leaves Excel
       looking frozen; that is what this catches.
-- [ ] **The duplicates header field, all four states.** On Setup, `Does the range you
+- [x] **The duplicates header field, all four states.** On Setup, `Does the range you
       pick include a header row?` is present with a working **Yes/No dropdown**
       defaulting to **Yes**. Then:
       **Yes** + a range whose first row IS a header → the header survives, uncompared.
@@ -2657,7 +2675,7 @@ Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
       so pasting is the only way in → Finalize **BLOCKS** with
       `UNRECOGNISED Yes/No value`.
       **Clear** the cell → reads as the default `Yes` and activates.
-- [ ] **Sheet-qualified messages, all three Clean actions.** With a button on one tab,
+- [x] **Sheet-qualified messages, all three Clean actions.** With a button on one tab,
       run `Remove Duplicates` against a range on a **different** tab: the completion
       dialog must read `TabName!M2:M12`, not `M2:M12`. Repeat for `Trim & Clean Text` and
       `Fill Blanks Down`. Then rename that tab to something needing quotes (`TabName Data`
@@ -2665,16 +2683,22 @@ Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
       **If any of them names the WRONG tab, stop and report it** — that would mean the
       original diagnosis was wrong and something really was acting on the wrong sheet.
 
-- [ ] **Step 7: Upgrade pass — fail-closed migration**
+- [x] **Step 7: Upgrade pass — fail-closed migration**
 
 **This is the check that protects a real user's existing work on upgrade.** Use
 **workbook C** — the one finalized under v0.3.0, per the recipe at the top of Task 10.
 v0.3.0 stored `Action | Page code`; v0.4.0 stores `Action | Availability | Placement`,
 so the saved codes have to survive being shifted one column to the right.
 
-- [ ] **Upgrade it.** Import `dist/MacrosBundle.bas` over that workbook, then run
-      `Create Setup Tab`.
-- [ ] **Every code you set under v0.3.0 is still there**, now under the `Placement`
+- [x] **Upgrade it.** In the VBA editor (**Alt+F11**), **remove the existing
+      `MacrosBundle` module first** — right-click it ▸ Remove ▸ **No** when asked to
+      export. Both bundles declare `Attribute VB_Name = "MacrosBundle"`, so importing
+      without removing gives you a second module named `MacrosBundle1` with every
+      procedure duplicated, which fails to compile. Then import
+      `dist/MacrosBundle.bas` and run `Create Setup Tab`.
+      **Removing the module does not touch `_Config`** — the saved v0.3.0 settings
+      live on that hidden worksheet, which is the whole point of the test.
+- [x] **Every code you set under v0.3.0 is still there**, now under the `Placement`
       header, and every `Availability` cell reads `Button` (v0.3.0 had no such
       column, so everything defaults to "shown as a button").
 
@@ -2682,14 +2706,22 @@ so the saved codes have to survive being shifted one column to the right.
 migration dropped saved settings, which is the exact failure this step exists to
 catch, and retyping hides it.
 
-- [ ] **Now corrupt one deliberately.** Put `zzz` into the old code column of the
-      hidden `_Config` sheet (see the note in Step 7b for how to open it — it cannot
-      be unhidden from Excel's normal menu). Run `Create Setup Tab` again. Expected:
+- [x] **Now corrupt one deliberately.** Open the hidden `_Config` sheet (see the note
+      in Step 7b for how — it cannot be unhidden from Excel's normal menu) and replace
+      one of your saved page codes with `zzz`, then set the **sheet** back to
+      `2 - xlSheetVeryHidden` (re-hide the *sheet*, not a column).
+      **Which cell:** `Create Setup Tab` rewrites only the *Setup* sheet; `_Config` is
+      rewritten only by Finalize, which has not run since the upgrade. So `_Config` is
+      still in v0.3.0 layout — column C `Action`, column D the **page code** (`1A`,
+      `2B`), column E empty, and **no Availability column at all**. Overwrite the code
+      in **column D**. If column D shows `Button` instead, Finalize has run and
+      rewritten `_Config` in v0.4.0 format: workbook C is spent and must be rebuilt
+      from the v0.3.0 bundle. Run `Create Setup Tab` again. Expected:
       it **refuses to run**, names the action whose code it could not read, and
       leaves your Setup tab exactly as it was. Refusing is the correct behaviour —
       rebuilding around an unreadable value risks discarding it.
 
-- [ ] **Step 7b: Previously-unverified behaviour (added in the final-review fix
+- [x] **Step 7b: Previously-unverified behaviour (added in the final-review fix
       wave)** — shipped but never exercised by the checklist above.
 
 **First: how to open the hidden `_Config` sheet.** Several checks below need you to
@@ -2705,19 +2737,30 @@ will not list it**. Do this instead:
 
 Inside `_Config`, the **format marker** is the cell in **column J** on the row whose
 column A reads `k_core_layout`. That marker is how the engine knows which version
-wrote the file.
+wrote the file. On a v0.4.0 workbook it reads **`v1.2`**.
 
-- [ ] **A damaged marker asks before discarding anything.** Open `_Config`, put
+**The next two items run on workbook C**, continuing straight on from Step 7 — no need
+to keep workbook B alive. Both verdicts are decided by the marker cell's contents
+alone, so a blank starting value works as well as `v1.2`. Two conditions:
+
+- **Restore J to blank afterwards, NOT `v1.2`.** C's `_Config` must keep looking
+  v0.3.0-written for the escape hatch below. A valid marker means that path never
+  runs and the check passes for the wrong reason.
+- **Answer No on the damaged-marker item.** Yes runs the guarded rebuild, discards
+  C's v0.3.0 config, and spends the workbook — it would have to be rebuilt from
+  `MacrosBundle.v030.bas`.
+
+- [x] **A damaged marker asks before discarding anything.** Open `_Config`, put
       nonsense (e.g. `xxx`) into the marker cell, re-hide, and run `Create Setup
       Tab`. Expected: a confirmation prompt that spells out explicitly what will be
       **DISCARDED** and what will be **KEPT**, and that defaults to **No**. Answering
       No must leave everything untouched. It must never rebuild silently.
-- [ ] **A marker from a newer version refuses outright.** Put a higher version string
+- [x] **A marker from a newer version refuses outright.** Put a higher version string
       into the marker cell (e.g. `v9.9`), re-hide, and run `Create Setup Tab`.
       Expected: it **refuses** and tells you to re-import that version's bundle. This
       is the guard against an old build stomping on a newer format it cannot read —
       it must not offer to rebuild.
-- [ ] **The no-Setup-tab escape hatch.** **This one must be done on workbook C, the
+- [x] **The no-Setup-tab escape hatch.** **This one must be done on workbook C, the
       v0.3.0 one** — on a v0.4.0 workbook the marker is present and valid, so this
       path never runs and the rebuild proceeds silently, which would look like a
       failure and is not.
@@ -2727,7 +2770,12 @@ wrote the file.
   Setup Tab`. Expected: a confirmation prompt naming exactly what will be discarded —
   not a silent rebuild. This is the recovery route for a user who has no Setup tab
   left to correct the value on.
-- [ ] **Chain cards: bounded, and always last.** Build a chain with **5 or more
+**Reset workbook A before the last two items.** Step 5b left every action row *and*
+every chain row coded `hide` in the Placement column, plus one anchor on `TabName`. Clear
+that whole column — actions and chains — and Finalize, or the two items below render
+nothing and look like failures. You should be back to the fixture's packed pages.
+
+- [x] **Chain cards: bounded, and always last.** Build a chain with **5 or more
       steps**, Finalize, and look at its button's description. Expected: a partial
       step list ending `+N more - see the Setup tab` — a long chain must not draw one
       enormous description row that stretches every card beside it — and you must
@@ -2735,7 +2783,7 @@ wrote the file.
       off. In the same build, confirm the reserved `Chains` category renders **after
       every other category**, regardless of when you authored the chain.
 
-- [ ] **Shrinking back to a small deployment leaves no debris, and an empty one is
+- [x] **Shrinking back to a small deployment leaves no debris, and an empty one is
       legal.** On workbook A: delete the `MacrosBundle` module, import
       `dist/MacrosBundle.bas` (the real 8-action bundle) instead, and Finalize.
       Expected: the tabs shrink back to one, with **no abnormally tall rows** left
@@ -2743,9 +2791,19 @@ wrote the file.
       shrink again when it goes away.
       Then **delete every chain** (otherwise a chain pointing at an `Off` action makes
       Finalize refuse and you never reach the empty state), set every action to `Off`,
-      and Finalize. Expected: `No macro pages were built - every button is hidden,
-      switched Off, or anchored to one of your own sheets.` and **no error**. An empty
-      workbook is a legitimate configuration, not a failure.
+      and Finalize. Expected: **no error** — an empty workbook is a legitimate
+      configuration, not a failure — and Finalize's own dialog reads
+      `Configuration activated.` followed by `No macro pages were built - every button
+      is hidden, switched Off, or anchored to one of your own sheets.`
+      **It must NOT say `The Macros pages have been rebuilt to match your Setup
+      answers.`** — that sentence is false when none were built, and it sends the user
+      looking for tabs that were never meant to exist.
+      **Found by this gate and fixed in v0.4.0.** Finalize calls
+      `Core_BuildControlPanel silent:=True`, so the zero-pages sentence originally
+      reached nobody on the normal path — the same defect class as the anchored-button
+      note that `mLastPlacedNote` was added to carry out, missed in the same place.
+      `mLastNoPages` now carries the verdict out, and `NO_PAGES_MSG` holds the
+      sentence once so the two callers cannot disagree.
 
 - [ ] **Step 8: Record the result**
 
