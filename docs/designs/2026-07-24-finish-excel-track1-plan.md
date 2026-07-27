@@ -2560,89 +2560,73 @@ defaults).
 
 - [ ] **Step 5b: Fixture pass — Sheet!Cell anchored placements**
 
-- [x] Create a scratch tab named `MIC`. Put `MIC!B4` in one action's Placement
-      cell, leave every other code blank, and Finalize. Confirm: a button appears on
-      `MIC` at cell B4, **and the other ~81 buttons are still packed automatically**
-      onto numbered pages - NOT dumped into page 1's `Unassigned` column. An anchor
-      must not flip the workbook into manual mode.
-- [x] The button on `MIC` is about **110pt** wide. Judge it against real data: it is
-      the one number in this release that only your eyes can settle. If it reads
-      wrong, `ANCHOR_BTN_W` is a one-line change.
-- [ ] **`MIC` is otherwise untouched.** No cleared cells, no changed column widths or
-      row heights, no formatting, no new values, no tab colour change. The button is
-      the ONLY thing that appeared.
-- [ ] Narrow column B on `MIC`. The button does **not** squash (it is `xlMove`, not
-      `xlMoveAndSize`). Insert a row above row 4: the button moves down with its cell.
-- [ ] Click it. It runs the action.
-- [ ] **Clear that Placement cell and Finalize again: the button is GONE from `MIC`**,
-      and the action is back on a generated page. This is the sweep working; if the
-      button is still there, `SweepPlacedButtons` is not running.
-- [ ] Change the code to `MIC!D10` and Finalize: exactly **one** button on `MIC`, at
-      D10. Not two.
-- [ ] Try each accepted spelling and confirm all are accepted: `MIC!B4`, `MIC!$B$4`.
-      Rename the tab to `MIC Data` and confirm **both** `MIC Data!B4` and
-      `'MIC Data'!B4` work — for an action **and** for a chain. The quoted form is
-      the one to watch: **Excel eats a leading apostrophe**, treating it as a "this
-      cell is text" prefix, so the cell actually stores `MIC Data'!B4` with the
-      opening quote gone. You can watch it happen — the formula bar still shows your
-      apostrophe, the cell itself does not. The engine repairs this, but if the check
-      fails you will get `NO SUCH SHEET` naming a tab that is plainly sitting right
-      there.
-- [ ] Anchor a **chain** the same way. It behaves identically - a chain is one button
-      with one placement.
-- [ ] **The four blocking conditions.** Each must refuse to activate, name the button,
-      and change nothing:
-      - `MICC!B4` (no such tab) -> `NO SUCH SHEET`
-      - `Macros 1!B4` -> `RESERVED SHEET`
-      - two different actions both set to `MIC!B4` -> `DUPLICATE TARGET` naming both
-      - `MIC!B4:C9` (a range, not a cell) -> `BAD CODE`
-      - also confirm `MIC!$B$4` and `MIC!B4` on two different actions **do** collide
-        (they are the same cell spelled two ways)
-- [ ] **`Macros 1!B4` on a workbook that has NOT been built yet** (a fresh import,
-      before any `Macros N` tab exists). Finalize must say **`RESERVED SHEET`**, not
-      `NO SUCH SHEET`. The wrong message here would tell you to create a tab called
-      `Macros 1` yourself — and the engine deletes and recreates those tabs on every
-      build, so it would be destroyed immediately.
-- [ ] **A PROTECTED target sheet.** Right-click `MIC` ▸ Protect Sheet ▸ OK (the
-      default protects `DrawingObjects`), then Finalize. Expected: **the build
-      COMPLETES** — it must not die with "rebuilding the Macros pages failed" — and
-      the `Configuration activated.` dialog Finalize shows at the end reports
-      `1 anchored button(s) could NOT be placed.` followed by two bullet lines, the
-      second of which tells you to unprotect the sheet and Finalize again.
-      **This is the single most important item in this section**: it is the one
-      assumption that could not be verified without Excel (`ws.Buttons.Add` raising
-      1004 on a protected sheet), and before the fix it took down the whole build.
-      **If the dialog says only `Configuration activated.` with no count, the note
-      is not reaching Finalize** — the build composes it and Finalize appends it, so
-      a missing note is a real finding, not a cosmetic one.
-      **Known residual, not a bug to report:** a button placed on that sheet by an
-      *earlier* build survives, because the sweep cannot delete it either. Removing
-      it would mean the engine unprotecting your sheet, which it must never do — the
-      dialog's second bullet says so. Unprotect and re-Finalize to clear it.
-- [ ] **A RENAMED target sheet.** Anchor a button to `MIC!B4`, Finalize, then rename
-      `MIC` to something else and Finalize again. Expected: the `Configuration
-      activated.` dialog says `1 anchored button(s) could NOT be placed.` and its
-      **first** bullet — `If the sheet or cell no longer exists, that action has no
-      button anywhere: fix the placement on the Setup tab and Finalize again.` — is
-      the one that applies. Confirm that action now has **no** button anywhere; that
-      is correct and is what the message exists to tell you.
-- [ ] With an anchor active, the Finalize report shows a soft
-      `Placed on your own sheets` list in the same `caption [id]` format the
-      `Hidden` and `Unassigned` lists use, and it does **not** block.
-- [ ] Set every button to `hide` except one anchored button, then Finalize. Confirm
-      the `Configuration activated.` dialog ends with
-      `1 button(s) placed on your own sheets.` - a success dialog, not an error.
-      **Then, without changing anything, run `Core_BuildControlPanel` from the
-      Immediate window** — **Alt+F11**, **Ctrl+G**, type `Core_BuildControlPanel`,
-      Enter. It will **not** be in the Alt+F8 list: it takes an optional argument,
-      and Excel's Macro dialog hides any procedure that takes arguments at all,
-      optional included. That is the *non-silent* path, and only it shows the
-      zero-pages wording:
-      `No macro pages were built - every button is hidden, switched Off, or anchored
-      to one of your own sheets.` followed by the same
-      `1 button(s) placed on your own sheets.` - not `Built 0 macro page(s)`.
-      Two dialogs is correct here (one per run); the note must appear exactly **once
-      per dialog**, never doubled inside one.
+- [x] **It places, and it does not disturb the layout.** `MIC!B4` on one action,
+      every other code blank, Finalize: the button appears on `MIC` at B4, the other
+      ~81 buttons stay packed on numbered pages (an anchor must not flip the workbook
+      into manual mode), and the button is about **110pt** wide — the one number only
+      your eyes can settle. Same again for a **chain**: identical behaviour, one
+      button, one placement.
+
+- [ ] **`MIC` is a guest surface, and the button behaves like one.** Four
+      observations on the button you already have there: **(a)** nothing on `MIC`
+      changed but the button — no cleared cells, no altered column widths or row
+      heights, no formatting, no tab colour; **(b)** narrow column B — the button
+      does **not** squash (`xlMove`, not `xlMoveAndSize`); **(c)** insert a row above
+      row 4 — the button moves down with its cell; **(d)** click it — it runs.
+
+- [ ] **Self-healing, and every accepted spelling, in one pass.** Change the
+      Placement cell and Finalize after each, confirming there is **exactly one**
+      button on the target each time — never two:
+      `MIC!$B$4` (same cell, absolute) → `MIC!D10` (moves) → rename the tab to
+      `MIC Data` and use `MIC Data!B4` (unquoted, with a space) → `'MIC Data'!B4`
+      (quoted) → finally **clear the cell** and confirm the button is **gone** and
+      the action is back on a generated page.
+      The quoted spelling is the one to watch: **Excel eats a leading apostrophe**,
+      treating it as a "this cell is text" prefix, so the cell really stores
+      `MIC Data'!B4`. You can watch it happen — your apostrophe shows in the formula
+      bar and not in the cell. The engine repairs this; if it fails you get
+      `NO SUCH SHEET` naming a tab sitting in plain view.
+
+- [ ] **What blocks Finalize.** Each must refuse to activate, name the button, and
+      change nothing:
+      `MICC!B4` → `NO SUCH SHEET` · `Macros 1!B4` → `RESERVED SHEET` (whether or not
+      that tab currently exists — engine-owned names are checked first, deliberately,
+      so you are never told to create a tab the engine would destroy) ·
+      `MIC!B4:C9` → `BAD CODE` · two actions both on `MIC!B4` → `DUPLICATE TARGET`
+      naming both · and `MIC!$B$4` against `MIC!B4` on two actions **must also**
+      collide, being one cell spelled two ways.
+      With a *valid* anchor, the report instead shows a soft `Placed on your own
+      sheets` list in the same `caption [id]` format as the `Hidden` and `Unassigned`
+      lists, and does **not** block.
+
+- [ ] **A PROTECTED target sheet — the single most important item in this section.**
+      Right-click `MIC` ▸ Protect Sheet ▸ OK (the default protects `DrawingObjects`),
+      then Finalize. Expected: **the build COMPLETES** — it must not die with
+      "rebuilding the Macros pages failed" — and the `Configuration activated.`
+      dialog reports `1 anchored button(s) could NOT be placed.` followed by two
+      bullets, the second telling you to unprotect and Finalize again.
+      This is the one assumption that could not be verified without Excel
+      (`ws.Buttons.Add` raising 1004 on a protected sheet), and before the fix it
+      took down the entire build. **If the dialog says only `Configuration
+      activated.` with no count, the note is not reaching Finalize — a real finding,
+      not cosmetic.**
+      **Known residual, not a bug:** a button an *earlier* build put there survives,
+      because the sweep cannot delete it either. The engine must never unprotect your
+      sheet. Unprotect and re-Finalize to clear it.
+
+- [ ] **A target that disappears, and the empty workbook.** Anchor to `MIC!B4`,
+      Finalize, then **rename** `MIC` and Finalize again: the dialog reports
+      `1 anchored button(s) could NOT be placed.` and its **first** bullet applies —
+      that action now has **no** button anywhere, which is exactly what the message
+      exists to tell you.
+      Then set every other button to `hide`, leaving only one anchored button, and
+      Finalize: a **success** dialog ending `1 button(s) placed on your own sheets.`
+      To see the zero-pages wording as well, run `Core_BuildControlPanel` from the
+      Immediate window (**Alt+F11**, **Ctrl+G**, type it, Enter — it is not in the
+      Alt+F8 list, which shows only zero-argument macros). That non-silent path
+      reads `No macro pages were built - every button is hidden, switched Off, or
+      anchored to one of your own sheets.` — not `Built 0 macro page(s)`. The note
+      must appear exactly **once per dialog**, never doubled.
 
 - [ ] **Step 6: Real pass — the shipping bundle**
 
@@ -2653,37 +2637,33 @@ Fresh copy of the real workbook, import `dist/MacrosBundle.bas` (no fixture),
       (5 buttons) and `Clean & Standardize` (3). All 8 fit on one tab. The point of
       this check is that a real deployment must not end up with more tabs than
       v0.3.0 had; the 7 tabs you saw with the fixture were the fixture's doing.
-- [ ] **Click all 8 buttons** and confirm each does its real work on real data.
-- [ ] **Cancel out of every prompt.** Each action that opens a range picker or file
-      dialog: press Cancel. Expected: it simply stops — no error dialog, and nothing
-      half-done left behind.
-- [ ] **A failed action must not poison the next one.** Force a failure: point a tab
+- [ ] **All 8 buttons work, and cancelling is clean.** Click each one and confirm it
+      does its real work on real data. On every action that opens a range picker or
+      file dialog, run it a second time and press **Cancel**: it should simply stop —
+      no error dialog, nothing half-done.
+- [ ] **A failed action must not poison the next one.** Force a failure — point a tab
       setting at a tab that does not exist, or a file setting at a prefix matching no
-      file, and run that action. Expected: Finalize warns you about it beforehand,
-      and after the failure **Excel still behaves normally** — screen still redraws,
-      formulas still recalculate, and the next button you click works. A macro that
-      dies with screen updating switched off leaves Excel looking frozen, which is
-      what this is checking.
-- [ ] **The duplicates header field.** On Setup, `Does the range you pick include a
-      header row?` is present with a working **Yes/No dropdown**, defaulting to
-      **Yes**.
-- [ ] With it **Yes**, run `Remove Duplicates` over a range whose first row IS a
-      header: the header row survives and is not compared.
-- [ ] With it **No**, run it over `M2:M12` with no header: **all eleven values are
-      considered**, not ten. This is the owner's original symptom.
-- [ ] **Paste** (do not type) `ye` into that cell - typing is refused by the
-      validation, so pasting is the only way in. Finalize **BLOCKS** with
-      `UNRECOGNISED Yes/No value` and does not activate.
-- [ ] Clear the cell entirely: it reads as the default (**Yes**) and activates.
-- [ ] **Sheet-qualified messages.** Put a button on one tab and run
-      `Remove Duplicates` against a range on a DIFFERENT tab. The completion dialog
-      must now read `MIC!M2:M12`, not `M2:M12`.
-      **If it names the WRONG tab, that is a genuinely new finding and the diagnosis
-      in the design document is wrong - stop and report it.** The prediction is that
-      it names the right one, and that nothing was ever acting on the wrong sheet.
-- [ ] Do the same for `Trim & Clean Text` and `Fill Blanks Down`.
-- [ ] Rename a tab to something needing quotes (e.g. `MIC Data` or `2024`) and
-      confirm the message quotes it: `'MIC Data'!M2:M12`.
+      file — and run it. Expected: Finalize warned you beforehand, and afterwards
+      **Excel still behaves normally**: the screen redraws, formulas recalculate, and
+      the next button works. A macro that dies with screen updating off leaves Excel
+      looking frozen; that is what this catches.
+- [ ] **The duplicates header field, all four states.** On Setup, `Does the range you
+      pick include a header row?` is present with a working **Yes/No dropdown**
+      defaulting to **Yes**. Then:
+      **Yes** + a range whose first row IS a header → the header survives, uncompared.
+      **No** + `M2:M12` with no header → **all eleven values considered**, not ten —
+      your original symptom.
+      **Paste** (do not type) `ye` into the cell — typing is refused by the dropdown,
+      so pasting is the only way in → Finalize **BLOCKS** with
+      `UNRECOGNISED Yes/No value`.
+      **Clear** the cell → reads as the default `Yes` and activates.
+- [ ] **Sheet-qualified messages, all three Clean actions.** With a button on one tab,
+      run `Remove Duplicates` against a range on a **different** tab: the completion
+      dialog must read `MIC!M2:M12`, not `M2:M12`. Repeat for `Trim & Clean Text` and
+      `Fill Blanks Down`. Then rename that tab to something needing quotes (`MIC Data`
+      or `2024`) and confirm it comes back quoted: `'MIC Data'!M2:M12`.
+      **If any of them names the WRONG tab, stop and report it** — that would mean the
+      original diagnosis was wrong and something really was acting on the wrong sheet.
 
 - [ ] **Step 7: Upgrade pass — fail-closed migration**
 
@@ -2747,30 +2727,25 @@ wrote the file.
   Setup Tab`. Expected: a confirmation prompt naming exactly what will be discarded —
   not a silent rebuild. This is the recovery route for a user who has no Setup tab
   left to correct the value on.
-- [ ] **A long chain's description gets truncated, with a pointer.** Build a chain
-      with **5 or more steps**, Finalize, and look at its button's description on the
-      Macros tab. Expected: a partial step list ending `+N more - see the Setup tab`.
-      A long chain must not be allowed to draw one enormous description row that
-      stretches every card beside it. Also confirm you **never** see `+0 more` —
-      that would mean the card claims there is more to see when nothing was
-      actually left off.
-- [ ] **Chain buttons always come last.** Chains are grouped into their own reserved
-      `Chains` category, and that column must render **after every other category**
-      no matter when you authored the chain. Easiest test: author a chain now, on a
-      workbook whose other categories were set up earlier, and confirm it still lands
-      last rather than in authoring order.
-- [ ] **Going from many buttons to few leaves no debris.** On workbook A (the
-      fixture one), delete the `MacrosBundle` module from the VBA editor, import
-      `dist/MacrosBundle.bas` instead — the real 8-action bundle — and Finalize.
-      Expected: the tabs shrink back to one, and **no abnormally tall rows are left
-      behind** from the fixture's longer descriptions. Rows that grew for big text
-      must shrink again when the text goes away.
-- [ ] **Every button switched off.** **Delete every chain first** — otherwise a chain
-      pointing at a now-`Off` action makes Finalize refuse, and you never reach the
-      empty state. Then set every action's Availability to `Off` and Finalize.
-      Expected: `No macro pages were built - every button is hidden, switched Off, or
-      anchored to one of your own sheets.` and **no error**. An empty workbook is a
-      legitimate configuration, not a failure.
+- [ ] **Chain cards: bounded, and always last.** Build a chain with **5 or more
+      steps**, Finalize, and look at its button's description. Expected: a partial
+      step list ending `+N more - see the Setup tab` — a long chain must not draw one
+      enormous description row that stretches every card beside it — and you must
+      **never** see `+0 more`, which would claim there is more when nothing was left
+      off. In the same build, confirm the reserved `Chains` category renders **after
+      every other category**, regardless of when you authored the chain.
+
+- [ ] **Shrinking back to a small deployment leaves no debris, and an empty one is
+      legal.** On workbook A: delete the `MacrosBundle` module, import
+      `dist/MacrosBundle.bas` (the real 8-action bundle) instead, and Finalize.
+      Expected: the tabs shrink back to one, with **no abnormally tall rows** left
+      over from the fixture's longer descriptions — rows that grew for big text must
+      shrink again when it goes away.
+      Then **delete every chain** (otherwise a chain pointing at an `Off` action makes
+      Finalize refuse and you never reach the empty state), set every action to `Off`,
+      and Finalize. Expected: `No macro pages were built - every button is hidden,
+      switched Off, or anchored to one of your own sheets.` and **no error**. An empty
+      workbook is a legitimate configuration, not a failure.
 
 - [ ] **Step 8: Record the result**
 
