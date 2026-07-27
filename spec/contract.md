@@ -85,7 +85,7 @@ field is the following record:
   evaluated independently, but off-ness wins: a field relegated to the off band
   goes there regardless of its `tier`, and the `advanced` band (§4) contains
   only fields that are still in use. A field never renders in both bands.
-- **No visible fields, no band (version pending).** A package contributing no
+- **No visible fields, no band (v2.0.0).** A package contributing no
   field to the working area MUST NOT have a configuration band rendered for it —
   neither its banner nor an empty body. This holds whether the package declares
   no fields at all or has had every one of them relegated to the off band. A

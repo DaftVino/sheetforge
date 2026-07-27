@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-27
+
 ### Changed
 
 - **BREAKING — `Remove Duplicates` now asks, instead of remembering.** The two
