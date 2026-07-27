@@ -1916,16 +1916,22 @@ Private Function ReadChains(ws As Worksheet) As Collection
 End Function
 
 ' Parse an Availability cell to one of the three tokens.
-'   ""      -> AVAIL_BUTTON  (never set; a pre-v0.4.0 config reads as today)
+'   ""      -> ""            (v2.1.0: blank is NOT an answer; the CALLER must block)
 '   invalid -> ""            (the CALLER must block Finalize)
 ' It must never fall back to Button on an unrecognised string: a user who typed
 ' "of" meaning "off" would otherwise be handed a live destructive button.
+' Blank joined that rule in v2.1.0. It used to read as Button, which was correct
+' while Button was the default; with the default at Off, silently reading a
+' cleared cell as EITHER value is wrong - Button resurrects an action the user
+' switched off, Off removes one they still want. Neither is recoverable from the
+' result, so blank must block instead. ComposeReport already refuses to activate
+' on "" and needs no change.
 ' Yes/No are accepted as synonyms so a user upgrading from a two-value habit, or
 ' one who types the obvious thing, is understood rather than blocked.
 Private Function ParseAvail(ByVal v As String) As String
     Dim s As String
     s = LCase(Trim(v))
-    If Len(s) = 0 Then ParseAvail = AVAIL_BUTTON: Exit Function
+    If Len(s) = 0 Then ParseAvail = "": Exit Function
     Select Case s
         Case AVAIL_BUTTON, "yes", "y", "on", "true"
             ParseAvail = AVAIL_BUTTON
@@ -1987,11 +1993,22 @@ Private Sub BoolDropdown(rng As Range)
 End Sub
 
 ' The display label written into the cell for a token.
+'
+' NOT display-only: RenderPlacementBlock writes this result into the Setup cell
+' (Core.bas ~2101) and ReadAvailMap reads that same cell back through ParseAvail
+' (~2015), so the label round-trips into stored configuration.
+'
+' Case Else therefore fails CLOSED (issue #10). It used to return "Button", which
+' meant an unrecognised stored value was silently rewritten as a live button on
+' the next 'Create Setup Tab' - bypassing ComposeReport's block, which only ever
+' sees "" and never saw it again once the rebuild had overwritten the cell.
+' Returning "" leaves the cell blank so that block fires as designed.
 Private Function AvailLabel(ByVal token As String) As String
     Select Case token
+        Case AVAIL_BUTTON: AvailLabel = "Button"
         Case AVAIL_CHAIN: AvailLabel = "Chains only"
         Case AVAIL_OFF:   AvailLabel = "Off"
-        Case Else:        AvailLabel = "Button"
+        Case Else:         AvailLabel = ""        ' fail closed - see above
     End Select
 End Function
 
@@ -2575,7 +2592,7 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
         Next aX
     Next regX
     If Len(badAvail) > 0 Then
-        s = s & vbCrLf & "UNRECOGNISED Availability (use Button, Chains only, or Off):" & _
+        s = s & vbCrLf & "MISSING or UNRECOGNISED Availability (use Button, Chains only, or Off):" & _
             vbCrLf & badAvail
     End If
     For Each ch In chains
