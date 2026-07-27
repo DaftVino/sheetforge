@@ -62,9 +62,12 @@ checker had passed clean:
   map is empty, so every real id looked unknown, so nothing relegated and Part A had no
   visible effect on exactly the install it was designed for. It now asks the package
   registry. → §1 item 3.
-- **`ReadAvailMap`'s "no catalog block at all" exit did not flag the map legacy.** Only
-  the absent-*marker* exit did. A `_Config` older than the catalog block fell through to
-  fresh and lost every button. → §2 item 4.
+- **`ReadAvailMap`'s three exits needed three different answers, not two.** The review
+  first argued the "no catalog block at all" exit should be flagged legacy like the
+  absent-marker one. It was, then reverted on re-review: that exit is reached by a damaged
+  *current* config as well as a pre-v1.1 one, and flagging it fails open on destructive
+  actions. It fails closed, and the reasoning is written into the code. → §2 item 4, which
+  records it as a judgement call the owner may want to overturn.
 
 Both were invisible to every structural gate, and both are the *same* failure the pin in
 §2 item 1 guards against. Treat that as the standing lesson: **on this change, "the build
@@ -259,10 +262,11 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
       Expected: `Fill Blanks Down [clean.filldown]` reads **`Off`**, and every other action
       still reads what it read before. Under v0.5.0 it would have come back `Button`.
 
-- [ ] **A `_Config` with no Action catalog block at all keeps Button (workbook B).**
-      The other legacy shape, older than workbook C: a config written before the catalog
-      block existed, so there is no marker *and no block to hold one*. Reached directly
-      rather than with a fourth bundle, because it is the same code path.
+- [ ] **A `_Config` with no Action catalog block at all reads Off, and that is
+      deliberate (workbook B).**
+      The third provenance, and the one where the two safe answers point in opposite
+      directions. Reached directly rather than with a fourth bundle, because it is the
+      same code path.
 
       Alt+F11 → select the `_Config` sheet → *Properties* → `Visible` =
       `-1 - xlSheetVisible`. On `_Config`, find the row whose key column reads
@@ -270,13 +274,23 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
       down to (not including) the next key row. Re-hide `_Config` (`Visible` =
       `2 - xlSheetVeryHidden`). Alt+F8 → `Core_BuildSetup`.
 
-      Expected: every `Availability` cell reads **`Button`** — not `Off`. `ReadAvailMap`
-      exits early when it cannot find the block, and that exit must flag the map legacy
-      just as the absent-marker exit does. **The first implementation flagged only the
-      absent-marker exit**, so this shape fell through to fresh and every action came
-      back `Off` — the same silent button-stripping that §2 item 1 guards against, one
-      config generation further back. Contract §10 promises v1.0.0/v1.1.0 configs stay
-      valid; this is that promise.
+      Expected: every `Availability` cell reads **`Off`**, and — the part that matters —
+      **your `IMPORT / EXPORT` field values are still there**, unchanged, in the off band.
+      Nothing you typed was lost; only the availability choices, which lived in the block
+      you deleted, are gone.
+
+      **Why Off and not Button, when §2 item 1 says the opposite for workbook C.** Two
+      histories reach this exact sheet state and cannot be told apart from it: a pre-v1.1
+      config written before the catalog block existed, and a current config whose block
+      was damaged. Flagging it legacy was implemented, then reverted: it fails *open*,
+      handing a damaged current config's destructive actions back as live buttons. Failing
+      closed costs the pre-v1.1 side almost nothing — that era had no Availability column
+      **and no placements**, so there are no configured buttons to strip, and its config
+      *values* load either way. Workbook C is different in the one way that counts: it has
+      a real placement block, so reading it as Off would strip a working install.
+
+      **If you disagree with that trade, say so — it is a judgement call, not a
+      derivation.** It was made on the fact that ADR 0002 records no installed base.
 
       Restore `B.xlsm` from a copy afterwards, or rebuild it — you have destroyed its
       catalog block.
