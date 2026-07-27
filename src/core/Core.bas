@@ -388,9 +388,18 @@ End Function
 ' Core_BuildSetup deletes and re-seeds Setup from the FINALIZED _Config, so
 ' omitting a field would cost toggle -> Finalize -> rebuild -> fill -> Finalize
 ' and would discard anything typed but not yet finalized (design section 2.3).
-' An unknown id counts as in-use, so a typo in usedBy cannot hide a field forever.
+' An id that no installed package declares counts as in-use, so a typo in usedBy
+' cannot hide a field forever.
+'
+' "Unknown" is decided against the REGISTRY, not against availMap (v2.1.0). It
+' used to be "absent from availMap", which was equivalent while absence meant
+' Button - both said "in use". Once absence means Off they diverge, and reading
+' unknown from the map broke disclosure exactly where it matters most: a fresh
+' workbook has an EMPTY map, so every real id looked unknown, so every field with
+' a usedBy stayed in the main band while its action rendered Off. Absence is now
+' resolved by AvailFor via IsRunnable, which already knows fresh from legacy.
 Private Function FieldInUse(f As Object, availMap As Object) As Boolean
-    Dim ids() As String, i As Long, one As String
+    Dim ids() As String, i As Long, one As String, entry As String
     FieldInUse = True
     If f Is Nothing Then Exit Function
     If Not f.Exists("usedBy") Then Exit Function
@@ -399,7 +408,7 @@ Private Function FieldInUse(f As Object, availMap As Object) As Boolean
     For i = LBound(ids) To UBound(ids)
         one = LCase(Trim(ids(i)))
         If Len(one) > 0 Then
-            If Not availMap.Exists(one) Then Exit Function     ' unknown id -> in use
+            If FindActionOwner(one, entry) Is Nothing Then Exit Function  ' unknown id -> in use
             If IsRunnable(availMap, one) Then Exit Function    ' one runnable is enough
         End If
     Next i
@@ -2032,7 +2041,18 @@ Private Function ReadAvailMap(ws As Worksheet) As Object
     Set ReadAvailMap = map
     If ws Is Nothing Then Exit Function
     kr = FindKeyRow(ws, LAYOUT_KEY)
-    If kr = 0 Then Exit Function
+    If kr = 0 Then
+        ' A _Config with no Action catalog block AT ALL - written before the block
+        ' existed. Same provenance conclusion as an absent marker below: there was
+        ' no Availability column, so that deployment had every action live, and
+        ' reading it as Off would strip a working installation. Contract section 10
+        ' promises v1.0.0/v1.1.0 configs stay valid; this is the branch that keeps
+        ' that promise. Distinct from the "ws Is Nothing" exit above, which is FRESH
+        ' (no _Config sheet) and must NOT be flagged - fresh is exactly the case the
+        ' new Off default is for.
+        map(AVAIL_LEGACY_KEY) = AVAIL_BUTTON
+        Exit Function
+    End If
     If MarkerVerdict(ws, kr, detail) = "absent" Then
         ' Pre-v1.2 block: the Availability column does not exist, so there are no
         ' values to read - but the map must still say WHERE it came from. Fresh

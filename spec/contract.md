@@ -1,7 +1,7 @@
 # SheetForge portable contract
 
-**Contract version: 1.2.0** (2026-07-24) · SemVer, independent of the
-repo `VERSION` and of per-package versions.
+**Contract version: 2.1.0** (2026-07-27) · SemVer, independent of the
+repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
 and action contract. The Excel/VBA build (`src/core/Core.bas` + `src/packages/`)
@@ -414,8 +414,14 @@ legacy default rather than through this one.
   never becomes undiscoverable. Only `off` relegates that action's fields (§2).
 - **An unrecognised value MUST block Finalize** and report the accepted values. It
   MUST NOT fall back to `button` — a user who typed `of` meaning `off` would
-  otherwise be handed a live destructive button. A **blank** cell is not
-  unrecognised: it means "never set" and reads as `button`.
+  otherwise be handed a live destructive button.
+- **A blank cell MUST block Finalize too (v2.1.0).** It previously read as `button`,
+  which was coherent while `button` was the default. With the default at `off`
+  (§6) neither reading is safe: `button` resurrects an action the user switched
+  off, `off` removes one they still want, and the choice is invisible in the
+  result. A blank cell is therefore not an answer, and a reader MUST NOT resolve it
+  to any token. **This is the cell being blank, not the column being absent** — an
+  absent column is §5's legacy case and still reads as `button`.
 - **Portability note:** the reference implementation presents the three values as a
   validated dropdown on the authoring grid. A platform without cell validation
   still parses the same three tokens and still blocks on anything else.
@@ -688,6 +694,14 @@ port realizes them per platform rather than re-deriving them:
   `button` still means `button` — because a default applies only where nothing was
   stored. The stored-format marker does NOT move; `SCHEMA_VER` stays `"v2.0"` and every
   v0.5.0 config remains readable.
+  **The one judgement call in that classification:** a **blank** `availability` cell
+  used to read as `button` and now blocks Finalize (§6), which by the letter is
+  reinterpreting a stored value. It is classed additive because **no conforming writer
+  has ever emitted one** — an implementation writes the label for a resolved token on
+  every render, and all three tokens have non-empty labels. A blank cell can therefore
+  only arrive by hand-editing the authoring surface, which is unvalidated input under
+  §5's fail-closed rules rather than stored configuration. If a port has ever written
+  a blank cell, this change IS breaking for that port and it must migrate them first.
 - **v2.0.0 (BREAKING):** withdraws the `clean_keycols` and `clean_hasheader` fields
   and changes `clean.dupes` to take both as run-time inputs (§8); adds §8's normative
   selection-vs-deployment rule and §2's no-visible-fields-no-band rule. Removing a

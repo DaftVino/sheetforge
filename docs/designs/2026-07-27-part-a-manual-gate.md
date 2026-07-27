@@ -27,12 +27,12 @@ actually run.
 
 | Section | Items | State |
 |---|---|---|
-| **1. Fresh install** | 0/2 | Not run |
-| **2. Legacy and stored configs** | 0/3 | Not run |
+| **1. Fresh install** | 0/3 | Not run |
+| **2. Legacy and stored configs** | 0/4 | Not run |
 | **3. Fail-closed on a bad cell** | 0/2 | Not run |
 | **4. Field disclosure** | 0/3 | Not run |
 | **5. Runtime** | 0/1 | Not run |
-| **Total** | **0/11** | **Not run** |
+| **Total** | **0/13** | **Not run** |
 
 ### The item that matters most
 
@@ -51,6 +51,24 @@ package declared one, so nothing could relegate. Task 4 wired `usedBy` onto
 `PkgImportExport`'s nine fields, which makes it reachable. **There is no earlier passing run
 to compare against** — a failure here may be a genuine Core bug rather than a Part A
 regression, so investigate before assuming Part A broke it.
+
+### Three items exist because a whole-branch review caught real defects
+
+§1 item 3, §2 item 4 and the corrected §4 items were added after an adversarial review of
+the finished branch found two P1 defects that all five tasks, the build and the syntax
+checker had passed clean:
+
+- **`FieldInUse` asked the stored map whether an id was "unknown".** A fresh workbook's
+  map is empty, so every real id looked unknown, so nothing relegated and Part A had no
+  visible effect on exactly the install it was designed for. It now asks the package
+  registry. → §1 item 3.
+- **`ReadAvailMap`'s "no catalog block at all" exit did not flag the map legacy.** Only
+  the absent-*marker* exit did. A `_Config` older than the catalog block fell through to
+  fresh and lost every button. → §2 item 4.
+
+Both were invisible to every structural gate, and both are the *same* failure the pin in
+§2 item 1 guards against. Treat that as the standing lesson: **on this change, "the build
+is green" says almost nothing.**
 
 ---
 
@@ -185,6 +203,25 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
 - [ ] **No buttons are drawn.** There is no `Macros 1` tab (nor `Macros`, nor `Macros 2`)
       anywhere in the workbook. Every action is `Off`, so there is nothing to place.
 
+- [ ] **Every setting has already stepped out of the way.** There is **no**
+      `IMPORT / EXPORT` band on the Setup tab. Instead there is one band headed
+
+      ```
+      SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON
+      ```
+
+      collapsed, with a `+` in the left margin. Open it: it holds an `Import / Export`
+      sub-heading and all nine fields. There is no `CLEAN & STANDARDIZE` band either
+      (that package has no settings at all — v0.5.0's guard, unchanged).
+
+      **This is the whole point of Part A and it was the last thing to work.** The first
+      implementation got the catalog right and this wrong: `FieldInUse` decided "unknown
+      id" by asking the stored availability map, and a fresh workbook's map is empty, so
+      every real action id looked unknown, so every field counted as in-use and stayed in
+      the main band under a catalog that said `Off`. It now asks the package registry
+      instead. If you see the nine fields in a normal `IMPORT / EXPORT` band here, that
+      regression is back.
+
 ## 2. Existing configurations are untouched
 
 - [ ] **A v0.3.0 legacy workbook keeps every button (workbook C).**
@@ -221,6 +258,28 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
 
       Expected: `Fill Blanks Down [clean.filldown]` reads **`Off`**, and every other action
       still reads what it read before. Under v0.5.0 it would have come back `Button`.
+
+- [ ] **A `_Config` with no Action catalog block at all keeps Button (workbook B).**
+      The other legacy shape, older than workbook C: a config written before the catalog
+      block existed, so there is no marker *and no block to hold one*. Reached directly
+      rather than with a fourth bundle, because it is the same code path.
+
+      Alt+F11 → select the `_Config` sheet → *Properties* → `Visible` =
+      `-1 - xlSheetVisible`. On `_Config`, find the row whose key column reads
+      `k_core_layout` and **delete that entire worksheet row and every row of its block**,
+      down to (not including) the next key row. Re-hide `_Config` (`Visible` =
+      `2 - xlSheetVeryHidden`). Alt+F8 → `Core_BuildSetup`.
+
+      Expected: every `Availability` cell reads **`Button`** — not `Off`. `ReadAvailMap`
+      exits early when it cannot find the block, and that exit must flag the map legacy
+      just as the absent-marker exit does. **The first implementation flagged only the
+      absent-marker exit**, so this shape fell through to fresh and every action came
+      back `Off` — the same silent button-stripping that §2 item 1 guards against, one
+      config generation further back. Contract §10 promises v1.0.0/v1.1.0 configs stay
+      valid; this is that promise.
+
+      Restore `B.xlsm` from a copy afterwards, or rebuild it — you have destroyed its
+      catalog block.
 
 ## 3. A bad Availability cell fails closed (workbook A — issue #10)
 

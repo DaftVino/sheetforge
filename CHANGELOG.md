@@ -11,7 +11,9 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 - **BREAKING — an action now arrives switched off, and you turn it on.** A fresh
   install shows the Action catalog with every `Availability` cell reading `Off` and
   no buttons drawn, instead of every button at once. Set the ones you want to
-  `Button` and click `Create Setup Tab`. The old default handed a first-time user
+  `Button`, then click **`Finalize Setup Tab`** to activate them — `Create Setup Tab`
+  rebuilds from the last activated configuration and would discard the edits you
+  just made. The old default handed a first-time user
   eight live buttons — several of them destructive — before they had read what any
   of them did. **Your existing deployments are unaffected**: a default only applies
   where nothing was ever stored, so every choice already saved still means exactly
