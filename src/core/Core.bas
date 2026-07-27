@@ -83,7 +83,27 @@ Private Const PLACE_HEADER   As String = "Placement"
 ' CStr (a comma-decimal locale yields "1,2"; some locales read it as a date).
 ' A non-numeric token cannot be coerced, so the marker survives the round trip
 ' byte-for-byte regardless of the workbook's locale.
-Private Const SCHEMA_VER     As String = "v1.2"
+'
+' v2.0 (contract v2.0.0): PkgClean's two per-selection fields were withdrawn, which
+' is a BREAKING contract change (a removed key). The stored BLOCK LAYOUT is in fact
+' unchanged - same three columns, same key row - so bumping the major here refuses
+' every config written by v0.4.0, which is stricter than the data requires.
+'
+' That was accepted deliberately, by the owner, on the ground that no deployment
+' exists yet: the bundle is only in test workbooks, so there is no installed base
+' to refuse. Keeping this marker coupled to the contract version is simpler than
+' the alternative, which was to decouple the two numbers permanently and explain
+' the split in every port. See docs/adr/0002 (rejected, with that reasoning).
+'
+' If an installed base ever exists, revisit before the next breaking bump: at that
+' point refusing every stored config to express a change that touched no stored
+' byte is a real cost, and ADR 0002's decoupling becomes the better trade.
+'
+' Note the asymmetry this creates and do not mistake it for a bug: a v0.3.0 config
+' has NO marker, reads as "absent", and still migrates cleanly. A v0.4.0 config has
+' "v1.2", reads as "other-major", and is refused. Older is accepted, newer-but-not-
+' current is not, because only the marker-less case has a defined legacy layout.
+Private Const SCHEMA_VER     As String = "v2.0"
 
 ' ---- button page geometry (v0.4.0: an unmerged CELL-CARD grid) ----
 ' Cards live in worksheet columns B, D and F, with C and E as narrow gutters.
