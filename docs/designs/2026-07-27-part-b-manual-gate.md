@@ -40,21 +40,61 @@ incapable of corrupting data.
 first means any later failure is unambiguously Part A's doing rather than something
 inherited from v0.5.0.
 
-**Workbook Q is required for section 5** and must be finalized under **v0.4.0**, not
-v0.5.0 — see the Setup table above. If workbook Q no longer exists, say so rather than
-substituting a v0.5.0 workbook: a v0.5.0 config is `same-major` and will not exercise
-the refusal at all, so the section would pass vacuously.
+**Section 5 needs two old workbooks that do not exist yet — Q (v0.4.0) and C (v0.3.0).**
+`dist/` is gitignored and there are no release tags, so neither the workbooks nor the old
+bundles survive anywhere. **The Setup section below now builds both from their release
+commits**, and the bundles are already sitting in `dist/`. Do not substitute a v0.5.0
+workbook for either: a v0.5.0 config reads as `same-major`, never reaches the branch under
+test, and the section would pass vacuously.
 
 ---
 
 ## Setup
 
-You need **two workbooks**:
+### First: build the old bundles you will need
 
-| # | Workbook | How |
+**You almost certainly do not have a v0.4.0 or v0.3.0 workbook lying around, and `dist/`
+is gitignored so no old `.bas` survives either.** You have to build them. There are no
+release tags, so the release commits are named directly:
+
+```sh
+# from the repo root, on any branch — these use throwaway worktrees and touch nothing
+git worktree add /tmp/wt-v040 3e586cf     # chore(release): v0.4.0
+git worktree add /tmp/wt-v030 cc59695     # chore: release v0.3.0
+
+(cd /tmp/wt-v040 && pwsh build/build.ps1) && cp /tmp/wt-v040/dist/MacrosBundle.bas dist/MacrosBundle-v0.4.0.bas
+(cd /tmp/wt-v030 && pwsh build/build.ps1) && cp /tmp/wt-v030/dist/MacrosBundle.bas dist/MacrosBundle-v0.3.0.bas
+
+git worktree remove /tmp/wt-v040 --force && git worktree remove /tmp/wt-v030 --force
+```
+
+**Already done for you — both files are in `dist/` now.** They are gitignored, so rebuild
+them with the above if they go missing. Verify before use, because the whole of §5 turns
+on these three markers being different:
+
+| Bundle | `SCHEMA_VER` | Reads as under v0.5.0 |
 |---|---|---|
-| **P** | A fresh scratch copy. Tests the new behaviour on a clean install. | Import `dist/MacrosBundle.bas`, `Debug ▸ Compile VBAProject`, Alt+F8 → `Core_BuildSetup`, then `Finalize Setup Tab`. |
-| **Q** | A workbook **already finalized under v0.4.0** — tests that an existing `_Config` carrying the two withdrawn keys upgrades cleanly. | Take any workbook finalized before this change. Alt+F11, right-click the `MacrosBundle` module ▸ Remove ▸ **No** to the export prompt, import the new `dist/MacrosBundle.bas`, then run `Core_BuildSetup`. |
+| `dist/MacrosBundle-v0.3.0.bas` | **no constant at all** | `absent` → legacy path |
+| `dist/MacrosBundle-v0.4.0.bas` | `"v1.2"` | `other-major` → **refused** |
+| `dist/MacrosBundle.bas` | `"v2.0"` | `same-major` → normal |
+
+```sh
+grep -c 'SCHEMA_VER' dist/MacrosBundle-v0.3.0.bas   # expect 0
+grep -n 'SCHEMA_VER     As String' dist/MacrosBundle-v0.4.0.bas dist/MacrosBundle.bas
+```
+
+### Then: the three workbooks
+
+| # | Workbook | How to build it |
+|---|---|---|
+| **P** | Fresh scratch copy — the new behaviour on a clean install. | New workbook → import `dist/MacrosBundle.bas` → `Debug ▸ Compile VBAProject` → Alt+F8 `Core_BuildSetup` → `Finalize Setup Tab`. |
+| **Q** | Finalized under **v0.4.0**, then upgraded. Tests the refusal. | New workbook → import **`dist/MacrosBundle-v0.4.0.bas`** → Alt+F8 `Core_BuildSetup` → **`Finalize Setup Tab`** (this is the step that writes the `v1.2` marker — without it there is no `_Config` and the test is void). Save. Then Alt+F11, right-click the `MacrosBundle` module ▸ Remove ▸ **No** to the export prompt, import `dist/MacrosBundle.bas`, and run `Core_BuildSetup`. |
+| **C** | Finalized under **v0.3.0**, then upgraded. Tests the legacy path. | Same as Q but with **`dist/MacrosBundle-v0.3.0.bas`**. Note the entry point differs in that era: the v0.3.0 build says **`Core_BuildControlPanel`**, not `Core_BuildSetup`. Finalize, save, then swap the module for `dist/MacrosBundle.bas` and run `Core_BuildSetup`. |
+
+**Finalizing is not optional for Q and C.** `Core_BuildSetup` alone only draws the Setup
+tab; `Finalize Setup Tab` is what copies it to the hidden `_Config` that carries the
+marker. An unfinalized workbook has no `_Config`, reads as `none`, and would pass §5
+vacuously.
 
 If a copy lands in `Downloads`, unblock it first (right-click ▸ Properties ▸ Unblock) —
 that is Mark-of-the-Web, not a macro-settings problem.
@@ -156,12 +196,20 @@ false refusal costs nothing, and one version number beats two. See
       written by a different version, and says to re-import that version's bundle.
       **No rebuild prompt, no Yes/No** — this is the `other-major` path, and it must
       not offer a choice. Your Setup tab is left exactly as it was.
-- [ ] **A v0.3.0-era workbook still upgrades cleanly**, if you still have one from the
-      v0.4.0 gate (workbook C). Its `_Config` has **no** marker at all, so it reads as
-      `absent` and takes the legacy migration path, which is unaffected.
+- [ ] **A v0.3.0-era workbook still upgrades cleanly — workbook C, buildable, no longer
+      conditional.** Its `_Config` has **no** marker at all (the v0.3.0 bundle has no
+      `SCHEMA_VER` constant to write one), so it reads as `absent` and takes the legacy
+      path, which is unaffected.
       **This asymmetry is correct, not a bug:** older-with-no-marker is accepted where
       newer-but-not-current is refused, because only the marker-less case has a defined
       legacy layout to migrate *from*.
+
+      **This item is now load-bearing for Part A, which it was not when it was written.**
+      ADR 0003 decides to leave the legacy path untouched, on the premise that it still
+      works. That premise is *this test*. If it fails, Part A's design is built on sand
+      and ADR 0003 has to be reopened before any code is written — so do not tick it
+      unless you actually ran it, and do not skip it because workbook C is extra effort.
+      The Setup section above now tells you how to build one.
 - [ ] **The recovery route works.** On workbook Q, delete the whole `_Config` sheet
       (Alt+F11 → `Visible` = `-1 - xlSheetVisible`, then right-click the tab ▸ Delete),
       and run `Create Setup Tab` again. Expected: it builds a fresh Setup tab with
