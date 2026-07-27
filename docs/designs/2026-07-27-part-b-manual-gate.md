@@ -14,38 +14,45 @@ written against that failure.
 
 ---
 
-## Status — sections 3-6 ARE THE RUN SHEET (2026-07-27, PR #7 merged)
+## Status — COMPLETE, 21/21, all sections pass (2026-07-27)
 
-Sections 1 and 2 passed and are done. **PR #7 has since merged, so sections 3-6 are now
-verifying code that is already on `main` at v0.5.0.** They are no longer deferred: this
-is the outstanding run, to be completed before Part A starts.
+**Run in full by the owner against v0.5.0 on `main`.** Every item in every section is
+ticked and was actually run; nothing was waived, inferred or skipped.
 
 | Section | State |
 |---|---|
-| **1. The Setup surface** | **Pass.** Item 4 asserted the wrong outcome and was corrected — see the item itself; the code was never wrong. |
-| **2. The three prompts** | **Pass**, except item 5 (the completion message's interpretation line) — folded into the run below. |
-| **3. Cancel paths** | **TO RUN.** Five items. |
-| **4. Key-column validation** | **TO RUN.** Three items. |
-| **5. v0.4.0 refusal** | **TO RUN — do this one first.** Three items. Highest risk; see below. |
-| **6. Inside a chain** | **TO RUN.** One item. |
+| **1. The Setup surface** | **Pass** (4/4). Item 4 asserted the wrong outcome and was corrected — the code was never wrong. |
+| **2. The three prompts** | **Pass** (5/5). |
+| **3. Cancel paths** | **Pass** (5/5). |
+| **4. Key-column validation** | **Pass** (3/3). |
+| **5. v0.4.0 refusal** | **Pass** (3/3). Both directions confirmed against purpose-built workbooks Q and C. |
+| **6. Inside a chain** | **Pass** (1/1). |
 
-**Run section 5 first.** It is the only one whose failure is *silent*. The `other-major`
-refusal has never been reached by a genuine version bump — only by a hand-edited marker
-during the v0.4.0 gate — and its neighbour, a v0.3.0-era workbook with no marker still
-taking the legacy path, would fail without any visible symptom. Sections 3, 4 and 6 are
-stop-early paths whose failure mode is a runtime-error dialog: annoying, but loud, and
-incapable of corrupting data.
+### The one result that mattered beyond Part B
 
-**Why now rather than later.** Part A changes this same `_Config` surface. Verifying it
-first means any later failure is unambiguously Part A's doing rather than something
-inherited from v0.5.0.
+**§5 item 2 — a v0.3.0-era workbook still upgrades cleanly — PASSED against a genuine
+marker-less workbook** (C), built from the v0.3.0 release commit rather than assumed.
 
-**Section 5 needs two old workbooks that do not exist yet — Q (v0.4.0) and C (v0.3.0).**
-`dist/` is gitignored and there are no release tags, so neither the workbooks nor the old
-bundles survive anywhere. **The Setup section below now builds both from their release
-commits**, and the bundles are already sitting in `dist/`. Do not substitute a v0.5.0
-workbook for either: a v0.5.0 config reads as `same-major`, never reaches the branch under
-test, and the section would pass vacuously.
+This was the load-bearing test for **Part A**. `docs/adr/0003` decides to leave the legacy
+path untouched, on the premise that the `absent`-marker path still works. That premise is
+now **verified rather than assumed**, and ADR 0003 does not need reopening.
+
+Equally, **§5 item 1 passed**: the `other-major` refusal was reached by a *genuine version
+bump* for the first time. Every previous run reached it only by hand-editing a marker.
+
+### Known-benign observation, recorded so it is not re-investigated
+
+On workbook C, the **first** `Core_BuildSetup` after importing the v0.3.0 bundle opened a
+Windows **"Finding printer"** dialog. Cancelling it caused no harm, and it did not recur
+across two further attempts.
+
+**Not a defect, and not specific to v0.3.0.** Neither bundle contains `PageSetup`,
+`PrintArea`, `HPageBreaks`, `VPageBreaks`, `PrintOut` or `PrintPreview` — nothing in the
+toolkit touches printing. The trigger is `Core_BuildSetup`'s `ThisWorkbook.Worksheets.Add`
+(`Core.bas:1347`) followed by `ws.Activate`: Excel computes page-break metrics for a newly
+added sheet, which queries the default printer driver. That enumeration is cached per
+session, which is exactly why it fired once and never again. It is likelier when the
+default printer is a network or offline device. **No action needed.**
 
 ---
 
@@ -231,11 +238,11 @@ across this change) and was accepted deliberately: there is no installed base, s
 false refusal costs nothing, and one version number beats two. See
 `docs/adr/0002-contract-version-vs-schema-marker.md`, Rejected.
 
-- [ ] **`Create Setup Tab` on workbook Q refuses outright**, tells you the config was
+- [x] **`Create Setup Tab` on workbook Q refuses outright**, tells you the config was
       written by a different version, and says to re-import that version's bundle.
       **No rebuild prompt, no Yes/No** — this is the `other-major` path, and it must
       not offer a choice. Your Setup tab is left exactly as it was.
-- [ ] **A v0.3.0-era workbook still upgrades cleanly — workbook C, buildable, no longer
+- [x] **A v0.3.0-era workbook still upgrades cleanly — workbook C, buildable, no longer
       conditional.** Its `_Config` has **no** marker at all (the v0.3.0 bundle has no
       `SCHEMA_VER` constant to write one), so it reads as `absent` and takes the legacy
       path, which is unaffected.
@@ -249,7 +256,7 @@ false refusal costs nothing, and one version number beats two. See
       and ADR 0003 has to be reopened before any code is written — so do not tick it
       unless you actually ran it, and do not skip it because workbook C is extra effort.
       The Setup section above now tells you how to build one.
-- [ ] **The recovery route works.** On workbook Q, delete the whole `_Config` sheet
+- [x] **The recovery route works.** On workbook Q, delete the whole `_Config` sheet
       (Alt+F11 → `Visible` = `-1 - xlSheetVisible`, then right-click the tab ▸ Delete),
       and run `Create Setup Tab` again. Expected: it builds a fresh Setup tab with
       defaults, no `CLEAN & STANDARDIZE` band, and no error. That is the documented
@@ -261,7 +268,7 @@ you imported, and that you removed the old module before importing.
 
 ## 6. Inside a chain (workbook P)
 
-- [ ] **A chain containing `clean.dupes` still prompts.** Build a two-step chain with
+- [x] **A chain containing `clean.dupes` still prompts.** Build a two-step chain with
       `clean.dupes` in it and run it. All three prompts appear. This is correct and not
       a regression — the action was always interactive, since it has always asked for a
       range. Confirm the chain's single summary dialog still appears at the end and the
