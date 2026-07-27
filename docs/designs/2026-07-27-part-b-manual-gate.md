@@ -85,16 +85,55 @@ grep -n 'SCHEMA_VER     As String' dist/MacrosBundle-v0.4.0.bas dist/MacrosBundl
 
 ### Then: the three workbooks
 
-| # | Workbook | How to build it |
-|---|---|---|
-| **P** | Fresh scratch copy — the new behaviour on a clean install. | New workbook → import `dist/MacrosBundle.bas` → `Debug ▸ Compile VBAProject` → Alt+F8 `Core_BuildSetup` → `Finalize Setup Tab`. |
-| **Q** | Finalized under **v0.4.0**, then upgraded. Tests the refusal. | New workbook → import **`dist/MacrosBundle-v0.4.0.bas`** → Alt+F8 `Core_BuildSetup` → **`Finalize Setup Tab`** (this is the step that writes the `v1.2` marker — without it there is no `_Config` and the test is void). Save. Then Alt+F11, right-click the `MacrosBundle` module ▸ Remove ▸ **No** to the export prompt, import `dist/MacrosBundle.bas`, and run `Core_BuildSetup`. |
-| **C** | Finalized under **v0.3.0**, then upgraded. Tests the legacy path. | Same as Q but with **`dist/MacrosBundle-v0.3.0.bas`**. Note the entry point differs in that era: the v0.3.0 build says **`Core_BuildControlPanel`**, not `Core_BuildSetup`. Finalize, save, then swap the module for `dist/MacrosBundle.bas` and run `Core_BuildSetup`. |
+**Q and C are INDEPENDENT workbooks built from separate lineages. Do not chain them.**
+You do not start at v0.3.0 and upgrade through v0.4.0. Each starts as its own blank
+workbook. Chaining is not a shortcut — it actively destroys the test: v0.4.0's Finalize
+would rewrite C's marker-less `_Config` *with* a `v1.2` marker, turning C into a second
+copy of Q and leaving the marker-less case untested.
 
-**Finalizing is not optional for Q and C.** `Core_BuildSetup` alone only draws the Setup
-tab; `Finalize Setup Tab` is what copies it to the hidden `_Config` that carries the
-marker. An unfinalized workbook has no `_Config`, reads as `none`, and would pass §5
-vacuously.
+Every workbook uses the **same three entry points**, in every era: `Core_BuildSetup`,
+`Core_FinalizeSetup`, `Core_BuildControlPanel`. (The v0.3.0 build script's closing hint
+says "run `Core_BuildControlPanel`", but `Core_BuildSetup` exists in that bundle at line
+831 and is the one to use.)
+
+Each of Q and C has the same two-phase shape: **build it old, then upgrade it.**
+
+#### Workbook P — clean install
+
+1. New blank workbook, save as **macro-enabled** (`.xlsm`).
+2. Alt+F11 → *File ▸ Import File* → `dist/MacrosBundle.bas`.
+3. *Debug ▸ Compile VBAProject*.
+4. Alt+F8 → `Core_BuildSetup`.
+5. Alt+F8 → `Core_FinalizeSetup`.
+
+#### Workbook Q — finalized under v0.4.0, then upgraded → must be REFUSED
+
+*Phase 1 — make it a genuine v0.4.0 workbook:*
+
+1. New blank workbook, save as `Q.xlsm`.
+2. Alt+F11 → *File ▸ Import File* → **`dist/MacrosBundle-v0.4.0.bas`**.
+3. Alt+F8 → `Core_BuildSetup`.
+4. Alt+F8 → `Core_FinalizeSetup`. **This is the step that matters** — it writes the hidden
+   `_Config` stamped `v1.2`. Skip it and there is no `_Config`, the workbook reads as
+   `none`, and §5 passes having tested nothing.
+5. Save and close.
+
+*Phase 2 — upgrade it to the current build:*
+
+6. Reopen `Q.xlsm`. Alt+F11 → right-click the `MacrosBundle` module ▸ *Remove* ▸ **No** to
+   the export prompt.
+7. *File ▸ Import File* → `dist/MacrosBundle.bas` (the current v2.0 build).
+8. Alt+F8 → `Core_BuildSetup`. **This is §5 item 1** — expect the refusal.
+
+#### Workbook C — finalized under v0.3.0, then upgraded → must upgrade CLEANLY
+
+Identical to Q, with one substitution: at step 2 import **`dist/MacrosBundle-v0.3.0.bas`**.
+That bundle has no `SCHEMA_VER` constant at all, so its Finalize writes a `_Config` with
+**no marker**, which is what makes it the legacy case. Everything else is the same, and
+step 8 is **§5 item 2** — expect a clean upgrade, not a refusal.
+
+**Finalizing is not optional for Q or C.** `Core_BuildSetup` only draws the Setup tab;
+`Core_FinalizeSetup` is what copies it to the hidden `_Config` that carries the marker.
 
 If a copy lands in `Downloads`, unblock it first (right-click ▸ Properties ▸ Unblock) —
 that is Mark-of-the-Web, not a macro-settings problem.
@@ -149,7 +188,7 @@ Leave `M1` empty. Click **Remove Duplicates**.
 - [x] **It runs.** Answer `No` then accept `1`. Expected: **ten rows remain** — `M5`
       removed because `M2` participated. Eleven remaining means the first row was
       skipped and the original symptom is back.
-- [ ] **The completion message states the interpretation.** It ends
+- [x] **The completion message states the interpretation.** It ends
       `Every row was compared, including the first.` Run it again answering `Yes` and
       it ends `The first row was treated as a header and left alone.` This is the
       point of the change: the answer is invisible in the result, so the report has
@@ -159,27 +198,27 @@ Leave `M1` empty. Click **Remove Duplicates**.
 
 Each of these must stop with **nothing changed and no error dialog**:
 
-- [ ] **Cancel the range picker.**
-- [ ] **Cancel the header question** — press `Cancel`, not `No`.
-- [ ] **Close the header question with the title-bar X.** Must behave as Cancel.
+- [x] **Cancel the range picker.**
+- [x] **Cancel the header question** — press `Cancel`, not `No`.
+- [x] **Close the header question with the title-bar X.** Must behave as Cancel.
       This is why the dialog has three buttons: on a two-button `vbYesNo` MsgBox the
       X returns `vbNo`, which here would silently mean "compare every row" and delete
       a header row.
-- [ ] **Cancel the key-column box.**
-- [ ] **Clear the key-column box and press OK.** An empty answer is NOT a cancel — it
+- [x] **Cancel the key-column box.**
+- [x] **Clear the key-column box and press OK.** An empty answer is NOT a cancel — it
       means "use the default", so it proceeds with column `1`.
 
 ## 4. Key-column validation (workbook P)
 
-- [ ] **Multiple columns.** Select `M2:N12` and answer `1,2`. Both columns decide a
+- [x] **Multiple columns.** Select `M2:N12` and answer `1,2`. Both columns decide a
       duplicate — two rows are duplicates only when they match in both.
-- [ ] **A column outside the range is refused before anything is edited.** Select the
+- [x] **A column outside the range is refused before anything is edited.** Select the
       single column `M2:M12` and answer `5`. Expected:
       `Column 5 is outside M2:M12, which is 1 column(s) wide.` followed by
       `Nothing has been changed. Run Remove Duplicates again.` — and the action stops.
       **It must not raise a runtime error**, which is what would happen if this reached
       `RemoveDuplicates`, and which would read as a broken macro rather than a typo.
-- [ ] **Non-numeric input falls back rather than failing.** Answer `abc`. Expected: it
+- [x] **Non-numeric input falls back rather than failing.** Answer `abc`. Expected: it
       proceeds on column `1` (`ParseCols` drops non-numeric entries and defaults).
 
 ## 5. A v0.4.0 workbook is REFUSED, on purpose (workbook Q)  — RUN THIS FIRST
