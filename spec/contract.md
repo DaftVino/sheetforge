@@ -578,20 +578,7 @@ Demo default rows (`|`-delimited): `IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N
 
 **Fields**
 
-> **⚠ VERSION DECISION PENDING — do not release this contract until resolved.**
-> Removing `clean_keycols` and `clean_hasheader` is **breaking** by §10's own rule
-> (removing a `key`; changing an action's semantics), which points at **v2.0.0**.
-> But `SCHEMA_VER` is `"v1.2"` and `CurrentSchemaMajor()` gates migration: if the
-> stored-format marker follows the contract to major 2, every existing v0.4.0
-> `_Config` reads as `other-major` and `Create Setup Tab` **refuses outright** —
-> a hard break for every current deployment, for a change that alters no stored
-> layout at all. The Action catalog block is byte-identical either way.
-> The likely resolution is that the two numbers **decouple**: `SCHEMA_VER`
-> describes the stored block layout and stays `v1.2`; the contract version
-> describes the published surface and goes to v2.0.0. That needs an ADR, because
-> §10 currently implies they move together. **Owner decides.**
-
-**None (version pending).** `clean` declares no configuration fields at all, and a
+**None (v2.0.0).** `clean` declares no configuration fields at all, and a
 conforming implementation MUST therefore render no configuration band for it —
 see §2's rule on a package with no visible fields.
 
@@ -677,16 +664,26 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
-- **⚠ UNRELEASED, VERSION UNDECIDED.** Withdrawing `clean_keycols` and
-  `clean_hasheader` (§8) and changing `clean.dupes` to take run-time inputs is
-  **breaking** by the rules above, which points at **v2.0.0**. The open question is
-  whether `SCHEMA_VER` — the stored-format marker that `CurrentSchemaMajor()` gates
-  migration on — follows it. It must not: the Action catalog block layout is
-  unchanged, so a marker bump to major 2 would make every existing v0.4.0 `_Config`
-  read as `other-major` and be **refused outright**, breaking every deployment for a
-  change that alters no stored layout. That implies the two version numbers
-  **decouple**, which §10 does not currently contemplate. **Needs an ADR and the
-  owner's decision before release.**
+- **v2.0.0 (BREAKING):** withdraws the `clean_keycols` and `clean_hasheader` fields
+  and changes `clean.dupes` to take both as run-time inputs (§8); adds §8's normative
+  selection-vs-deployment rule and §2's no-visible-fields-no-band rule. Removing a
+  `key` and changing an action's semantics are breaking by the rules above.
+- **The stored-format marker moves with it, deliberately.** `SCHEMA_VER` goes to
+  `"v2.0"`, so `CurrentSchemaMajor()` is 2 and every `_Config` written by v0.4.0
+  (marker `v1.2`) reads as `other-major` and is **refused**. This is stricter than
+  the data requires — the Action catalog block layout is byte-identical across this
+  change — and it was accepted on the ground that **no deployment exists yet**: the
+  bundle is in test workbooks only, so there is no installed base to refuse. Keeping
+  one version number is simpler than decoupling the two and explaining the split in
+  every port. The alternative was analysed and rejected in `docs/adr/0002`.
+  **Revisit before the next breaking bump if an installed base exists by then** —
+  at that point, refusing every stored config to express a change that touched no
+  stored byte is a real cost, and decoupling becomes the better trade.
+- **Asymmetry this creates, which is correct and not a defect.** A v1.1.0-era config
+  has *no* marker, reads as `absent`, and still migrates cleanly through the legacy
+  path. A v1.2.0 config has `v1.2`, reads as `other-major`, and is refused. Older is
+  accepted where newer-but-not-current is not, because only the marker-less case has
+  a defined legacy layout to migrate *from*.
 - **v1.1.0 (additive):** adds the `chain` config entity, the reserved `chain.*`
   id namespace, engine-owned config, the grouping/layout placement code, and the
   quiet/dispatch convention. No existing key, action id, kind, value encoding, or

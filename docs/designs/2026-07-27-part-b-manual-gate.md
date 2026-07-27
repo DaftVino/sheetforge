@@ -94,22 +94,35 @@ Each of these must stop with **nothing changed and no error dialog**:
 - [ ] **Non-numeric input falls back rather than failing.** Answer `abc`. Expected: it
       proceeds on column `1` (`ParseCols` drops non-numeric entries and defaults).
 
-## 5. Upgrade from v0.4.0 (workbook Q) — the one that protects existing users
+## 5. A v0.4.0 workbook is REFUSED, on purpose (workbook Q)
 
-Workbook Q's `_Config` still contains `clean_keycols` and `clean_hasheader` rows, for
-fields that no longer exist.
+**This section inverted after the version decision. Read it before you run it.**
+`SCHEMA_VER` is now `"v2.0"`, so `CurrentSchemaMajor()` is 2 and workbook Q's marker
+(`v1.2`) reads as `other-major`. A v0.4.0 config is **not migrated — it is refused.**
+That is stricter than the data needs (the catalog block layout is byte-identical
+across this change) and was accepted deliberately: there is no installed base, so the
+false refusal costs nothing, and one version number beats two. See
+`docs/adr/0002-contract-version-vs-schema-marker.md`, Rejected.
 
-- [ ] **`Create Setup Tab` completes without error**, and the rebuilt Setup tab simply
-      has no `CLEAN & STANDARDIZE` band. The orphaned stored values are ignored, not
-      rendered, and must not produce a warning or a block.
-- [ ] **`Finalize Setup Tab` then succeeds**, and the two orphaned keys are gone from
-      `_Config` afterwards (Finalize rewrites it from Setup). To check: Alt+F11, select
-      `_Config`, Properties ▸ `Visible` = `-1 - xlSheetVisible`, look in column A, then
-      set it back to `2 - xlSheetVeryHidden`.
-- [ ] **Every other saved setting survived.** The `IMPORT / EXPORT` values and every
-      `Placement` code are exactly as they were. **If anything came back blank, stop
-      and report it — do not retype it.** A blank means the rebuild dropped saved
-      settings, and retyping hides it.
+- [ ] **`Create Setup Tab` on workbook Q refuses outright**, tells you the config was
+      written by a different version, and says to re-import that version's bundle.
+      **No rebuild prompt, no Yes/No** — this is the `other-major` path, and it must
+      not offer a choice. Your Setup tab is left exactly as it was.
+- [ ] **A v0.3.0-era workbook still upgrades cleanly**, if you still have one from the
+      v0.4.0 gate (workbook C). Its `_Config` has **no** marker at all, so it reads as
+      `absent` and takes the legacy migration path, which is unaffected.
+      **This asymmetry is correct, not a bug:** older-with-no-marker is accepted where
+      newer-but-not-current is refused, because only the marker-less case has a defined
+      legacy layout to migrate *from*.
+- [ ] **The recovery route works.** On workbook Q, delete the whole `_Config` sheet
+      (Alt+F11 → `Visible` = `-1 - xlSheetVisible`, then right-click the tab ▸ Delete),
+      and run `Create Setup Tab` again. Expected: it builds a fresh Setup tab with
+      defaults, no `CLEAN & STANDARDIZE` band, and no error. That is the documented
+      way out for a workbook this build will not read.
+
+**If `Create Setup Tab` silently migrates workbook Q instead of refusing it**, the
+marker bump did not take effect — check `SCHEMA_VER` really is `"v2.0"` in the bundle
+you imported, and that you removed the old module before importing.
 
 ## 6. Inside a chain (workbook P)
 
@@ -121,13 +134,15 @@ fields that no longer exist.
 
 ---
 
-## Known-undecided, not a test failure
+## Version decision — settled
 
-**The contract version is deliberately not bumped.** Removing a `key` is breaking per
-§10, which points at v2.0.0, but `SCHEMA_VER` is `"v1.2"` and gates migration — if the
-marker follows the contract to major 2, every existing v0.4.0 `_Config` reads as
-`other-major` and `Create Setup Tab` refuses outright, breaking every deployment for a
-change that alters no stored layout. See the ⚠ blocks in `spec/contract.md` §8 and §10,
-and the ADR draft at `docs/adr/0002-contract-version-vs-schema-marker.md`. **Decide
-this before release, not before testing** — the code under test is unaffected either
-way.
+**Contract v2.0.0, and `SCHEMA_VER` moves with it to `"v2.0"`.** Withdrawing two keys
+and changing an action's semantics is breaking by §10's own rules. The marker was kept
+coupled to the contract version rather than decoupled, because **no deployment exists
+yet** — the bundle is in test workbooks only, so refusing v0.4.0 configs costs nothing,
+and one version number is simpler than two. `docs/adr/0002-contract-version-vs-schema-marker.md`
+records the rejected alternative in full, because the analysis stops being *expensive*
+rather than stopping being *true*: **revisit it before the next breaking bump if an
+installed base exists by then.**
+
+The visible consequence is section 5 — a v0.4.0 workbook is refused, not upgraded.

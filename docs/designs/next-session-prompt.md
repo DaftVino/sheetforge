@@ -6,8 +6,9 @@
 
 Run `/orient` before anything else, including clarifying questions. Then walk the owner
 through `docs/designs/2026-07-27-part-b-manual-gate.md` — Part B is implemented,
-committed and pushed, but **never run in Excel**. When it passes, settle the contract
-version question in ADR 0002, then ship Part B and start planning Part A (issue #6).
+committed and pushed, but **never run in Excel**. When it passes, open the PR and ship
+it, then start planning Part A (issue #6). The contract version question is already
+settled — do not reopen it.
 
 **Model and agent routing, owner's instruction.** Offload as much as possible to
 **codex via the CLI** (`/codex`): `luna` and `terra` for lighter tasks, `sol` for
@@ -21,8 +22,9 @@ Read nothing else until you have these, in order:
 
 1. `docs/designs/2026-07-27-part-b-manual-gate.md` (7.4K) — the phase contract: the
    manual checklist for work already built, plus the two-workbook setup it needs.
-2. `docs/adr/0002-contract-version-vs-schema-marker.md` (4.4K) — DRAFT, unaccepted. The
-   one blocking decision: contract v2.0.0 vs `SCHEMA_VER` staying `v1.2`.
+2. `docs/adr/0002-contract-version-vs-schema-marker.md` (5.3K) — **Rejected**, and read
+   the top of it before touching any version number. It records why `SCHEMA_VER` moves
+   with the contract to major 2 and what that costs.
 3. `src/packages/PkgClean.bas` (11K) — the whole implementation under test; small
    enough to read entire.
 4. `spec/contract.md` (46K) — **read in slices from anchors; never front to back.**
@@ -47,10 +49,11 @@ off `main` only when starting Part A, and only after Part B lands.
 - **Do not reintroduce `clean_keycols` or `clean_hasheader` as remembered settings.**
   Asking every time is the feature — it is what keeps the answer matched to the
   selection the user just made. This is now a normative rule in contract §8.
-- **Do not bump `SCHEMA_VER`.** It is `"v1.2"` and `CurrentSchemaMajor()` gates
-  migration on it. Moving its major refuses every existing v0.4.0 `_Config` outright,
-  for a change that alters no stored layout. This is the whole subject of ADR 0002 and
-  must not be settled by editing the constant.
+- **The version question is settled: contract v2.0.0, `SCHEMA_VER` `"v2.0"`.** Do not
+  reopen it, and do not "fix" the resulting refusal of v0.4.0 configs — that refusal is
+  the decision, taken because no installed base exists. ADR 0002 is Rejected and holds
+  the reasoning; revisit only before a *future* breaking bump, and only if real
+  deployments exist by then.
 - **`AskHasHeader` uses `vbYesNoCancel` on purpose.** On a two-button `vbYesNo` MsgBox
   the title-bar X returns `vbNo`, which here silently means "compare every row" and
   deletes a header row. Do not simplify it to two buttons.
@@ -70,14 +73,12 @@ off `main` only when starting Part A, and only after Part B lands.
   `Sub`/`Function` counts, and `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas`
   reports no diagnostics
 - Every checkbox in `docs/designs/2026-07-27-part-b-manual-gate.md` is ticked, including
-  section 5's upgrade pass on a workbook finalized under v0.4.0
-- `docs/adr/0002-contract-version-vs-schema-marker.md` has `**Status:** Accepted` or
-  `Rejected` — not `DRAFT` — and `spec/contract.md`'s two warning blocks are resolved to
-  a decided version
+  section 5, where a workbook finalized under v0.4.0 must be **refused, not migrated**
+- `grep -n 'SCHEMA_VER     As String' dist/MacrosBundle.bas` shows `"v2.0"` in the
+  bundle actually imported for the gate
 - A PR exists for `feat/prompt-per-selection-settings` with the completed checklist in
-  its body, and `CHANGELOG.md` carries the entry under `## [Unreleased]`
-- A note is queued to `~/.daftplate/outbox/` if ADR 0002 is accepted, per CLAUDE.md's
-  rule that deviating from a standard needs an ADR here **and** an outbox note
+  its body, and `VERSION` is bumped with the `## [Unreleased]` entry moved under a
+  dated release heading in `CHANGELOG.md`
 
 ## Unknowns and risks
 
@@ -88,11 +89,13 @@ off `main` only when starting Part A, and only after Part B lands.
   every package, not just PkgClean. If it is wrong, a package that *should* show a band
   loses it. Section 1 of the gate tests both directions deliberately — the zero-field
   package and the all-actions-Off package.
-- **The upgrade path is untested.** A v0.4.0 `_Config` still carries `clean_keycols` and
-  `clean_hasheader` rows for fields that no longer exist. Expected to be ignored
-  harmlessly, but section 5 of the gate exists because "expected to be" is not evidence.
-- **ADR 0002 is unaccepted and blocks release, not testing.** Do not let it hold up the
-  manual gate; the code under test is identical either way.
+- **The refusal path is untested from this direction.** `SCHEMA_VER` `"v2.0"` means a
+  v0.4.0 `_Config` now reads as `other-major`. That branch was verified in the v0.4.0
+  gate by hand-editing a marker; it has never been reached by a genuine version bump,
+  which is the only way real users will meet it.
+- **A v0.3.0-era workbook must still migrate cleanly** — no marker at all reads as
+  `absent`, not `other-major`. If the bump broke that, the legacy path is gone and
+  nobody would notice from the v0.4.0 test alone.
 - **`.vscode/` is untracked** and unrelated to this work — left alone deliberately
   across several sessions, not an oversight.
 - **Leftover SDD files could not be deleted.** `.superpowers/sdd/` still holds

@@ -2,8 +2,12 @@
 
 <!-- File: docs/adr/0002-contract-version-vs-schema-marker.md — one page max. Never edited after acceptance; reversals are a new ADR. -->
 
-**Status:** DRAFT — not accepted. Written unattended on 2026-07-27 to make the decision explicit, not to take it. **The owner decides.**
-**Date:** 2026-07-27 (draft)
+**Status:** Rejected
+**Date:** 2026-07-27
+
+**Rejected by the owner on 2026-07-27**, on a fact this draft did not have: **there is no installed base.** The bundle exists only in test workbooks, so the false refusal this ADR was written to prevent costs nothing today. One version number is simpler than two, and simpler wins while it is free. `SCHEMA_VER` therefore moves to `"v2.0"` with the contract, and contract §10 records both the decision and the asymmetry it creates.
+
+**Revisit before the next breaking bump.** The analysis below does not stop being true — it stops being *expensive*. Once real deployments exist, refusing every stored config to express a change that touched no stored byte is a genuine cost, and the decision should be retaken on the merits set out here rather than re-derived from scratch. That is why this stays on the record as Rejected rather than being deleted.
 
 ## Context
 
@@ -36,7 +40,10 @@ is byte-identical before and after Part B: same three columns, same key row, sam
 per-row ids. The only thing that changed is that two field rows are no longer declared,
 which the reader already ignores.
 
-## Decision (proposed, NOT accepted)
+## Decision proposed — and NOT taken
+
+*What follows is the rejected proposal, kept intact as the record of what was weighed.
+The decision actually taken is at the top of this file.*
 
 State in §10 that the two version numbers are **independent**, and say what each one
 describes:
