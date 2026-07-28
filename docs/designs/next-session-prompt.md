@@ -5,9 +5,28 @@
 ## Start here
 
 Run `/orient` before anything else, including clarifying questions. Then build
-**W1 — the ingest→clean wave, 7 actions.** Its scope, its seven action ids and its
-module assignments are frozen in §3.4 of the phase contract and were approved by the
-owner on 2026-07-28. Do not re-plan the wave and do not brainstorm.
+**W1 — the ingest→clean wave, 7 actions** — in two phases, each reviewed by codex
+before it is acted on.
+
+**Phase 1 — plan.** Invoke `superpowers:writing-plans` and write the W1
+implementation plan. Then **`/codex` review the plan** before writing any code;
+treat a `[P1]` as blocking and resolve it in the plan, not in the implementation.
+
+**Phase 2 — implement.** Invoke `superpowers:subagent-driven-development` and
+execute the plan task by task. Dispatch mechanical work to codex — terra or sonnet
+for per-module edits, sol for the contract and `build.ps1` work. **Opus writes the
+contract §7/§8 edits and the `build.ps1` id checks itself**: they are the two pieces
+every later wave depends on. Then **`/codex` review the finished diff**, and fix
+`[P1]`s before opening the PR.
+
+**What is frozen, and what the plan is actually for.** W1's *scope* is settled and
+must not be re-opened: the seven action ids, their module assignments and the wave's
+membership are frozen in §3.4 and were approved by the owner on 2026-07-28. Do not
+brainstorm the wave, do not add or drop an action, do not rename an id. The plan
+covers *how*: the config fields each action exposes and their defaults, the shape of
+`PkgImport_CombineEngine`, the cancel and error-restore paths, and the gate script.
+Two open questions in `## Unknowns and risks` are real plan input — settle them
+there, with the owner, rather than mid-implementation.
 
 Build in this order, because the first two items are what make the other five safe
 to write:
@@ -100,11 +119,14 @@ base branches that had already merged. #18 exists only to undo that.
 ## Exit criteria
 
 - `pwsh build/build.ps1` exits 0 reporting `Core + 3 package(s)` with balanced Sub
-  and Function counts
-- `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` reports no diagnostics
+  and Function counts, and `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas`
+  reports no diagnostics
 - `pwsh build/build.ps1` fails with a named error when a duplicate
   `Core_AddAction` id or an off-vocabulary domain is deliberately injected, and
   passes again once reverted
+- A W1 implementation plan exists under `docs/designs/`, and **both** codex reviews
+  are recorded in the PR body — one of the plan before implementation, one of the
+  finished diff — with no unresolved `[P1]` from either
 - `grep -c 'SCHEMA_VER *As String = "v2.0"' dist/MacrosBundle.bas` prints `1`
 - `spec/contract.md` records **v2.3.0**, with the nine-domain vocabulary table in
   §7 and all seven new ids in §8
