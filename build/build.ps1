@@ -336,11 +336,14 @@ $legacyIds | ForEach-Object { [void]$legacySet.Add($_) }
 # found and this guard reports "no dispatchable handler" for a handler that is really
 # there. VBA is case-insensitive, so matching its syntax case-sensitively is simply wrong.
 #
-# KNOWN LIMITATION, pre-existing and NOT fixed here: the duplicate-procedure, block-balance
-# and module-declaration guards above and below still match VBA keywords case-sensitively,
-# so a module written as `public sub` fails one of those instead. Making the whole file
-# casing-agnostic is a separate change to guards with their own rationale; this comment
-# exists so the next person finds the limitation instead of rediscovering it.
+# Every other structural guard in this file was made case-insensitive in the same commit,
+# and that was not optional. Fixing only this one opened a hole: a procedure written
+# `public sub Foo(ctx as object)` ... `end sub` - consistently lowercase - was counted by
+# NEITHER the Sub-open nor the End-Sub pattern, so it balanced, and it was simultaneously
+# invisible to the duplicate-name and module-declaration guards. It shipped with zero
+# structural validation, having previously been stopped (confusingly, but stopped) right
+# here. VBA is case-insensitive; every pattern in this file that matches VBA syntax now
+# carries (?i) or IgnoreCase, and any new one must too.
 #
 # $dispatchable itself stays a case-INSENSITIVE hashtable on purpose, because VBA resolves
 # procedure names case-insensitively and so does Application.Run - an entry point declared
@@ -430,7 +433,7 @@ if ($idProblems.Count -gt 0) {
 # --- guard: every Sub/Function/Property name must be unique across all modules ---
 # NOTE: Property Get/Let/Set sharing a name would false-positive here; this
 # codebase uses none. Add kind to the key if that changes.
-$procRe = '^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)'
+$procRe = '(?i)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)'
 $seen = @{}
 $dupes = New-Object System.Collections.Generic.List[string]
 foreach ($src in $sources) {
@@ -493,10 +496,10 @@ foreach ($src in $sources) {
 $text = $sb.ToString()
 $attr = ([regex]::Matches($text, '(?m)^Attribute VB_Name')).Count
 $opt = ([regex]::Matches($text, '(?m)^Option Explicit')).Count
-$subO = ([regex]::Matches($text, '(?m)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Sub\s')).Count
-$subC = ([regex]::Matches($text, '(?m)^\s*End Sub\b')).Count
-$fnO = ([regex]::Matches($text, '(?m)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Function\s')).Count
-$fnC = ([regex]::Matches($text, '(?m)^\s*End Function\b')).Count
+$subO = ([regex]::Matches($text, '(?im)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Sub\s')).Count
+$subC = ([regex]::Matches($text, '(?im)^\s*End Sub\b')).Count
+$fnO = ([regex]::Matches($text, '(?im)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Function\s')).Count
+$fnC = ([regex]::Matches($text, '(?im)^\s*End Function\b')).Count
 
 $problems = New-Object System.Collections.Generic.List[string]
 if ($attr -ne 1) { $problems.Add("expected 1 Attribute VB_Name, found $attr") }
@@ -519,9 +522,9 @@ if ($fnO -ne $fnC) { $problems.Add("Function/End Function imbalance: $fnO / $fnC
 # does not compile VBA, so catch that structural error here.
 $declLines = [regex]::Split($text, "\r?\n")
 $inProc = $false; $sawProc = $false
-$procOpen = '^\s*(?:Public\s+|Private\s+|Friend\s+|Global\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s'
-$procClose = '^\s*End\s+(?:Sub|Function|Property)\b'
-$moduleDecl = '^\s*(?:Public\s+|Private\s+|Global\s+)?(?:Const|Dim|Type|Enum|Declare)\b|^\s*(?:Public|Private|Global)\s+(?:WithEvents\s+)?\w+\s+As\b'
+$procOpen = '(?i)^\s*(?:Public\s+|Private\s+|Friend\s+|Global\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s'
+$procClose = '(?i)^\s*End\s+(?:Sub|Function|Property)\b'
+$moduleDecl = '(?i)^\s*(?:Public\s+|Private\s+|Global\s+)?(?:Const|Dim|Type|Enum|Declare)\b|^\s*(?:Public|Private|Global)\s+(?:WithEvents\s+)?\w+\s+As\b'
 for ($i = 0; $i -lt $declLines.Count; $i++) {
     $ln = $declLines[$i]
     if ($ln -match $procOpen) { $inProc = $true; $sawProc = $true; continue }
