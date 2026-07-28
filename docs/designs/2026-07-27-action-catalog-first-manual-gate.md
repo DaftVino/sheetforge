@@ -18,14 +18,22 @@ that remain unverified are marked `ASSUMPTION`.
 
 ---
 
-## Status — NOT RUN
+## Status — PART RUN, 2026-07-28
 
 | Item | State |
 |---|---|
-| 1. The Setup tab opens on the Action catalog, Chains second | Not run |
+| 1. The Setup tab opens on the Action catalog, Chains second | **Passed** |
 | 2. Nothing is clipped and no boundary gained or lost a blank row | Not run |
 | 3. An old-order `_Config` still reads correctly | Not run |
-| **Total 0/3** | **Not run** |
+| **Total 1/3** | **Part run** |
+
+**This reorder caused a Core defect, found by the v0.7.0 gate rather than this one.**
+Moving the catalog to the top put Chains immediately after it, and `RenderChainsBlock`
+opens with two merged `TintRow`s — which landed inside the span `ClearCatalogBlock`
+blanket-cleared, raising `1004 We can't do that to a merged cell` and aborting the rebuild
+on any damaged-config recovery. Fixed on this branch (`ClearCatalogBlock` now clears row by
+row and skips merged rows). Item 2 below is the one that would catch a *layout* regression
+from the same move; it has not been run.
 
 ---
 
@@ -53,7 +61,7 @@ entries. **Always remove the old module first:** in the Project Explorer, right-
 
 ---
 
-- [ ] **The Action catalog is first, Chains second, settings bands after both.**
+- [x] **The Action catalog is first, Chains second, settings bands after both.**
       Scroll to the top of the Setup tab.
 
       Expected, top to bottom:

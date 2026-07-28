@@ -16,15 +16,15 @@ unverified are marked `ASSUMPTION`.
 
 ---
 
-## Status — NOT RUN
+## Status — PART RUN, 2026-07-28
 
 | Item | State |
 |---|---|
-| 1. Setup tab wears the identity | Not run |
+| 1. Setup tab wears the identity | **Passed** |
 | 2. Macros pages match, and stay distinguishable | Not run |
 | 3. Semantic colours survived | Not run |
 | 4. Legible on a dark Excel theme | Not run |
-| **Total 0/4** | **Not run** |
+| **Total 1/4** | **Part run** |
 
 ### The reference
 
@@ -93,7 +93,7 @@ was set. That is precisely why every tab claim below is checked with a number.
 
 ---
 
-- [ ] **The Setup sheet wears the identity.** Activate the Setup worksheet, then check each
+- [x] **The Setup sheet wears the identity.** Activate the Setup worksheet, then check each
       of these — the numbers are the item, the descriptions are only so you know what you
       are looking at.
 
