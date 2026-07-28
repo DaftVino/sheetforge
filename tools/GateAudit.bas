@@ -134,35 +134,38 @@ Private Sub AuditOrder()
     End If
 End Sub
 
+' INFORMATIONAL ONLY - deliberately asserts nothing. Read the geometry, then look.
+'
+' This used to FAIL if it did not find exactly one blank row, and it was wrong twice
+' over. It counted backwards from the next KEY row, but the spacer sits before the
+' next BLOCK, and a package band opens with a banner and a section header several
+' rows above its first key - so it always found content and always reported 0.
+'
+' It cannot be repaired into an assertion, either: with no chains defined, the 20
+' chain input rows are themselves empty, so row-blankness does not delimit the block.
+' There is no sound row-based test here. Spacing is cosmetic and stays a human
+' glance in the reorder gate; printing the geometry is the most this can honestly do.
 Private Sub AuditSpacing()
-    Dim w As Worksheet, rChn As Long, nk As Long, i As Long, blanks As Long
-    Head "BLOCK SPACING               [reorder 2, spacing half]"
+    Dim w As Worksheet, rChn As Long, nk As Long, i As Long, lastContent As Long
+    Head "BLOCK GEOMETRY              [reorder 2 - INFO, not a check]"
 
     Set w = Sh("Setup")
-    If w Is Nothing Then Skp "spacing", "no Setup sheet": Exit Sub
+    If w Is Nothing Then Skp "block geometry", "no Setup sheet": Exit Sub
 
     rChn = KeyRow(w, "k_core_chains")
-    If rChn = 0 Then Skp "one blank row after the Chains block", "chains key not found": Exit Sub
-
     nk = NextKeyRowAt(w, rChn)
-    If nk = 0 Then Skp "one blank row after the Chains block", "no following key row": Exit Sub
+    If rChn = 0 Or nk = 0 Then Skp "block geometry", "a key row was not found": Exit Sub
 
-    ' Count trailing wholly-empty rows between the last populated chains row and
-    ' whatever block starts next.
-    For i = nk - 1 To rChn + 1 Step -1
-        If Application.WorksheetFunction.CountA(w.Rows(i)) = 0 Then
-            blanks = blanks + 1
-        Else
-            Exit For
-        End If
+    For i = rChn + 1 To nk - 1
+        If Application.WorksheetFunction.CountA(w.Rows(i)) > 0 Then lastContent = i
     Next i
 
-    Say "  blank rows before the next block: " & blanks
-    If blanks = 1 Then
-        Pas "exactly one blank row after the Chains block"
-    Else
-        Fal "exactly one blank row after the Chains block", blanks & " found, expected 1"
-    End If
+    Say "  chains key row      : " & rChn
+    Say "  next key row        : " & nk
+    Say "  last populated row  : " & lastContent & "  (blank rows after it: " & _
+        IIf(lastContent = 0, "n/a", CStr(nk - 1 - lastContent)) & ")"
+    Say "  -> spacing is a LOOK, not a number. Confirm by eye that there is exactly"
+    Say "     one blank row between the Chains block and the IMPORT / EXPORT band."
 End Sub
 
 Private Sub AuditSetupColours()
