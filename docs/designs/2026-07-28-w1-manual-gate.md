@@ -5,9 +5,19 @@
 > Tick an item only against a real run. If you skip one, write **UNTESTED** next to it
 > rather than leaving it blank — a blank tick is indistinguishable from a pass nobody did,
 > and eight of track 1's fifteen items are still unrun for exactly that reason.
+>
+> **Run each section in order, and do not credit a "nothing happened" item on its own.**
+> Items 1.4, 3.4, 4.2 and 4.3 all expect *no change* — and a completely broken build that
+> does nothing when you click would pass every one of them. Each is only evidence once the
+> positive-path item in the same section (1.1, 3.1, 4.1, 4.4) has already passed. They are
+> marked **[pairs with N]** below.
 
 **Build under test:** `dist/MacrosBundle.bas`, built from branch `feat/w1-ingest-clean`.
 Rebuild it with `pwsh build/build.ps1` before you start.
+
+**Also needed:** `tools/GateAudit.bas`, from the same branch. It is **not** part of the
+bundle — nothing in the build reads `tools/` — so it is a second, separate import used
+only by item 0.4. If it is missing from your checkout, skip 0.4 and mark it UNTESTED.
 
 ---
 
@@ -81,7 +91,7 @@ Store`. Put two or three data rows on each.
   that skipped anything starting `Macros ` would eat a user's own data sheet without
   saying so.
 
-- [ ] **1.4 — Your `Setup` and `Macros <n>` tabs are NOT in the result.**
+- [ ] **1.4 [pairs with 1.1] — Your `Setup` and `Macros <n>` tabs are NOT in the result.**
   *Failure looks like:* Setup's key column or a page of buttons appearing as data rows.
   *Why:* engine-owned sheets are not data.
 
@@ -136,7 +146,7 @@ leave it blank to use this workbook's own folder.
   nothing.**
   *Failure looks like:* a second sheet appearing, or the first being overwritten.
 
-- [ ] **3.4 — Press Cancel on the file picker. Nothing happens at all.**
+- [ ] **3.4 [pairs with 3.1] — Press Cancel on the file picker. Nothing happens at all.**
   No new sheet, no dialog, no error.
 
   *Failure looks like:* an error dialog, or an empty sheet created before the cancel was
@@ -159,11 +169,11 @@ value in `A17` on an otherwise blank row 17).
   *Why:* this action ships without the `backup.snapshot` restore point that its deferred
   siblings are waiting for. The count IS the safety story.
 
-- [ ] **4.2 — Answer No. Nothing is deleted.**
+- [ ] **4.2 [pairs with 4.4] — Answer No. Nothing is deleted.**
   Every row and column is still there.
 
-- [ ] **4.3 — ⚠️ Answer by clicking the title-bar X rather than a button. Nothing is
-  deleted.**
+- [ ] **4.3 [pairs with 4.4] — ⚠️ Answer by clicking the title-bar X rather than a button.
+  Nothing is deleted.**
   *Expected — but NOT verified:* the dialog has Yes and No only, and the X is assumed to
   return the same as No.
   *Why this is on the list:* the whole safety argument for a two-button dialog is that its
@@ -258,8 +268,18 @@ crosses the edge of your selection**.
 ## 8. Error recovery — the one that gets blamed on the next macro
 
 - [ ] **8.1 — Force a failure, dismiss the error, then confirm Excel is not left broken.**
-  Easiest trigger: run `import.combine_workbooks` against a folder containing a file that
-  is not a real workbook (rename a `.txt` to `.xlsx`).
+
+  **Use this trigger:** set `Folder to read workbooks from` on Setup to a path that does
+  not exist, Finalize, and run `import.combine_workbooks`.
+
+  *Do not use "rename a `.txt` to `.xlsx`".* Excel often detects the mismatch and either
+  repairs the file silently or shows a prompt that gets auto-answered because the action
+  suppresses alerts while it runs — so it may never raise an error at all, and you would be
+  testing nothing. A missing folder fails deterministically.
+
+  Note that a missing folder is caught deliberately and reports as itself (item 2.2), so
+  for the state check below use a **second** trigger that reaches the engine: point the
+  folder at a real folder containing a zero-byte file renamed to `.xlsx`.
 
   Before running, note these four in the VBE Immediate window (Ctrl+G, type each and press
   Enter):
@@ -291,11 +311,34 @@ crosses the edge of your selection**.
 
 ## 9. Chain them — the reason this wave exists
 
-- [ ] **9.1 — Build one chain: combine worksheets → remove blanks → trim → text to numbers.
-  Run it from a single button and get a clean dataset.**
+**How to build a chain.** On the Setup tab, find the **Chains** block. In one chain's
+`Steps` cell, put one step per line, each as `Label [action.id]` — the bracketed id is what
+actually runs and the label is only the caption. Use exactly this:
 
-  *Failure looks like:* a step's dialog appearing when it should be suppressed inside a
-  chain, or the chain stopping silently mid-way.
+```
+Combine All Worksheets [import.combine_worksheets]
+Remove Blank Rows & Columns [clean.remove_blanks]
+Trim & Clean Text [clean.trim]
+Convert Text to Numbers [clean.text_to_numbers]
+```
+
+Give the chain a name, Finalize, and its button appears on a Macros page.
+
+**Expect to be interrupted — this is correct, not a bug.** Running this chain will stop for
+input **four** times: a range picker for each of `clean.remove_blanks`, `clean.trim` and
+`clean.text_to_numbers`, plus the Yes/No delete confirmation inside `clean.remove_blanks`.
+Chain mode suppresses each step's *completion* message, not its questions. It is deliberate
+that a destructive confirmation is never suppressed, and range-scoped actions ask for their
+range at run time by design rather than storing it.
+
+- [ ] **9.1 — Build the chain above, run it from its single button, and get a clean dataset
+  at the end.**
+  You answer four prompts along the way (three range pickers, one Yes/No). At the end you
+  get **one** summary, not four.
+
+  *Failure looks like:* four separate "complete" dialogs instead of one summary; the chain
+  stopping part-way with no message; or a step reporting an error and the chain continuing
+  as if it had worked.
   *Why:* these seven were chosen as a coherent workflow rather than a feature sampler
   precisely so this works the day it lands. If the individual actions pass but this does
   not, the wave has not delivered what it was for.
