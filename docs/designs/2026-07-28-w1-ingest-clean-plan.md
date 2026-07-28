@@ -80,6 +80,43 @@ material and it must not survive conversion in any form.
 
 ---
 
+## Codex plan review, 2026-07-28 — findings and resolutions
+
+Run before any code was written, per the wave's two-phase protocol. Codex reviewed the plan
+against the frozen design, the contract, `build.ps1` and `PkgClean.bas`. **8 `[P1]`, 11
+`[P2]`, 2 `[P3]`.** All `[P1]`s are resolved in this document; none is deferred to
+implementation. Reproduce with the prompt in the session scratchpad
+(`codex exec -` with the plan and its context files inlined — codex's sandbox cannot run
+shell commands on this machine, so pointing it at paths yields nothing).
+
+| # | Finding | Resolution |
+|---|---|---|
+| P1 | The fixture proved only the happy path; the parser tolerates a duplicate marker, a renamed header, a malformed or duplicated row, and a silently omitted row | Parser rewritten: exactly one marker, exact header and separator rows, **every** row between them must parse or the build fails, duplicate domain rejected, a `\|` in any cell rejected |
+| P1 | `$addActionRe` silently skips producer forms it cannot parse, so the build can check zero actions and still pass | A `Core_AddAction` **call** that does not parse is now a build failure. Anchored at statement position so `Core_AddAction`'s own declaration and comment mentions do not false-positive |
+| P1 | Entry-point check accepts a `Private Sub`, which `Application.Run` cannot dispatch | Now requires a Public/unqualified `Sub <name>(x As Object)` |
+| P1 | `importexport.some_new_id` passes, though §7 says no new id may join that domain | `grandfathered` now means "these exact ids only" — a new id in that domain fails |
+| P1 | **The empty-formats-table refusal is unreachable dead code**, and its gate item unexecutable: `TableValues` falls back to manifest defaults | Verified true at [Core.bas:561](src/core/Core.bas#L561). `k_clean_formats` now declares **no default rows**; refusal reachable, gate item executable, and no first-time user gets `mm/dd/yyyy` applied to a range they picked |
+| P1 | `import.delimited_file` has no failure cleanup — leaves the text workbook open and a partial sheet | Full cleanup added, with the original error captured and re-signalled so `Core_Fail` reports the real cause rather than the last cleanup statement |
+| P1 | The `grep -c` verification steps **cannot pass** — every id appears in `Core_AddAction` *and* `Core_Fail` | Confirmed: the old grep prints 8, not 3. All three steps now count `Core_AddAction` declarations |
+| P1 | No step hands the gate to the owner | Task 7 Step 3b added. The "or explicitly recorded as untested" allowance is kept — it is the owner's stated exit criterion — but narrowed to items needing a build this session cannot make |
+| P2 ×11 | Shape regex vs contract; `Dir` trailing-separator and unsaved workbook; source extent from column A only; duplicate headers within one source; `Macros ` prefix swallowing user sheets; qualifier blank semantics; delimited-file counts; unmerge crossing the selection edge; letter-vs-header ambiguity absent from help text; gate coverage; unmarked Excel assumptions | All accepted and applied |
+| P3 ×2 | Stale "declares NO fields" comment; false claim that a 15-element `Array()` breaches the 25-continuation limit | Both corrected — the `Array()` claim was simply wrong (14 continuations) |
+
+**Found by direct verification, not by codex — and the most serious of the lot.**
+PowerShell's `-match` and `-ne` are **case-insensitive**, so
+`'import.combineWorksheets' -match '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'` returns `True`.
+The shape check was decorative, and the design doc's "**No new id is ever camelCase**" — the
+single rule this gate exists to enforce — was unenforced. Every id-value and contract-text
+comparison now uses `-cmatch` / `-cne`; VBA-syntax matching stays case-insensitive because
+VBA is. Step 5b injects a camelCase id specifically so this branch is never again assumed
+to work.
+
+Also fixed pre-review by running `build.ps1`'s own guards over the plan's VBA: `Dim eNum`
+lowercases to `enum`, a listed reserved word, so Task 3's engine would have failed the
+build. Renamed to `errNum`/`errDesc`.
+
+---
+
 ## Deliberately deferred, and why
 
 State these in the PR body so they are not read as oversights.
@@ -178,8 +215,11 @@ the design doc's frozen rule that the first segment is a **user-facing domain, n
 package** — this correction is the whole reason §7 needed touching.
 
 ````markdown
-- **Action id** — `<domain>.<operation>`, unique, lowercase ASCII letters, digits and
-  underscores, exactly two segments. **The domain is a controlled user-facing vocabulary,
+- **Action id** — `<domain>.<operation>`, unique, exactly two segments. Each segment
+  **begins with a lowercase ASCII letter** and continues with lowercase ASCII letters,
+  digits and underscores. (The leading-letter rule is stated because the build gate
+  enforces it; without it here, the gate would be stricter than the contract it claims to
+  implement.) **The domain is a controlled user-facing vocabulary,
   NOT the package or module that implements it** — encoding the module would make a future
   package split a contract break for no benefit. The operation segment is descriptive
   where ambiguity looms (`clean.remove_blank_rows`, never `clean.blank2`). **No new id is
@@ -193,6 +233,17 @@ package** — this correction is the whole reason §7 needed touching.
   file and fails a build whose action ids use a domain that is not listed `active` or
   `grandfathered`. Do not reformat the table, rename its columns, or remove the marker
   without changing that parser in the same commit.
+
+  **Machine-readable constraints, because a build gate reads this table.** The marker
+  appears **exactly once** in this document. The header row is exactly
+  `| domain | status | meaning |` and is followed by exactly `|---|---|---|`. Every row
+  between the header and the terminating blank line is a data row of the form
+  `` | `<domain>` | <status> | <meaning> | `` where `<status>` is one of `active`,
+  `reserved`, `grandfathered`. **No cell may contain a `|` character** — there is no
+  escaping rule and none is wanted; a pipe would corrupt the rendered table as well as
+  the parse. A domain appears at most once. The parser **fails the build** on any
+  violation rather than skipping the offending row: a gate that quietly parses eleven of
+  twelve rows still goes green while silently permitting the twelfth domain.
 
 <!-- action-domain-vocabulary -->
 
@@ -247,7 +298,7 @@ domain-is-not-the-module rule, realized).
 | `k_import_dest` | text | simple | `Master` | Name of the **new** sheet a combine action creates. `usedBy` the two combines. A conforming implementation MUST create this sheet and MUST NOT overwrite, clear or delete an existing sheet of that name — if one exists the action MUST stop before changing anything and say so, naming the sheet. Kind is `text`, deliberately **not** `sheet`: a `sheet` field is validated at activation to **exist**, and this one must not. |
 | `k_import_folder` | text | simple | *(blank)* | Folder the workbook combine reads from. **Blank means the deployment's data location** (§9 — the workbook's containing folder in Excel, a Drive folder in Sheets), which is the common case and the reason the default is blank rather than a path. `usedBy` `import.combine_workbooks`. |
 | `k_import_delim` | text | advanced | `comma` | Column separator for delimited files. Token vocabulary: `comma`, `tab`, `semicolon`, `pipe`, `space`; any other non-blank value is read as **the literal separator character** (its first character). Blank reads as `comma`. `usedBy` `import.delimited_file`. |
-| `k_import_qualifier` | text | advanced | `"` | The character wrapping text that itself contains the separator. `"` (double quote), `'` (single quote), or the token `none`. Blank reads as `none`. `usedBy` `import.delimited_file`. |
+| `k_import_qualifier` | text | advanced | `"` | The character wrapping text that itself contains the separator. `"` (double quote), `'` (single quote), or the token `none` to disable qualification entirely. **A blank cell reads as the declared default `"`, not as `none`** — §5's blank-means-never-set rule resolves a blank to the manifest default, so `none` must be typed to be meant. Any other value also reads as `"`. `usedBy` `import.delimited_file`. |
 
 **Actions**
 
@@ -271,10 +322,20 @@ v2.2.0. It now declares exactly one:
 
 | key | kind | tier | default | semantics |
 |---|---|---|---|---|
-| `k_clean_formats` | table | simple | see below | Column-to-number-format map for `clean.standardize_formats`. Two columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks) and **Number format** (a platform number-format string). A row whose Column resolves to nothing inside the picked range is reported, not silently skipped. `usedBy` `clean.standardize_formats`. |
+| `k_clean_formats` | table | simple | **none** | Column-to-number-format map for `clean.standardize_formats`. Two columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks) and **Number format** (a platform number-format string). A row whose Column resolves to nothing inside the picked range is reported, not silently skipped. `usedBy` `clean.standardize_formats`. |
 
 `k_clean_formats` header: `Column (letter or header name)|Number format`.
-Demo default rows (`|`-delimited): `A|mm/dd/yyyy` · `B|0` · `C|$#,##0.00` · `D|0.00%`.
+
+**This field declares NO default rows, deliberately, and that is load-bearing.** §5's
+fallback resolves an empty stored table to the field's declared defaults — so a field that
+declared demo rows could never observe "the user configured nothing". `clean.standardize_formats`
+MUST stop and say where to configure the map when the table is empty, and that refusal is
+only reachable because there is nothing to fall back to. It is also the difference between
+an action that does nothing until told and one that silently applies `mm/dd/yyyy` to
+column A of whatever range a first-time user picked. `k_import`'s demo rows are the
+opposite case and stay: a three-column type map is genuinely hard to guess, and its action
+already refuses to run against tabs that do not exist. Worked examples for this field live
+in its help text instead, where they cost nothing.
 
 **This does not reopen the rule below, it satisfies it.** A house number format is a fact
 about the deployment — the same columns get the same formats every close — not a fact
@@ -311,22 +372,35 @@ Insert as the **first** versioned bullet in §10 (above the `v2.2.0` bullet):
   shipped source does.
 ````
 
-- [ ] **Step 6: Verify the table parses the way Task 2 will parse it**
+- [ ] **Step 6: Verify the table by parsing it, not by counting lines**
 
-```bash
-grep -n -A 16 'action-domain-vocabulary' spec/contract.md
+A `grep -c` over the whole file counts matching lines **anywhere** — including a second
+copy of the table pasted elsewhere, or a row the real parser will reject. It answers a
+different question from "what will `build.ps1` load". Run the parser instead:
+
+```powershell
+pwsh -NoProfile -Command @'
+$lines = Get-Content -LiteralPath spec/contract.md
+$m = @($lines | Select-String -SimpleMatch "<!-- action-domain-vocabulary -->")
+"markers: $($m.Count)"
+$at = $m[0].LineNumber - 1
+$d = [ordered]@{}
+for ($i = $at + 1; $i -lt $lines.Count; $i++) {
+  $ln = $lines[$i]
+  if ($ln -notmatch "^\s*\|") { if ($d.Count -gt 0) { break } else { continue } }
+  if ($ln -match "^\s*\|[\s\-:|]+\|\s*$") { continue }
+  if ($ln -match "^\s*\|\s*``([a-z][a-z0-9_]*)``\s*\|\s*(active|reserved|grandfathered)\s*\|") {
+    $d[$matches[1]] = $matches[2]
+  } elseif ($ln -notmatch "^\s*\|\s*domain\s*\|") { "UNPARSED ROW: $ln" }
+}
+"domains: $($d.Count)"
+$d.GetEnumerator() | ForEach-Object { "  {0,-14} {1}" -f $_.Key, $_.Value }
+'@
 ```
 
-Expected: the marker on its own line, a blank line, the header row, the separator row, and
-exactly twelve data rows — nine `active`, two `reserved`, one `grandfathered`. Confirm
-every first cell is a backticked lowercase token and every second cell is one of those
-three words, lowercase, with no trailing punctuation.
-
-```bash
-grep -c '^| `[a-z][a-z0-9_]*` | \(active\|reserved\|grandfathered\) |' spec/contract.md
-```
-
-Expected: `12`.
+Expected: `markers: 1`, `domains: 12`, no `UNPARSED ROW` line, and the twelve domains
+listed with nine `active`, two `reserved`, one `grandfathered`. Anything else means Task 2's
+gate will not load what you think it will.
 
 - [ ] **Step 7: Commit**
 
@@ -374,6 +448,15 @@ Insert after line 195 (`}` closing the `$reservedProblems` check) and before the
 # some built-in list: a gate that quietly disables itself when its input goes missing is
 # worse than no gate, because the build still goes green.
 #
+# CASE SENSITIVITY - the one thing to get right here. PowerShell's -match and -ne are
+# case-INSENSITIVE by default, which silently defeats every lowercase rule below. Two
+# different rules apply and the distinction is deliberate:
+#   * VBA SOURCE SYNTAX is matched case-INSENSITIVELY (-match), because VBA itself is:
+#     `public sub Foo(ctx as object)` is a valid handler and must be found.
+#   * ACTION ID VALUES and CONTRACT TABLE TEXT are matched case-SENSITIVELY (-cmatch,
+#     -cne), because the id rule IS a case rule. With plain -match,
+#     "import.combineWorksheets" passes the lowercase-only shape check.
+#
 # Scope is every candidate source (Core + every Pkg*.bas on disk), NOT only the
 # -Packages subset this run selected - the same repo-wide-invariant reasoning as the
 # ASCII guard above. A bad id sitting in an unbundled package ships the day someone
@@ -387,33 +470,78 @@ if (-not (Test-Path -LiteralPath $contractPath)) {
 }
 $contractLines = Get-Content -LiteralPath $contractPath
 $vocabMarker = '<!-- action-domain-vocabulary -->'
-$markerAt = -1
+$vocabProblems = New-Object System.Collections.Generic.List[string]
+
+# EXACTLY one marker. Two markers (a copied section, a half-finished edit) would silently
+# make the first one win, and which table is authoritative would depend on file order.
+$markerLines = @()
 for ($i = 0; $i -lt $contractLines.Count; $i++) {
-    if ($contractLines[$i].Trim() -eq $vocabMarker) { $markerAt = $i; break }
+    if ($contractLines[$i].Trim() -eq $vocabMarker) { $markerLines += ($i + 1) }
 }
-if ($markerAt -lt 0) {
+if ($markerLines.Count -ne 1) {
     Write-Host "BUILD FAILED - action id validation:" -ForegroundColor Red
-    Write-Host "  marker '$vocabMarker' not found in spec/contract.md." -ForegroundColor Red
-    Write-Host "  Section 7 must carry that marker on its own line directly above the domain table." -ForegroundColor Red
+    if ($markerLines.Count -eq 0) {
+        Write-Host "  marker '$vocabMarker' not found in spec/contract.md." -ForegroundColor Red
+        Write-Host "  Section 7 must carry that marker on its own line directly above the domain table." -ForegroundColor Red
+    } else {
+        Write-Host "  marker '$vocabMarker' appears $($markerLines.Count) times in spec/contract.md (lines $($markerLines -join ', ')). It must appear exactly once." -ForegroundColor Red
+    }
     exit 1
 }
-# Read table rows following the marker; stop at the first non-table line AFTER at least
-# one row has been read (the blank line and the header/separator rows sit in between).
-$domainStatus = @{}
+$markerAt = $markerLines[0] - 1
+
+# Walk the table. EVERY line between the marker and the terminating blank must be
+# recognised - header, separator, or a well-formed data row. An unrecognised row is a
+# BUILD FAILURE, not a skip: silently parsing 11 of 12 rows leaves the build green while
+# the 12th domain quietly stops being enforced, which is the exact failure this gate
+# exists to prevent.
+$domainStatus = [ordered]@{}
+$sawHeader = $false
+$sawSeparator = $false
 for ($i = $markerAt + 1; $i -lt $contractLines.Count; $i++) {
     $ln = $contractLines[$i]
+    $lineNo = $i + 1
     if ($ln -notmatch '^\s*\|') {
-        if ($domainStatus.Count -gt 0) { break } else { continue }
+        if ($sawHeader) { break } else { continue }      # blank line between marker and table
     }
-    if ($ln -match '^\s*\|[\s\-:|]+\|\s*$') { continue }          # separator row
-    if ($ln -match '^\s*\|\s*`([a-z][a-z0-9_]*)`\s*\|\s*(active|reserved|grandfathered)\s*\|') {
-        $domainStatus[$matches[1]] = $matches[2]
+    if (-not $sawHeader) {
+        if ($ln.Trim() -cne '| domain | status | meaning |') {
+            $vocabProblems.Add("contract.md:${lineNo}: expected the header row '| domain | status | meaning |', found: $($ln.Trim())")
+            break
+        }
+        $sawHeader = $true
+        continue
+    }
+    if (-not $sawSeparator) {
+        if ($ln.Trim() -cne '|---|---|---|') {
+            $vocabProblems.Add("contract.md:${lineNo}: expected the separator row '|---|---|---|', found: $($ln.Trim())")
+            break
+        }
+        $sawSeparator = $true
+        continue
+    }
+    if ($ln -cmatch '^\s*\|\s*`([a-z][a-z0-9_]*)`\s*\|\s*(active|reserved|grandfathered)\s*\|[^|]*\|\s*$') {
+        $dom = $matches[1]
+        if ($domainStatus.Contains($dom)) {
+            $vocabProblems.Add("contract.md:${lineNo}: domain '$dom' is listed more than once.")
+        } else {
+            $domainStatus[$dom] = $matches[2]
+        }
+    } else {
+        # The trailing [^|]* is what rejects a stray pipe inside the meaning cell: it
+        # corrupts the rendered table, so it must not parse cleanly here either.
+        $vocabProblems.Add("contract.md:${lineNo}: unrecognised vocabulary row. Expected | ``<domain>`` | active|reserved|grandfathered | <meaning with no pipe> |  --  found: $($ln.Trim())")
     }
 }
+if (-not $sawHeader -or -not $sawSeparator) {
+    $vocabProblems.Add("contract.md: the domain table under '$vocabMarker' has no header and separator row.")
+}
 if ($domainStatus.Count -eq 0) {
-    Write-Host "BUILD FAILED - action id validation:" -ForegroundColor Red
-    Write-Host "  the domain table under '$vocabMarker' in spec/contract.md parsed to zero domains." -ForegroundColor Red
-    Write-Host "  Each row must read: | ``<domain>`` | active|reserved|grandfathered | <meaning> |" -ForegroundColor Red
+    $vocabProblems.Add("contract.md: the domain table under '$vocabMarker' parsed to zero domains.")
+}
+if ($vocabProblems.Count -gt 0) {
+    Write-Host "BUILD FAILED - action id vocabulary (spec/contract.md section 7):" -ForegroundColor Red
+    $vocabProblems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
     exit 1
 }
 
@@ -428,12 +556,17 @@ $legacyIds = @(
 )
 $legacySet = @{}; $legacyIds | ForEach-Object { $legacySet[$_] = $true }
 
-# Every Sub name declared anywhere in the candidate sources, for entry-point resolution.
-$declaredSubs = @{}
+# Entry points that Core_Run can actually dispatch. Core_Run reaches a handler through
+# Application.Run, which cannot call a Private or Friend procedure - so "a Sub of that
+# name exists somewhere" is NOT the question. The question is whether a PUBLIC Sub taking
+# a single ctx argument exists. A Private Sub with the right name would sail through a
+# name-only check and fail at the button, which is the most expensive place to find it.
+# (In VBA an unqualified `Sub Foo` is Public, so both spellings count.)
+$dispatchable = @{}
 foreach ($f in $asciiCandidates) {
     foreach ($line in (Get-Content -LiteralPath $f)) {
-        $m = [regex]::Match($line, '^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Sub\s+([A-Za-z_]\w*)')
-        if ($m.Success) { $declaredSubs[$m.Groups[1].Value] = Split-Path $f -Leaf }
+        $m = [regex]::Match($line, '^\s*(?:Public\s+)?(?:Static\s+)?Sub\s+([A-Za-z_]\w*)\s*\(\s*(?:ByRef\s+|ByVal\s+)?\w+\s+As\s+Object\s*\)')
+        if ($m.Success) { $dispatchable[$m.Groups[1].Value] = Split-Path $f -Leaf }
     }
 }
 
@@ -449,7 +582,22 @@ foreach ($f in $asciiCandidates) {
     for ($i = 0; $i -lt $srcLines.Count; $i++) {
         if ($srcLines[$i] -match "^\s*'") { continue }             # commented-out example
         $m = [regex]::Match($srcLines[$i], $addActionRe)
-        if (-not $m.Success) { continue }
+        if (-not $m.Success) {
+            # A CALL to Core_AddAction that does not parse is a failure, not a skip.
+            # Otherwise a wave that wraps its arguments differently - a line continuation
+            # before the entry point, `Call Core_AddAction(...)`, a named argument -
+            # registers an action this gate never looks at, and the build goes green
+            # having checked nothing. Fail loudly and make the author either reformat the
+            # call or extend this regex deliberately.
+            #
+            # Anchored at statement position, NOT a bare substring match: Core.bas both
+            # DECLARES `Public Sub Core_AddAction(...)` and mentions the name in a
+            # trailing comment, and a substring test fails the build on each of them.
+            if ($srcLines[$i] -match '^\s*(?:Call\s+)?Core_AddAction\b') {
+                $idProblems.Add("${leaf}:$($i + 1): a Core_AddAction call this gate cannot parse. Put the id, caption and entry point as three literal strings on this line (a continuation may follow the entry point). Line: $($srcLines[$i].Trim())")
+            }
+            continue
+        }
         $id = $m.Groups[1].Value
         $entry = $m.Groups[2].Value
         $where = "${leaf}:$($i + 1)"
@@ -461,22 +609,35 @@ foreach ($f in $asciiCandidates) {
         }
 
         if (-not $legacySet.ContainsKey($id)) {
-            if ($id -notmatch $idShapeRe) {
-                $idProblems.Add("malformed action id '$id' at $where - must be exactly two segments, <domain>.<operation>, lowercase letters/digits/underscores, never camelCase.")
+            # -cnotmatch, NOT -notmatch. PowerShell's -match is case-INSENSITIVE, so a
+            # lowercase-only character class happily matches "import.combineWorksheets"
+            # and this entire check would be decorative - while the design doc's
+            # "No new id is ever camelCase" is the single rule this gate exists to
+            # enforce. Verified: 'import.combineWorksheets' -match  <shape> -> True
+            #                    'import.combineWorksheets' -cmatch <shape> -> False
+            # Do not "simplify" the c-operators away anywhere in this block.
+            if ($id -cnotmatch $idShapeRe) {
+                $idProblems.Add("malformed action id '$id' at $where - must be exactly two segments, <domain>.<operation>, each starting with a lowercase letter and continuing with lowercase letters/digits/underscores. Never camelCase.")
             }
         }
 
         $domain = if ($id -match '^([^.]+)\.') { $matches[1] } else { $id }
-        if (-not $domainStatus.ContainsKey($domain)) {
+        if (-not $domainStatus.Contains($domain)) {
             $idProblems.Add("unknown domain '$domain' in action id '$id' at $where - not in the vocabulary table in spec/contract.md section 7. Allowed: $allowed.")
         } elseif ($domainStatus[$domain] -eq 'reserved') {
             $idProblems.Add("reserved domain '$domain' in action id '$id' at $where - '$domain.*' is reserved for the engine in spec/contract.md section 7 and no package action may use it.")
+        } elseif ($domainStatus[$domain] -eq 'grandfathered' -and -not $legacySet.ContainsKey($id)) {
+            # 'grandfathered' means "these exact shipped ids are permanent", NOT "this
+            # domain is open for business". Without this branch a wave could add
+            # importexport.some_new_id and pass, which is precisely what section 7's
+            # "no new id may be added to it" forbids.
+            $idProblems.Add("new action id '$id' at $where uses the grandfathered domain '$domain'. That domain is closed: only its shipped ids are permitted, and no new id may be added to it (spec/contract.md section 7). Pick an active domain.")
         }
 
         if ($entry -eq '') {
             $idProblems.Add("action '$id' at $where declares an empty entry point.")
-        } elseif (-not $declaredSubs.ContainsKey($entry)) {
-            $idProblems.Add("action '$id' at $where names entry point '$entry', which no source file declares as a Sub. Core_Run would fail to dispatch it.")
+        } elseif (-not $dispatchable.ContainsKey($entry)) {
+            $idProblems.Add("action '$id' at $where names entry point '$entry', for which no source declares a dispatchable handler. Core_Run calls it through Application.Run, so it must be a PUBLIC (or unqualified) Sub taking one Object argument: Public Sub $entry(ctx As Object). A Private or Friend Sub, or a different signature, cannot be dispatched.")
         }
     }
 }
@@ -550,12 +711,75 @@ pwsh build/build.ps1; echo "exit=$?"
 ```
 
 Expected: `exit=1`, **two** red lines — `reserved domain 'core'` and
-`names entry point 'PkgClean_NoSuchProc', which no source file declares as a Sub`. Then
+`names entry point 'PkgClean_NoSuchProc', for which no source declares a dispatchable
+handler`. Then revert:
+
+```bash
+git checkout -- src/packages/PkgClean.bas
+```
+
+- [ ] **Step 5b: Watch it fail — camelCase, a closed domain, and a Private entry point**
+
+**Do not skip this step.** These three branches are the reason the gate exists, and each
+was silently broken in an earlier draft of this plan. The camelCase one in particular
+passed a green build until it was deliberately injected: PowerShell's `-match` is
+case-insensitive, so the lowercase-only shape check was decorative.
+
+Inject all three at once, in the same place:
+
+```vb
+    Core_AddAction reg, "import.combineWorksheets", "Injected CamelCase", "PkgClean_Injected", "Deliberate build-gate injection - revert."
+    Core_AddAction reg, "importexport.brand_new", "Injected Closed Domain", "PkgClean_Injected", "Deliberate build-gate injection - revert."
+```
+
+and add a **Private** handler with the right name and signature, which is exactly the
+shape a name-only check would wave through:
+
+```vb
+Private Sub PkgClean_Injected(ctx As Object)
+End Sub
+```
+
+```bash
+pwsh build/build.ps1; echo "exit=$?"
+```
+
+Expected: `exit=1`, and **three** distinct red lines —
+
+- `malformed action id 'import.combineWorksheets' … Never camelCase.`
+- `new action id 'importexport.brand_new' … uses the grandfathered domain 'importexport'. That domain is closed`
+- `names entry point 'PkgClean_Injected', for which no source declares a dispatchable handler`
+
+If the camelCase line is missing, a `-cnotmatch` somewhere became `-notmatch`. If the
+entry-point line is missing, the `$dispatchable` regex is matching `Private Sub`. Then
 revert:
 
 ```bash
 git checkout -- src/packages/PkgClean.bas
 ```
+
+- [ ] **Step 5c: Watch the vocabulary parser fail — malformed table**
+
+The table parser has its own failure branches, and "it parsed the good table" proves none
+of them. Inject each into `spec/contract.md` in turn, run `pwsh build/build.ps1`, confirm
+`exit=1` with the named message, then `git checkout -- spec/contract.md`:
+
+1. **Duplicate a data row** — paste a second `clean` row.
+   Expected: `domain 'clean' is listed more than once`.
+2. **Put a pipe character inside a meaning cell** — e.g. change `summarize`'s meaning to
+   `Aggregating: pivots | charts.`
+   Expected: `unrecognised vocabulary row`.
+3. **Change the header row** to `| Domain | Status | Meaning |`.
+   Expected: `expected the header row`.
+4. **Change one status** from `active` to `Active`.
+   Expected: `unrecognised vocabulary row`.
+5. **Paste a second marker line** anywhere in the file.
+   Expected: `appears 2 times … must appear exactly once`.
+
+Injections 3 and 4 only fail because the comparisons are case-sensitive (`-cne`,
+`-cmatch`). With PowerShell's default operators both parse clean and the build goes green —
+which is how a renamed header or a capitalised status would silently change what the gate
+enforces.
 
 - [ ] **Step 6: Watch it fail closed — vocabulary unreadable**
 
@@ -708,7 +932,7 @@ Public Sub PkgImport_Manifest(reg As Object)
         "import.delimited_file"
     Core_AddField reg, "k_import_qualifier", "Quote character around text", "text", """", _
         "advanced", _
-        "The character wrapping text that itself contains the separator. Type a double quote, a single quote, or the word none. Blank means none.", _
+        "The character wrapping text that itself contains the separator. Type a double quote, a single quote, or the word none. Leaving this blank means a double quote, not none - type none to turn quoting off.", _
         "import.delimited_file"
 
     Core_AddAction reg, "import.combine_worksheets", "Combine All Worksheets", "PkgImport_CombineWorksheets", _
@@ -783,7 +1007,17 @@ Public Sub PkgImport_CombineWorkbooks(ctx As Object)
     If Not PkgImport_DestUsable(destName, TITLE) Then Exit Sub
 
     folderPath = PkgImport_ResolveFolder(Core_Cfg(ctx, "k_import_folder"))
-    If Len(Dir(folderPath, vbDirectory)) = 0 Then
+    If Len(folderPath) = 0 Then
+        ' Blank config AND an unsaved workbook: there is no "this workbook's folder" yet.
+        ' Caught explicitly, because otherwise it reaches Dir() as an empty path and
+        ' surfaces as an engine error rather than the one-sentence fix it actually is.
+        MsgBox "This workbook has never been saved, so it has no folder to read from." & _
+               vbCrLf & vbCrLf & "Save it first, or set 'Folder to read workbooks from' " & _
+               "on the Setup tab." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", vbExclamation, TITLE
+        Exit Sub
+    End If
+    If Not PkgImport_FolderExists(folderPath) Then
         MsgBox "This folder was not found:" & vbCrLf & vbCrLf & "   " & folderPath & vbCrLf & vbCrLf & _
                "Check 'Folder to read workbooks from' on the Setup tab, Finalize, and run " & _
                "this again." & vbCrLf & vbCrLf & "Nothing has been changed.", vbExclamation, TITLE
@@ -841,7 +1075,7 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
     Dim dest As Worksheet, src As Worksheet, wbSrc As Workbook
     Dim one As Variant, headerMap As Object
     Dim destRow As Long, destCols As Long
-    Dim eNum As Long, eDesc As String
+    Dim errNum As Long, errDesc As String
     On Error GoTo EngineFail
 
     Set headerMap = CreateObject("Scripting.Dictionary")
@@ -862,8 +1096,12 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
             Set src = one
         End If
 
-        PkgImport_AppendSheet src, dest, headerMap, destRow, destCols
-        sourcesOut = sourcesOut + 1
+        ' Count only sources that actually contributed rows. Reporting "combined 9
+        ' sheets" when four were empty is a wrong number in the one dialog the user
+        ' reads to decide whether it worked.
+        If PkgImport_AppendSheet(src, dest, headerMap, destRow, destCols) Then
+            sourcesOut = sourcesOut + 1
+        End If
 
         If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
     Next one
@@ -872,29 +1110,42 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
     Exit Sub
 
 EngineFail:
-    eNum = Err.Number
-    eDesc = Err.Description
+    errNum = Err.Number
+    errDesc = Err.Description
     On Error Resume Next
     If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
     ' DisplayAlerts is already False under Core_SpeedOn, so this does not prompt;
     ' Core_Fail's RestoreSpeed puts it back either way.
     If Not dest Is Nothing Then dest.Delete
     On Error GoTo 0
-    Err.Raise eNum, "PkgImport_CombineEngine", eDesc
+    Err.Raise errNum, "PkgImport_CombineEngine", errDesc
 End Sub
 
 ' Append one source sheet under the growing master header.
 ' Writes ONE column block per source column rather than cell by cell - a
 ' cell-at-a-time loop over a real close file is minutes, not seconds, even
 ' with screen updating off.
-Private Sub PkgImport_AppendSheet(src As Worksheet, dest As Worksheet, headerMap As Object, _
-                                  ByRef destRow As Long, ByRef destCols As Long)
+Private Function PkgImport_AppendSheet(src As Worksheet, dest As Worksheet, headerMap As Object, _
+                                       ByRef destRow As Long, ByRef destCols As Long) As Boolean
     Dim lastR As Long, lastC As Long, c As Long, r As Long, target As Long
     Dim hdr As String, vals As Variant, colVals() As Variant
+    Dim ur As Range, seenHere As Object
 
-    lastR = Core_LastRowUp(src, 1)
-    lastC = Core_LastCol(src, 1)
-    If lastR < 2 Or lastC < 1 Then Exit Sub          ' empty, or a header with no data
+    ' Per-SOURCE header tally, not the cross-source map: two sheets each having one
+    ' "Amount" column must still align onto one destination column.
+    Set seenHere = CreateObject("Scripting.Dictionary")
+    seenHere.CompareMode = 1
+
+    ' Extent comes from the WHOLE sheet, not from column A and row 1. A source whose
+    ' first column has a gap would be truncated by End(xlUp) on column A, and a trailing
+    ' column with a blank header would be dropped by End(xlToLeft) on row 1 - silently,
+    ' and the completion dialog would still report success. UsedRange overstates on a
+    ' sheet with stray formatting; overstating costs blank rows, understating loses data.
+    Set ur = src.UsedRange
+    If ur Is Nothing Then Exit Function
+    lastR = ur.Row + ur.Rows.Count - 1
+    lastC = ur.Column + ur.Columns.Count - 1
+    If lastR < 2 Or lastC < 1 Then Exit Function     ' empty, or a header with no data
 
     vals = src.Range(src.Cells(1, 1), src.Cells(lastR, lastC)).Value
 
@@ -902,6 +1153,15 @@ Private Sub PkgImport_AppendSheet(src As Worksheet, dest As Worksheet, headerMap
     For c = 1 To lastC
         hdr = Trim(CStr(vals(1, c)))
         If Len(hdr) = 0 Then hdr = "Column " & c     ' an unnamed column still needs a home
+        ' Two columns sharing a header WITHIN one source both map to the same destination
+        ' column, so the second overwrites the first. Disambiguate rather than lose data:
+        ' the duplicate becomes its own column, named so the user can see what happened.
+        If seenHere.Exists(hdr) Then
+            seenHere(hdr) = seenHere(hdr) + 1
+            hdr = hdr & " (" & seenHere(hdr) & ")"
+        Else
+            seenHere.Add hdr, 1
+        End If
         If Not headerMap.Exists(hdr) Then
             destCols = destCols + 1
             headerMap.Add hdr, destCols
@@ -915,7 +1175,8 @@ Private Sub PkgImport_AppendSheet(src As Worksheet, dest As Worksheet, headerMap
         dest.Cells(destRow, target).Resize(lastR - 1, 1).Value = colVals
     Next c
     destRow = destRow + (lastR - 1)
-End Sub
+    PkgImport_AppendSheet = True
+End Function
 ```
 
 - [ ] **Step 5: Write the delimited-file action**
@@ -926,7 +1187,8 @@ End Sub
 '================================================================
 Public Sub PkgImport_DelimitedFile(ctx As Object)
     Dim picked As Variant, destName As String, dest As Worksheet, wbTxt As Workbook
-    Dim rowsOut As Long, colsOut As Long
+    Dim rowsOut As Long, colsOut As Long, src As Worksheet
+    Dim errNum As Long, errDesc As String
     Const TITLE As String = "Import a Delimited File"
     On Error GoTo Fail
 
@@ -947,17 +1209,44 @@ Public Sub PkgImport_DelimitedFile(ctx As Object)
     Set dest = ThisWorkbook.Worksheets.Add( _
         After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
     dest.name = destName
-    rowsOut = Core_LastRowUp(wbTxt.Worksheets(1), 1)
-    colsOut = Core_LastCol(wbTxt.Worksheets(1), 1)
-    wbTxt.Worksheets(1).UsedRange.Copy dest.Range("A1")
+    Set src = wbTxt.Worksheets(1)
+    ' Dimensions come from UsedRange, the same thing being copied. Reading them off
+    ' column A / row 1 instead would misreport any file whose first column or header
+    ' cell is empty - a correct import with a wrong number next to it.
+    rowsOut = src.UsedRange.Rows.Count
+    colsOut = src.UsedRange.Columns.Count
+    src.UsedRange.Copy dest.Range("A1")
     Application.CutCopyMode = False
     wbTxt.Close SaveChanges:=False
+    Set wbTxt = Nothing
     Core_SpeedOff
 
     Core_Done ctx, "Imported " & Core_FileName(CStr(picked)) & " into a new sheet '" & _
            destName & "'." & vbCrLf & rowsOut & " row(s), " & colsOut & " column(s).", TITLE
     Exit Sub
 Fail:
+    ' Same cleanup contract as the combines, and for the same reason: without it a
+    ' failure after OpenText leaves the source file open in a second Excel window AND a
+    ' half-written sheet in this workbook. Core_Fail restores application state only -
+    ' it knows nothing about either object.
+    '
+    ' The error is captured FIRST and re-signalled afterwards because On Error Resume
+    ' Next cleanup overwrites Err: without this, Core_Fail would report whatever the
+    ' last cleanup statement did instead of the real cause. Re-raising under a local
+    ' On Error GoTo keeps the report inside this action - the shipped contract is that
+    ' every entry point reports through Core_Fail and lets no error escape to the
+    ' dispatcher.
+    errNum = Err.Number
+    errDesc = Err.Description
+    On Error Resume Next
+    Application.CutCopyMode = False
+    If Not wbTxt Is Nothing Then wbTxt.Close SaveChanges:=False
+    If Not dest Is Nothing Then dest.Delete       ' alerts already off under Core_SpeedOn
+    On Error GoTo Report
+    Err.Clear
+    Err.Raise errNum, "PkgImport_DelimitedFile", errDesc
+    Exit Sub
+Report:
     Core_Fail ctx, "import.delimited_file", Err
 End Sub
 ```
@@ -1014,18 +1303,37 @@ End Function
 ' store. Generated button pages are "Macros 1", "Macros 2", ... so the
 ' test is a prefix, not a list.
 Private Function PkgImport_IsEngineSheet(ByVal nm As String) As Boolean
+    Dim tail As String
     Select Case LCase(Trim(nm))
         Case "setup", "setup menu", "_config", "_config_staged", "_packages", _
              "macros", "macros home"
             PkgImport_IsEngineSheet = True
-        Case Else
-            PkgImport_IsEngineSheet = (LCase(Left$(nm, 7)) = "macros ")
+            Exit Function
     End Select
+    ' Generated button pages are "Macros 1", "Macros 2", ... The contract reserves THOSE,
+    ' not the prefix: a plain Left$(nm, 7) = "macros " test also swallows a user's own
+    ' "Macros Data" sheet and silently drops it from every combine. Require a numeric
+    ' tail so only the generated names match.
+    If LCase(Left$(Trim(nm), 7)) = "macros " Then
+        tail = Trim(Mid$(Trim(nm), 8))
+        If Len(tail) > 0 Then PkgImport_IsEngineSheet = PkgImport_IsDigits(tail)
+    End If
+End Function
+
+Private Function PkgImport_IsDigits(ByVal s As String) As Boolean
+    Dim i As Long, ch As String
+    If Len(s) = 0 Then Exit Function
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If ch < "0" Or ch > "9" Then Exit Function
+    Next i
+    PkgImport_IsDigits = True
 End Function
 
 ' Blank means the folder this workbook is saved in - contract section 9's
 ' "data location", and the answer in the overwhelming majority of cases.
-' Always returns a path ending in a separator.
+' Returns a path ending in a separator, or "" when the workbook has never been
+' saved and no folder was configured (the caller reports that case by name).
 Private Function PkgImport_ResolveFolder(ByVal raw As String) As String
     Dim p As String
     p = Trim(raw)
@@ -1033,6 +1341,23 @@ Private Function PkgImport_ResolveFolder(ByVal raw As String) As String
     If Len(p) = 0 Then Exit Function                 ' workbook never saved
     If Right$(p, 1) <> Application.PathSeparator Then p = p & Application.PathSeparator
     PkgImport_ResolveFolder = p
+End Function
+
+' Folder existence, via FileSystemObject rather than Dir(path, vbDirectory).
+' Dir's behaviour with a trailing separator is not something to bet a refusal dialog
+' on, and it also returns a non-empty result for a FILE, so a path pointing at a
+' workbook would read as a valid folder. Late-bound: no reference to add, and no
+' VBIDE trust dependency (CLAUDE.md rule 3).
+Private Function PkgImport_FolderExists(ByVal folderPath As String) As Boolean
+    Dim fso As Object, p As String
+    p = folderPath
+    If Len(p) > 3 Then
+        If Right$(p, 1) = Application.PathSeparator Then p = Left$(p, Len(p) - 1)
+    End If
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso Is Nothing Then PkgImport_FolderExists = fso.FolderExists(p)
+    On Error GoTo 0
 End Function
 
 ' Every workbook in the folder except this one. Collects names FIRST and
@@ -1099,13 +1424,17 @@ Private Function PkgImport_OpenDelimited(ByVal fullPath As String, ByVal delim A
             otherCh = Left$(Trim(delim), 1)
     End Select
 
-    Select Case Trim(qual)
+    ' Blank never reaches here: Core_Cfg resolves an empty cell to the manifest default,
+    ' which is a double quote. "none" therefore has to be TYPED to be meant, and the
+    ' field's help text says so. Anything unrecognised falls back to a double quote -
+    ' the overwhelmingly common convention, and the safe guess for a stray value.
+    Select Case LCase(Trim(qual))
+        Case "none"
+            tq = xlTextQualifierNone
         Case "'"
             tq = xlTextQualifierSingleQuote
-        Case """"
-            tq = xlTextQualifierDoubleQuote
         Case Else
-            tq = xlTextQualifierNone
+            tq = xlTextQualifierDoubleQuote
     End Select
 
     Workbooks.OpenText Filename:=fullPath, DataType:=xlDelimited, TextQualifier:=tq, _
@@ -1134,10 +1463,12 @@ Expected: no diagnostics.
 - [ ] **Step 8: Confirm the three ids reached the bundle**
 
 ```bash
-grep -c 'import\.combine_worksheets\|import\.combine_workbooks\|import\.delimited_file' dist/MacrosBundle.bas
+grep -Ec '^[[:space:]]*Core_AddAction[[:space:]]+reg,[[:space:]]*"import\.(combine_worksheets|combine_workbooks|delimited_file)"' dist/MacrosBundle.bas
 ```
 
-Expected: `3`.
+Expected: `3` — three **declarations**. Do not count bare mentions of the ids: each one also
+appears in its `Core_Fail` line and in `usedBy` strings, so a plain `grep -c '"<id>"'` counts
+those too and can never distinguish a missing action from a wrapped one.
 
 - [ ] **Step 9: Commit**
 
@@ -1185,8 +1516,33 @@ Core_Coerce(v As Variant, code As String) As Variant   ' "N" -> Double, or v unc
 - [ ] **Step 1: Add the one config field to the manifest**
 
 `PkgClean_Manifest` currently opens with a comment block asserting the package declares no
-fields. That comment is load-bearing — it records why `clean_keycols` and `clean_hasheader`
-were withdrawn — so **extend it, do not replace it.** Insert immediately after the existing
+fields. Part of that comment is load-bearing — it records why `clean_keycols` and
+`clean_hasheader` were withdrawn — but the "declares NO fields" assertion is about to
+become false, and leaving it in place next to a contradicting paragraph makes the module
+argue with itself.
+
+**First, correct the stale assertion.** In the module header block at the top of the file,
+this sentence:
+
+```vb
+' As of v0.5.0 this package declares NO config fields and therefore
+' renders no band on Setup at all - it is now also the proof that a
+' package needing no configuration costs the user no Setup surface.
+```
+
+becomes:
+
+```vb
+' From v0.5.0 to v2.2.0 this package declared NO config fields and rendered
+' no band on Setup at all. v2.3.0 adds exactly one - k_clean_formats, a
+' deployment-level number-format map - so the band exists again, holding
+' that one table and nothing else. The point it used to prove still holds:
+' a package asks for Setup surface only where the answer describes the
+' DEPLOYMENT, never where it describes the range the caller just picked.
+```
+
+**Then, in `PkgClean_Manifest`, extend the withdrawal rationale rather than replacing it.**
+Insert immediately after the existing
 `' ... Do NOT reintroduce these as remembered settings.` line:
 
 ```vb
@@ -1196,14 +1552,18 @@ were withdrawn — so **extend it, do not replace it.** Insert immediately after
     ' about to pick. Its rows address columns by LETTER or by HEADER NAME, never
     ' by position within the selection; a position counted from the left of a
     ' selection that does not exist yet would be clean_keycols under a new name.
+    '
+    ' It declares NO default rows, deliberately. Core resolves an EMPTY stored table
+    ' to the field's declared defaults, so a field with demo rows can never observe
+    ' "nothing configured" - clean.standardize_formats' refusal would be unreachable
+    ' code and the gate item testing it would be impossible to execute. It also means
+    ' a first-time user cannot have mm/dd/yyyy applied to column A of a range they
+    ' picked before filling anything in. Examples live in the help text instead.
+    ' Do NOT add Core_AddDefault rows here.
     Core_AddTable reg, "k_clean_formats", "Column formats", _
         "Column (letter or header name)|Number format", "simple", _
-        "One row per column you want formatted. Left cell: a column letter like C, or the column's header text. Right cell: the format, e.g. mm/dd/yyyy or $#,##0.00.", _
+        "One row per column you want formatted. Left cell: a column letter like C, or the column's header text - a one-to-three-letter entry is always read as a letter, so a column headed exactly A or ID must be addressed by its letter. Right cell: the format, e.g. mm/dd/yyyy or $#,##0.00. Nothing happens until you fill this in.", _
         "clean.standardize_formats"
-    Core_AddDefault reg, "k_clean_formats", "A|mm/dd/yyyy"
-    Core_AddDefault reg, "k_clean_formats", "B|0"
-    Core_AddDefault reg, "k_clean_formats", "C|$#,##0.00"
-    Core_AddDefault reg, "k_clean_formats", "D|0.00%"
 ```
 
 One `Core_AddDefault` per line — never a single `Array(...)`, per the 25-continuation rule.
@@ -1343,6 +1703,7 @@ End Function
 Public Sub PkgClean_UnmergeFill(ctx As Object)
     Dim rng As Range, c As Range, seen As Object, addrs As Collection
     Dim area As Range, i As Long, v As Variant, fml As String, hadFormula As Boolean
+    Dim straddling As Long
     Const TITLE As String = "Unmerge & Fill Down"
     On Error GoTo Fail
 
@@ -1358,7 +1719,16 @@ Public Sub PkgClean_UnmergeFill(ctx As Object)
         If c.MergeCells Then
             If Not seen.Exists(c.MergeArea.Address) Then
                 seen.Add c.MergeArea.Address, 1
-                addrs.Add c.MergeArea.Address
+                ' Only blocks WHOLLY INSIDE the selection. A merge that straddles the
+                ' edge would otherwise be unmerged and overwritten outside the range the
+                ' user picked - the one thing every action here promises not to do. They
+                ' are counted and named in the report instead, so the user can widen the
+                ' selection and run it again rather than wonder why nothing happened.
+                If PkgClean_Contains(rng, rng.Parent.Range(c.MergeArea.Address)) Then
+                    addrs.Add c.MergeArea.Address
+                Else
+                    straddling = straddling + 1
+                End If
             End If
         End If
     Next c
@@ -1378,17 +1748,37 @@ Public Sub PkgClean_UnmergeFill(ctx As Object)
     Core_SpeedOff
 
     If addrs.Count = 0 Then
-        MsgBox "There are no merged cells inside " & Core_RangeRef(rng) & "." & vbCrLf & vbCrLf & _
+        MsgBox "There are no merged cells wholly inside " & Core_RangeRef(rng) & "." & _
+               vbCrLf & vbCrLf & PkgClean_StraddleNote(straddling) & vbCrLf & vbCrLf & _
                "Nothing has been changed.", vbInformation, TITLE
         Exit Sub
     End If
 
     Core_Done ctx, "Unmerged " & addrs.Count & " merged block(s) in " & Core_RangeRef(rng) & _
-           " and filled each one's value into every cell it covered.", TITLE
+           " and filled each one's value into every cell it covered." & _
+           IIf(straddling > 0, vbCrLf & vbCrLf & PkgClean_StraddleNote(straddling), ""), TITLE
     Exit Sub
 Fail:
     Core_Fail ctx, "clean.unmerge_fill", Err
 End Sub
+
+' Names the merged blocks that were left alone, and why. Returns "" when there were
+' none, so a caller can drop the sentence entirely.
+Private Function PkgClean_StraddleNote(ByVal n As Long) As String
+    If n = 0 Then Exit Function
+    PkgClean_StraddleNote = n & " merged block(s) cross the edge of your selection and " & _
+        "were left alone - unmerging one would have changed cells outside it. Select the " & _
+        "whole block and run this again."
+End Function
+
+' Is inner entirely within outer? Used to keep an edit inside the picked range.
+Private Function PkgClean_Contains(outer As Range, inner As Range) As Boolean
+    If outer.Parent.name <> inner.Parent.name Then Exit Function
+    PkgClean_Contains = (inner.Row >= outer.Row) And _
+        (inner.Row + inner.Rows.Count - 1 <= outer.Row + outer.Rows.Count - 1) And _
+        (inner.Column >= outer.Column) And _
+        (inner.Column + inner.Columns.Count - 1 <= outer.Column + outer.Columns.Count - 1)
+End Function
 ```
 
 - [ ] **Step 4: Write `clean.standardize_formats`**
@@ -1554,10 +1944,11 @@ pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 Expected: exit 0, `Core + 3 package(s)`, balanced counts, no diagnostics.
 
 ```bash
-grep -c 'clean\.remove_blanks\|clean\.unmerge_fill\|clean\.standardize_formats\|clean\.text_to_numbers' dist/MacrosBundle.bas
+grep -Ec '^[[:space:]]*Core_AddAction[[:space:]]+reg,[[:space:]]*"clean\.(remove_blanks|unmerge_fill|standardize_formats|text_to_numbers)"' dist/MacrosBundle.bas
 ```
 
-Expected: `4`.
+Expected: `4` — four **declarations**, for the same reason as Task 3 Step 8: every id also
+appears in its `Core_Fail` line, so counting mentions counts the wrong thing.
 
 - [ ] **Step 7: Commit**
 
@@ -1578,16 +1969,25 @@ or checked that `SCHEMA_VER` survived.
 
 - [ ] **Step 1: Every frozen id, exactly as §3.4 froze it**
 
+Count **declarations**, not mentions. Each id appears at least twice in the bundle — once in
+its `Core_AddAction` line and again in its `Core_Fail` line — and several appear in `usedBy`
+strings and comments too, so a bare `grep -c '"<id>"'` can never print `1` and is not a test
+of anything:
+
 ```bash
 for id in import.combine_worksheets import.combine_workbooks import.delimited_file \
           clean.remove_blanks clean.unmerge_fill clean.standardize_formats clean.text_to_numbers; do
-  printf '%-32s %s\n' "$id" "$(grep -c "\"$id\"" dist/MacrosBundle.bas)"
+  printf '%-32s decl=%s  mentions=%s\n' "$id" \
+    "$(grep -Ec "^[[:space:]]*Core_AddAction[[:space:]]+reg,[[:space:]]*\"$id\"" dist/MacrosBundle.bas)" \
+    "$(grep -c "\"$id\"" dist/MacrosBundle.bas)"
 done
 ```
 
-Expected: every line prints `1`. A `0` means an id was mistyped; a `2` means it was declared
-twice and the Task 2 gate should already have caught it — investigate the gate, not just the
-id.
+Expected: `decl=1` on every line. `mentions` is printed for information only and will be 2
+or more. A `decl=0` means the id was mistyped or the `Core_AddAction` line is wrapped
+differently — and in that second case Task 2's gate should already have failed the build,
+so investigate the gate too. A `decl=2` means it was declared twice, which the gate should
+also have caught.
 
 - [ ] **Step 2: `SCHEMA_VER` did not move**
 
@@ -1649,8 +2049,10 @@ executing any action.
 
 ```vb
 ' Every action id this build should expose. The seven W1 ids plus the eight
-' shipped before them - contract section 8. One Add per line: the 25-continuation
-' rule, and a 15-element Array(...) would breach it.
+' shipped before them - contract section 8. One Add per line, matching how Core's
+' own CoreCandidates is written: a 15-element Array(...) would fit inside VBA's
+' 25-continuation limit, but a one-per-line list diffs cleanly when a wave adds
+' an id, which is the whole reason this list exists.
 Private Function ExpectedIds() As Collection
     Dim c As New Collection
     c.Add "importexport.clear"
@@ -1771,18 +2173,58 @@ Cover, at minimum:
    destination sheet is left behind**.
 8. **`clean.remove_blanks`' held-back count** — select a range whose blank rows carry data
    outside the selection, and confirm those rows are reported as held back and survive.
+9. **`import.delimited_file`'s destination collision** — import the same file twice.
+   The second run must refuse by name and create nothing.
+10. **`clean.standardize_formats` with an unmatched row** — configure a row naming a
+    column that is not in the picked range, and confirm it is reported by name rather
+    than silently skipped.
+11. **`clean.standardize_formats` with an empty table** — clear every row, Finalize, run.
+    It must refuse and say where to configure the map. *(This item is only executable
+    because `k_clean_formats` declares no default rows — see Task 4 Step 1. If it turns
+    out the table repopulates itself, that decision was reverted and this item is the
+    one that catches it.)*
+12. **Engine-sheet exclusion** — create a user sheet named `Macros Data`, run
+    `import.combine_worksheets`, and confirm its rows appear in the result. A generated
+    `Macros 1` page must not.
+13. **Header realignment across sources** — give two sheets the same headers in a
+    *different column order* and confirm the values land under the right headers, not by
+    position. Then give one source a duplicate header and confirm the second becomes its
+    own `<header> (2)` column rather than overwriting the first.
+14. **Formula preservation after unmerge** — merge a block whose anchor holds a formula,
+    unmerge it, and confirm the anchor still shows the formula in the formula bar while
+    the covered cells hold its computed value.
+15. **A merge straddling the selection edge** — confirm it is left alone and reported.
+16. **Application state after an induced failure, for each action that can fail.** Before
+    the run, note `Application.Calculation`, `.DisplayAlerts`, `.EnableEvents`,
+    `.ScreenUpdating` (Ctrl+G in the VBE, `?Application.Calculation` etc.). Induce the
+    failure, dismiss the error, and confirm all four are back. Excel left with
+    `Calculation = xlCalculationManual` is the failure mode that gets blamed on the next
+    macro to run, not on this one.
 
-**Mark these as assumptions**, since each is a claim about Excel rather than about this code,
-and none has been executed:
+**Mark these as assumptions**, since each is a claim about Excel rather than about this
+code, and none has been executed here:
 
-- `Application.GetOpenFilename` returns Boolean `False` on Cancel (the plan's cancel test).
+- `Application.GetOpenFilename` returns Boolean `False` on Cancel.
 - `Workbooks.OpenText` leaves the opened file as `ActiveWorkbook`, which
   `PkgImport_OpenDelimited` returns.
 - `Workbooks.OpenText`'s `Local:=True` coexists with an explicit `TextQualifier`.
 - `Application.CountA` accepts a whole-row/whole-column `Range` without an overflow.
 - `Range.UnMerge` leaves the anchor's value and formula intact and the covered cells empty.
-- `dest.Delete` inside the engine's error handler does not prompt, because `Core_SpeedOn`
-  already set `DisplayAlerts = False`.
+- `dest.Delete` inside an error handler does not prompt, because `Core_SpeedOn` already
+  set `DisplayAlerts = False`.
+- **A `vbYesNo` MsgBox's title-bar X returns `vbNo`.** `clean.remove_blanks` relies on
+  this: its `vbNo` is the safe answer, so an X that returned something else would still
+  be safe — but the claim is stated in a code comment and should be checked once.
+- **A macro's row/column deletion cannot be undone with Ctrl+Z.** The confirm dialog tells
+  the user this; if it is wrong, the dialog is lying.
+- **`Scripting.FileSystemObject` is available** (used for the folder check) — it is on
+  stock Windows Excel, but a locked-down build could block it. `PkgImport_FolderExists`
+  degrades to `False`, which shows as "folder not found" rather than a crash.
+- **`Workbooks.Open` on a `.csv` applies the machine's list separator**, which is the
+  stated reason `import.delimited_file` uses `OpenText` instead. The reasoning holds
+  regardless, but the claim is asserted in a comment.
+- **The sheet-name character rules** hardcoded in `PkgImport_DestUsable`
+  (`: \ / ? * [ ]`, 31 characters) match Excel's own.
 
 - [ ] **Step 4: Blind dry-run — required before the checklist reaches the owner**
 
@@ -1839,6 +2281,23 @@ git status --short
 
 Expected: build exit 0 with `Core + 3 package(s)`; no diagnostics; `1`; one match; and a tree
 clean but for the untracked `.vscode/`.
+
+- [ ] **Step 3b: Hand the gate to the owner and wait**
+
+Nothing in Tasks 1–6 puts the built bundle in front of the person who has to run it. Build
+the bundle, tell the owner it is ready, and give them the checklist path and the
+remove-the-old-module-first warning.
+
+**The wave's own protocol (design doc §3.5) is "click every action, every cancel path, and
+every error-restore path".** Every item that protocol names should be run. The exit
+criterion permits an item to be *"explicitly recorded as untested"* — that allowance exists
+for items needing a second hostile build or a machine this session cannot reach, and it is
+the owner's call to invoke, not this session's default. Do not tick an item nobody ran, and
+do not quietly widen "untested" to cover items that were simply skipped.
+
+Track-1 precedent, so the risk is concrete: 8 of its 15 gate items are still unrun, which
+is why `reskin 4` — the likeliest real finding in that whole wave — remains undiscovered
+months later.
 
 - [ ] **Step 4: Open one PR against `main`**
 
