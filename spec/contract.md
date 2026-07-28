@@ -1,7 +1,7 @@
 # SheetForge portable contract
 
-**Contract version: 1.2.0** (2026-07-24) · SemVer, independent of the
-repo `VERSION` and of per-package versions.
+**Contract version: 2.1.0** (2026-07-27) · SemVer, independent of the
+repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
 and action contract. The Excel/VBA build (`src/core/Core.bas` + `src/packages/`)
@@ -126,6 +126,12 @@ Notes:
 - Import **column-type codes** (`T`/`N`/`D`/`DT`/`B`/`G`) are a *data format
   inside* the `importexport` package's `k_import` table (§8), **not** field
   kinds. They are defined where that field is defined.
+- **Disclosure (v2.1.0).** A field whose actions are all `off` is relegated, and a
+  platform MAY present relegation as a collapsed band or as hidden-in-place. **Omitting
+  the field entirely remains non-conforming** either way: the engine re-seeds its
+  authoring surface from stored config, so an omitted field costs the user a
+  toggle → activate → rebuild → fill → activate cycle and discards anything typed but
+  not yet activated.
 
 ---
 
@@ -237,8 +243,13 @@ to it. Proceeding without that confirmation remains non-conforming.
 **Absent is not invalid.** An attribute or column introduced after the stored
 marker's version (for example `availability`, §6, in a store marked pre-v1.2.0)
 simply does not exist in that store — there is no value to validate, so its
-absence is not a conflict, and the reader takes the documented default (`button`
-for `availability`). Fail-closed applies only to a value that IS present but
+absence is not a conflict, and the reader takes the **pinned legacy default**, which
+for `availability` is `button` — fixed at this value as of v2.1.0 and deliberately
+NOT a reference to §6's current default. §6's default moved to `off` in v2.1.0; this
+one did not move with it, because a store written before the column existed described
+a deployment in which every action was live, and reading it as `off` would silently
+remove every button from a working installation. A reader MUST treat these as two
+independent values. Fail-closed applies only to a value that IS present but
 unreadable or fails its grammar, and to a marker the reader does not recognise at
 all — never to a column this document added after the store was last written.
 This is what lets §10 promise that v1.0.0/v1.1.0 configs remain valid.
@@ -255,7 +266,7 @@ An action is one thing a package *does* (it becomes a button). Each action is:
 | `caption` | Button label (may carry an ordinal, e.g. `"2.  Import Source Data"`). |
 | `help` | Plain-language description shown on/near the button. |
 | `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on an index surface where a platform provides one (§6), and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
-| `availability` | Deployment config, not manifest data (v1.2.0): one of `button`, `chains-only`, `off`. Defaults to `button`. |
+| `availability` | Deployment config, not manifest data (v1.2.0): one of `button`, `chains-only`, `off`. **Defaults to `off` (v2.1.0)** — an action arrives switched off and is turned on deliberately. This changes no stored value's meaning: a stored `button` still reads as `button`. The default applies only where nothing was ever stored. For the pre-v1.2.0 legacy case the default is pinned separately and does NOT follow this row — see §5. |
 | `semantics` | **Normative** description of the action's behavior (§8). This is what every platform reproduces. |
 
 **Handler binding is platform-specific and NOT part of the portable contract.**
@@ -380,12 +391,14 @@ into this v1.2.0 freeze rather than bumping the contract version.
 
 **Per-action availability (v1.2.0):** each action carries a deployment-level
 `availability`, authored on the same engine-owned surface as the placement code
-(§5). It has exactly three values and defaults to `button`, so a deployment that
-predates v1.2.0 is unchanged.
+(§5). It has exactly three values. It defaulted to `button` at v1.2.0, so a
+deployment that predates v1.2.0 was unchanged by its introduction; **as of v2.1.0
+the default is `off`**, and the pre-v1.2.0 case keeps `button` through §5's pinned
+legacy default rather than through this one.
 
 | Value | Button drawn | Runnable directly | Runnable as a chain step |
 |---|---|---|---|
-| `button` (default) | yes | yes | yes |
+| `button` | yes | yes | yes |
 | `chains-only` | no | **no** | yes |
 | `off` | no | **no** | **no** |
 
@@ -401,8 +414,14 @@ predates v1.2.0 is unchanged.
   never becomes undiscoverable. Only `off` relegates that action's fields (§2).
 - **An unrecognised value MUST block Finalize** and report the accepted values. It
   MUST NOT fall back to `button` — a user who typed `of` meaning `off` would
-  otherwise be handed a live destructive button. A **blank** cell is not
-  unrecognised: it means "never set" and reads as `button`.
+  otherwise be handed a live destructive button.
+- **A blank cell MUST block Finalize too (v2.1.0).** It previously read as `button`,
+  which was coherent while `button` was the default. With the default at `off`
+  (§6) neither reading is safe: `button` resurrects an action the user switched
+  off, `off` removes one they still want, and the choice is invisible in the
+  result. A blank cell is therefore not an answer, and a reader MUST NOT resolve it
+  to any token. **This is the cell being blank, not the column being absent** — an
+  absent column is §5's legacy case and still reads as `button`.
 - **Portability note:** the reference implementation presents the three values as a
   validated dropdown on the authoring grid. A platform without cell validation
   still parses the same three tokens and still blocks on anything else.
@@ -501,6 +520,10 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
   shared config namespace). Namespace by convention (`k_*`, `clean_*`).
 - **Action id** — `pkg.verb`, unique.
 - **Reserved:** the id namespace `chain.*` is reserved for engine chains; no package action id may use it.
+- **Reserved (v2.1.0):** the action-id namespace `core.*` is reserved for engine-internal
+  sentinels; no package action id may use it. The reference implementation uses
+  `core.legacy` as a provenance flag inside the in-memory availability map, so an id
+  colliding with it would be read as engine state rather than as an action.
 - **Reserved:** the display category `Chains` (engine-generated, holds chain
   buttons) and, in the Excel reference implementation, the sheet name
   `Macros Home`. A platform substitutes its own index surface name. The name
@@ -664,6 +687,21 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.1.0 (additive):** `availability` defaults to `off` (§6); the pre-v1.2.0 legacy
+  default is pinned to `button` independently (§5); reserves the `core.*` action-id
+  namespace (§7); restates relegation presentation for disclosure (§3). **Additive, not
+  breaking, by the two-axes rule above:** no stored value is reinterpreted — a stored
+  `button` still means `button` — because a default applies only where nothing was
+  stored. The stored-format marker does NOT move; `SCHEMA_VER` stays `"v2.0"` and every
+  v0.5.0 config remains readable.
+  **The one judgement call in that classification:** a **blank** `availability` cell
+  used to read as `button` and now blocks Finalize (§6), which by the letter is
+  reinterpreting a stored value. It is classed additive because **no conforming writer
+  has ever emitted one** — an implementation writes the label for a resolved token on
+  every render, and all three tokens have non-empty labels. A blank cell can therefore
+  only arrive by hand-editing the authoring surface, which is unvalidated input under
+  §5's fail-closed rules rather than stored configuration. If a port has ever written
+  a blank cell, this change IS breaking for that port and it must migrate them first.
 - **v2.0.0 (BREAKING):** withdraws the `clean_keycols` and `clean_hasheader` fields
   and changes `clean.dupes` to take both as run-time inputs (§8); adds §8's normative
   selection-vs-deployment rule and §2's no-visible-fields-no-band rule. Removing a

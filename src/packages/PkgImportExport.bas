@@ -26,16 +26,20 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     ' ---- GENERAL ----
     Core_AddSection reg, "GENERAL"
     Core_AddField reg, "k_export_base", "Name for the exported file (a date is added in front)", "text", "My Report", _
-        help:="The saved file will be named like:  2026-01-15 <this text>.xlsx"
+        help:="The saved file will be named like:  2026-01-15 <this text>.xlsx", _
+        usedBy:="importexport.export"
     Core_AddField reg, "k_settings_sheet", "Settings / thresholds sheet name", "sheet", "README", "advanced", _
-        "The hidden sheet whose cells drive the conditional-formatting thresholds; it is kept (hidden) inside the export so the colors still work."
+        "The hidden sheet whose cells drive the conditional-formatting thresholds; it is kept (hidden) inside the export so the colors still work.", _
+        usedBy:="importexport.export"
     Core_AddField reg, "k_export_offset", "Date shift for the export file name (days)", "int", "-1", "advanced", _
-        "How many days to shift the date put in front of the file name.  -1 = yesterday, 0 = today, 1 = tomorrow."
+        "How many days to shift the date put in front of the file name.  -1 = yesterday, 0 = today, 1 = tomorrow.", _
+        usedBy:="importexport.export"
 
     ' ---- EXPORT TABS ----
     Core_AddSection reg, "EXPORT TABS"
     Core_AddList reg, "k_export_tabs", "Tabs to include in the export (one per row, in order)", "Tab name", _
-        help:="Each finished tab to copy into the exported .xlsx, top to bottom in this order."
+        help:="Each finished tab to copy into the exported .xlsx, top to bottom in this order.", _
+        usedBy:="importexport.export"
     Core_AddDefault reg, "k_export_tabs", "Summary"
     Core_AddDefault reg, "k_export_tabs", "Details"
     Core_AddDefault reg, "k_export_tabs", "Trends"
@@ -45,7 +49,8 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     ' ---- IMPORT FILES ----
     Core_AddSection reg, "IMPORT FILES"
     Core_AddTable reg, "k_import", "Import files (one row per input tab)", "Input tab (in this workbook)|Source file (name starts with...)|Column types", _
-        help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, codes, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them."
+        help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, codes, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them.", _
+        usedBy:="importexport.clear, importexport.import, importexport.suggestTypes"
     Core_AddDefault reg, "k_import", "IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_Data2|Source File B|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_Data3|Source File C|T,T,T,T,T,T,T,N,N,N,N"
@@ -54,13 +59,17 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     ' ---- REF_MASTER ----
     Core_AddSection reg, "REF_MASTER"
     Core_AddField reg, "k_master_prefix", "Master-list file (name starts with...)", "file", "Master List Import", _
-        help:="The newest file in THIS workbook's folder whose name starts with this text; used to refresh the destination tab below. A trailing (1) or (2) is ignored."
+        help:="The newest file in THIS workbook's folder whose name starts with this text; used to refresh the destination tab below. A trailing (1) or (2) is ignored.", _
+        usedBy:="importexport.updateMaster"
     Core_AddField reg, "k_master_dest", "Destination tab (in this workbook)", "sheet", "Ref_Master", _
-        help:="The tab in THIS workbook that the master list is written into."
+        help:="The tab in THIS workbook that the master list is written into.", _
+        usedBy:="importexport.updateMaster"
     Core_AddField reg, "k_master_sheet", "Sheet name inside the master file", "text", "Current Master", "advanced", _
-        "The worksheet name to read from inside the master-list file."
+        "The worksheet name to read from inside the master-list file.", _
+        usedBy:="importexport.updateMaster"
     Core_AddList reg, "k_master_cols", "Columns to copy from the master file (in order)", "Column header", _
-        help:="The exact column headers to pull from the master file, in order. The FIRST one is the key column and is always kept as text. Replace these with the exact headers from your own master file."
+        help:="The exact column headers to pull from the master file, in order. The FIRST one is the key column and is always kept as text. Replace these with the exact headers from your own master file.", _
+        usedBy:="importexport.updateMaster"
     Core_AddDefault reg, "k_master_cols", "Store ID"
     Core_AddDefault reg, "k_master_cols", "Location Name or Address"
     Core_AddDefault reg, "k_master_cols", "Entity ID"
