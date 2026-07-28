@@ -566,8 +566,9 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
   design: an alias means two permanent names for one action and would have to be ported to
   Apps Script.
 
-  **The vocabulary is the table below, and it is normative.** The marker comment
-  immediately above it is a parse anchor — `build/build.ps1` reads the table from this file
+  **The vocabulary is the table below, and it is normative.** The marker comment appears on
+  its own line above it — a blank line may separate the two — and is a parse anchor:
+  `build/build.ps1` reads the table from this file
   and fails a build whose action ids use a domain that is not listed `active` or
   `grandfathered`. Do not reformat the table, rename its columns, or remove the marker
   without changing that parser in the same commit.
