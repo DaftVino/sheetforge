@@ -1,101 +1,143 @@
 # Next session — paste this into a fresh chat
 
-> Delete this file once Part A execution is underway; it is a launch pad, not a document.
+> Delete this file once W1 is underway; it is a launch pad, not a document.
 
 ## Start here
 
-Run `/orient` before anything else, including clarifying questions. Then execute
-`docs/designs/2026-07-27-part-a-implementation-plan.md` task by task using
-`superpowers:subagent-driven-development`, dispatching the mechanical work to codex via
-`/codex` — luna and terra for lighter tasks, sol for heavier ones. Opus reviews every
-task before it is committed, and **Opus implements Tasks 1 and 3 itself**: they touch the
-contract and `_Config`, which the owner reserves for Opus. Task 4 is mechanical and is the
-best candidate to hand to codex outright.
+Run `/orient` before anything else, including clarifying questions. Then build
+**W1 — the ingest→clean wave, 7 actions.** Its scope, its seven action ids and its
+module assignments are frozen in §3.4 of the phase contract and were approved by the
+owner on 2026-07-28. Do not re-plan the wave and do not brainstorm.
 
-The plan is written, reviewed and approved. Do not re-plan it, do not re-open its
-decisions, and do not brainstorm — start at Task 1.
+Build in this order, because the first two items are what make the other five safe
+to write:
+
+1. **Contract v2.3.0** — add the nine-domain vocabulary table to §7 (`import` ·
+   `clean` · `validate` · `enrich` · `format` · `summarize` · `export` ·
+   `workbook` · `backup`; reserved `chain.*` and `core.*`; grandfathered
+   `importexport.*`) and the seven new ids to §8. **§7 has no vocabulary table
+   today** — the design assumes one exists and it does not.
+2. **`build.ps1` id enforcement** — extract literal `Core_AddAction` ids, fail on
+   duplicates and on any domain absent from that table.
+3. **`src/packages/PkgImport.bas`** (new) — `import.combine_worksheets`,
+   `import.combine_workbooks`, `import.delimited_file`. The two combines share one
+   private `PkgImport_CombineEngine`.
+4. **`src/packages/PkgClean.bas`** (+4) — `clean.remove_blanks`,
+   `clean.unmerge_fill`, `clean.standardize_formats`, `clean.text_to_numbers`. The
+   last calls the existing `Core_Coerce`; do not reimplement coercion.
+5. **Manual gate + `tools/GateAudit.bas` extension** — the manifest-shaped checks
+   (every action has a manifest entry, an entry point and a valid domain) automate
+   the way the colour checks did. Only click-every-button stays manual.
 
 ## Read first
 
 Read nothing else until you have these, in order:
 
-1. `docs/designs/2026-07-27-part-a-implementation-plan.md` (27.6K) — the phase contract:
-   five tasks with the exact VBA for every step, plus the adapted verification cycle
-   (TDD is off here, so it is build → syntax-check → commit, never a test suite).
-2. `docs/adr/0003-availability-default-and-legacy-migration.md` (6.5K) — the binding
-   decisions, including why three unanimous panel resolutions were NOT adopted. Read
-   before touching any default.
-3. `spec/contract.md` (46.1K) — **over the slice threshold; never read front to back.**
-   Task 1 edits four sections: grep for `## 5.`, `## 6.`, `## 7.`, `## 10.` and read only
-   the lines around each anchor. The `availability` row is at roughly line 258 and §5's
-   "Absent is not invalid" paragraph at roughly 237-244.
-4. `docs/designs/2026-07-27-part-b-manual-gate.md` (15.6K) — the precedent Task 5's gate
-   must match: every item names the workbook, the click path and the exact expected
-   string. It also carries the recipe for rebuilding the v0.3.0 and v0.4.0 fixture
-   bundles, which Task 5 Step 1 needs.
+1. `docs/designs/2026-07-24-finish-excel-design.md` (22.1K) — the phase contract.
+   §3 is the whole track-2 spec and §3.4 is W1's frozen action table. Its
+   `## 5. Handoff log` carries the do-not-revert list and the empirical findings
+   that cost round trips last session — read the 2026-07-28 entry in full.
+2. `docs/macro-catalog-plug-and-play.md` (16.3K) — the authoritative build queue,
+   with a per-item verdict. Confirms which library snippets are W1 and which are
+   Deferred, Declined or unassigned.
+3. `docs/macro_code_library.md` (30.8K) — the owner's reference implementation, 49
+   snippets; §1 and §2 cover W1. **These are test scaffolding, not package code**:
+   `ActiveSheet`/`Selection`, hardcoded paths marked `' <-- set`, no speed wrapper,
+   no error handler, none runtime-tested. Converting one is most of the work.
+4. `spec/contract.md` (54.1K) — **over the slice threshold; never read front to
+   back.** Grep for `## 7.` (naming rules, where the vocabulary table goes) and
+   `## 8.` (frozen registry, where the seven ids go). Currently v2.2.0.
+5. `build/build.ps1` (16.6K) — gains the id checks. Read its existing
+   duplicate-procedure and block-balance checks first and match their shape and
+   their failure output.
+6. `src/packages/PkgClean.bas` (11.0K) — the package pattern to copy for
+   `PkgImport.bas`, and the file W1 extends by four actions.
 
 ## Branch
 
-`feat/progressive-disclosure-part-a` — rebased onto `main`, four commits, **docs only, no
-VBA changed yet**. It carries the spec, ADR 0003, the panel record and the plan. Stay on
-it for all five tasks and open one PR from it at the end. Do not branch again from `main`;
-Part B already landed and this branch is current with it.
+`main` — at v0.9.0 / contract v2.2.0, clean, with all of track 1 merged. Create a
+new branch for W1 off `main`: `git checkout -b feat/w1-ingest-clean`. Do **not**
+branch from
+`feat/sheetforge-identity`, `feat/action-catalog-first` or
+`fix/core-hardening-and-checklist-gate`; all three are merged and stale.
+
+Open **one PR against `main`**. Do not stack PRs this time: last session stacked
+three, merged them back-to-back, beat GitHub's retarget, and stranded 11 commits on
+base branches that had already merged. #18 exists only to undo that.
 
 ## Constraints
 
-- **TDD is formally off** (`CLAUDE.md`). Excel has no headless runner. Do not propose or
-  write a test suite; the gates are the build, the syntax checker, and the owner's manual
-  run.
-- **Contract §5 must pin `button` literally** (Task 1 Step 2). §5 currently defers to "the
-  documented default", and the moment §6's default becomes `off` that sentence silently
-  flips the legacy path and strips every button from a v0.3.0 deployment. This is the
-  single most important step in the plan; Task 5's gate item 2 is its regression test.
-- **`SCHEMA_VER` must stay `"v2.0"`.** ADR 0003 keeps it deliberately so v0.5.0 configs
-  remain readable. If a build ever reports `"v3.0"`, something is wrong.
-- **Never read `src/core/Core.bas` whole** (210K) and never read an `.xlsm`. Grep
-  `docs/code-map.md` for a symbol, then read only the slice around the anchor.
-- **Do not reintroduce `clean_keycols` or `clean_hasheader`.** Asking every time is the
-  feature, and it is now a normative rule in contract §8.
-- **`AvailLabel`'s `Case Else` fails closed, it does not flip to `Off`.** It is a live bug
-  (issue #10), not a cosmetic choice — the value round-trips into stored config. Task 2
-  fixes it, and must land before Task 3.
-- **Gate fixtures are rebuilt, never reused.** Workbook C was consumed by the Part B gate;
-  reusing it would pass a legacy test vacuously.
-- **No attribution footers** in any commit message or PR body.
+- **`SCHEMA_VER` stays `"v2.0"`.** W1 adds actions; it reinterprets no stored
+  value. If a build ever reports `v3.0`, something is wrong.
+- **Action ids are immutable, two-segment `<domain>.<operation>`, never camelCase,
+  and there is no alias table** — by design, since an alias means two permanent
+  names for one action and would have to be ported to Apps Script. A wrong id is
+  unfixable, which is why enforcement lands before the actions.
+- **The domain is a user-facing vocabulary, NOT the module.** `import.*` actions
+  live in `PkgImport` while `importexport.import` stays where it is, and both merge
+  onto one Home card via `category:=`.
+- **`Core_AddAction` already takes `category:=`** — shipped in track 1. Do not
+  re-add it.
+- **Do not revert anything in the handoff log's do-not-revert list.** In
+  particular: `ClearCatalogBlock` clears row by row and skips merged rows (a
+  blanket `Range.ClearContents` over D:E partially clears a `TintRow` B:E merge and
+  raises `1004`); `CfgSheet` adopts an orphaned `_Config_staged`; and the identity
+  palette is five `Private Function`s placed after every module-level declaration.
+- **Never read `src/core/Core.bas` whole** (229.3K) and never read an `.xlsm`. Grep
+  `docs/code-map.md` (29.3K, current at `8886fa8`) for a symbol, then read only
+  that slice.
+- **TDD is off** (`CLAUDE.md`) — there is no VBA runner and you must not propose a
+  test suite. The gates are `build.ps1`, `scripts/vba-syntax-check.mjs`, and the
+  owner running the imported bundle.
+- **Every new manual checklist passes a blind dry-run before it reaches the
+  owner** — a subagent holding the checklist and the built bundle, forbidden from
+  reading `src/`. Know its limit, learned the hard way: it reads VBA, it does not
+  execute it, so it catches authoring defects and no runtime defects at all.
+- Every action wraps its work in the speed pattern with guaranteed restore in the
+  error handler; shared helpers live only in Core; no attribution footers in any
+  commit message or PR body.
 
 ## Exit criteria
 
-- `pwsh build/build.ps1` exits 0 reporting `Core + 2 package(s)` with balanced Sub and
-  Function counts
+- `pwsh build/build.ps1` exits 0 reporting `Core + 3 package(s)` with balanced Sub
+  and Function counts
 - `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` reports no diagnostics
-- `grep -n 'SCHEMA_VER     As String' dist/MacrosBundle.bas` still shows `"v2.0"`
-- `spec/contract.md` records v2.1.0 in §10, with §5 pinning `button` for the legacy case
-  independently of §6
-- Every checkbox in `docs/designs/2026-07-27-part-a-manual-gate.md` is either ticked
-  against a real run or explicitly recorded as untested — never ticked unrun
-- `VERSION` contains `0.6.0` and `CHANGELOG.md` carries a dated `## [0.6.0]` heading
-- A PR exists from `feat/progressive-disclosure-part-a` whose body closes #6 and #10 and
-  carries the completed gate table
+- `pwsh build/build.ps1` fails with a named error when a duplicate
+  `Core_AddAction` id or an off-vocabulary domain is deliberately injected, and
+  passes again once reverted
+- `grep -c 'SCHEMA_VER *As String = "v2.0"' dist/MacrosBundle.bas` prints `1`
+- `spec/contract.md` records **v2.3.0**, with the nine-domain vocabulary table in
+  §7 and all seven new ids in §8
+- All seven W1 ids appear in `dist/MacrosBundle.bas` exactly as frozen in §3.4:
+  `import.combine_worksheets`, `import.combine_workbooks`, `import.delimited_file`,
+  `clean.remove_blanks`, `clean.unmerge_fill`, `clean.standardize_formats`,
+  `clean.text_to_numbers`
+- A W1 manual gate exists under `docs/designs/`, has passed a blind dry-run, and
+  every item is either ticked against a real run or explicitly recorded as untested
 
 ## Unknowns and risks
 
-- `.vscode/` is untracked and unrelated to this work. It has been left alone deliberately
-  across several sessions; it is not an oversight and should not be committed or removed.
-- Issue #8 is open and out of scope: `Core_FinalizeSetup`'s activate is delete-then-copy,
-  so there is a window in which the workbook has no `_Config` at all. Part A adds Finalize
-  cycles during gating but does not touch that path. Do not fix it here.
-- Issue #11 (the palette reskin) is deferred until everything else is done. The logo stays
-  out of the build — a `.bas` cannot carry a PNG. Do not fold it into this work.
-- Nothing in Part A has been run in Excel. All five tasks are unverified behaviourally
-  until the owner runs Task 5's gate; the structural gates cannot see a dialog or a
-  rendered band.
-- Task 5 gate item 7 exercises the empty-band guard's second direction for the first time
-  ever. It was untestable before Task 4 wired `usedBy`, so it has no prior passing run to
-  compare against — a failure there may be a genuine Core bug rather than a Part A
-  regression.
-- The `usedBy` mapping in Task 4 was derived from each action's `Core_Cfg` calls, but a
-  typo in a `usedBy` id is silent by design (`FieldInUse` treats an unknown id as in-use).
-  Task 4 Step 5's two greps are the only check; do not skip them.
-- Leftover SDD files remain under `.superpowers/sdd/`. The directory is gitignored and two
-  delete attempts were refused by the permission classifier, so the owner should remove it
-  by hand. Nothing depends on it.
+- **8 of 15 track-1 gate items are still unrun, and all need the owner:** hardening
+  1.3, 2.2, 3.1, 4.1, 4.2; reorder 2 (clipping half) and 3; reskin 4 (dark Excel
+  theme). Both load-bearing items — #8 crash recovery and #12 fail-closed — passed.
+  Reskin 4 is the likeliest real finding: the palette came off a dark-background
+  proof and lands on an explicitly white sheet, and nothing has checked the two
+  together. `tools/GateAudit.bas` re-runs six mechanical checks in one click.
+- **`.vscode/` is untracked and left alone deliberately** across many sessions. It
+  is not an oversight; do not commit or remove it.
+- **`.superpowers/sdd/` still needs deleting by hand.** The permission classifier
+  refused twice. Nothing depends on it.
+- **The 34-vs-36 action count is unreconciled.** §3.6 says W1–W6 assign 34 items
+  producing 35 actions; grepping the catalog for wave tags yields 36. Worth
+  resolving before W2; not urgent for W1, whose seven are unambiguous.
+- **Three W1 items have no owner-facing config story yet.**
+  `import.delimited_file`, `clean.standardize_formats` and both combines carry
+  hardcoded paths, sheet names or format strings in the library. Which become
+  manifest fields, and with what defaults, is a real design decision this wave has
+  to make and the design doc does not settle it.
+- **`clean.remove_blanks` is destructive with no preview**, and the catalog defers
+  sibling items for exactly that reason. It is assigned to W1 anyway. Confirm with
+  the owner whether it needs a confirmation prompt before shipping, or whether
+  row-deletion bounded to the used range is considered safe enough.
+- **No W1 code exists.** The wave is approved and ordered but unstarted, so nothing
+  in it has been compiled or run in Excel.
