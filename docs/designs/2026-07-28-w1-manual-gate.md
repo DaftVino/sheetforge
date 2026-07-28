@@ -115,17 +115,32 @@ leave it blank to use this workbook's own folder.
   generic "Action failed" engine error.
   *Why:* a wrong path in a config cell is an ordinary user mistake and should read as one.
 
-- [ ] **2.3 — ⚠️ Have a colleague (or a second Excel window) hold one source workbook OPEN,
-  then run it.**
-  Record exactly what happens.
+- [ ] **2.3 — Have a colleague (or a second Excel window) open one source workbook, TYPE AN
+  EDIT INTO IT, and leave it unsaved. Then run the combine.**
 
-  *Expected — but NOT verified, and the reason this item exists:* Excel writes a hidden
-  lock file named `~$Something.xlsx` beside an open workbook, and the folder scan matches
-  `*.xls*`. If the action tries to open that lock file it will fail and abandon the whole
-  combine.
-  *Why this is on the list:* in a shared finance folder somebody usually has a file open.
-  If this fails, it is the most likely real-world failure in the wave and the fix is one
-  line (skip names starting `~$`). **Write down what you see even if it works.**
+  Three things must all be true afterwards:
+  1. Their workbook is **still open**, and their unsaved edit is **still there**.
+  2. Their data appears in the combined sheet — including the unsaved edit, because what
+     was read is what is on their screen.
+  3. The completion message says how many files were already open and that their current
+     on-screen contents were used.
+
+  *Failure looks like:* their workbook closed, or still open but with the edit gone.
+  *Why this is the most important item in this section:* `Workbooks.Open` on a file that is
+  already open does not hand back a separate read-only copy — it hands back the copy the
+  user has on screen. Closing that without saving throws their work away, and because this
+  action suppresses alerts while it runs, Excel's own "you will lose your changes" prompt
+  never appears. In a shared close folder somebody usually has a source open. **If this
+  item fails, do not ship.**
+
+- [ ] **2.4 — Excel's hidden `~$` lock files do not break the run.**
+  With a source workbook open (so a `~$Name.xlsx` lock file exists beside it), the combine
+  still completes.
+
+  *Expected — but NOT verified:* `Dir` defaults to excluding hidden files and these lock
+  files are hidden, so they should never be seen. On a network share the hidden attribute
+  is not always preserved.
+  *Failure looks like:* an error naming a `~$` file, and the combine abandoned.
 
 ---
 
@@ -163,7 +178,8 @@ value in `A17` on an otherwise blank row 17).
 
 - [ ] **4.1 — It shows a count BEFORE deleting anything, and names what it will not touch.**
   The dialog states how many blank rows and columns it will delete, and separately that N
-  rows are blank inside your selection but hold data outside it and were left alone.
+  rows and columns were left alone because each one "either holds data outside your
+  selection or is part of a merged block".
 
   *Failure looks like:* deletion with no dialog, or a dialog with no counts.
   *Why:* this action ships without the `backup.snapshot` restore point that its deferred
@@ -191,6 +207,24 @@ value in `A17` on an otherwise blank row 17).
   *Failure looks like:* row 17 gone and `A17`'s value with it.
   *Why:* a whole-row delete based on a partial selection would destroy data the user never
   selected and never saw. This is the item that proves it does not.
+
+---
+
+- [ ] **4.5 — Select whole columns (click the `A` header and drag to `D`) and run it.**
+  It completes in a few seconds, not minutes, and reports counts for the data area only.
+
+  *Failure looks like:* Excel freezes for minutes with no dialog.
+  *Why:* a whole-column pick is a million rows. The action narrows what you picked to the
+  sheet's used area before scanning; without that, the scan alone is a multi-minute freeze
+  and the delete phase is a million separate deletions.
+
+- [ ] **4.6 — A blank row that is part of a merged block is NOT deleted, and is reported as
+  held back.**
+  Merge two cells across an otherwise-empty row inside your selection, then run it.
+
+  *Failure looks like:* the row deleted and the merge damaged, or a `1004` error.
+  *Why:* a merged block can extend past your selection, so deleting a row inside it changes
+  cells you never picked.
 
 ---
 
@@ -366,13 +400,15 @@ failure reads as "the assumption was wrong" rather than "the macro is broken":
 | A macro's row deletion cannot be undone with Ctrl+Z (the dialog says so) | 4.4 |
 | `Scripting.FileSystemObject` is available for the folder check | 2.2 |
 | Deleting whole rows never renumbers columns | 4.4 |
-| The folder scan's `*.xls*` glob also matches `~$` lock files | 2.3 |
 | Excel's sheet-name rules match the hardcoded `: \ / ? * [ ]` and 31-character checks | 1.2, 3.2 |
+| `Workbooks.Open` on an already-open file returns the open copy, not a read-only second copy | 2.3 |
+| `Dir` excludes hidden files by default, so `~$` lock files are not enumerated | 2.4 |
+| Nothing outside `UsedRange` can hold a value, a formula or a merge | 4.5 |
 
 ---
 
 ## Result
 
-- Items passed: ____ / 33
+- Items passed: ____ / 37
 - Items recorded UNTESTED: ____
 - Anything that failed, with what you saw:

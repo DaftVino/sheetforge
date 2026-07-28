@@ -61,7 +61,7 @@ End Sub
 '================================================================
 Public Sub PkgImport_CombineWorksheets(ctx As Object)
     Dim destName As String, sources As Collection, ws As Worksheet
-    Dim rowsOut As Long, sourcesOut As Long
+    Dim rowsOut As Long, sourcesOut As Long, alreadyOpen As Long
     Const TITLE As String = "Combine All Worksheets"
     On Error GoTo Fail
 
@@ -86,7 +86,7 @@ Public Sub PkgImport_CombineWorksheets(ctx As Object)
     End If
 
     Core_SpeedOn
-    PkgImport_CombineEngine sources, destName, rowsOut, sourcesOut
+    PkgImport_CombineEngine sources, destName, rowsOut, sourcesOut, alreadyOpen
     Core_SpeedOff
 
     Core_Done ctx, "Combined " & sourcesOut & " sheet(s) into '" & destName & "'." & vbCrLf & _
@@ -103,7 +103,7 @@ End Sub
 '================================================================
 Public Sub PkgImport_CombineWorkbooks(ctx As Object)
     Dim destName As String, folderPath As String, sources As Collection
-    Dim rowsOut As Long, sourcesOut As Long
+    Dim rowsOut As Long, sourcesOut As Long, alreadyOpen As Long
     Const TITLE As String = "Combine All Workbooks in a Folder"
     On Error GoTo Fail
 
@@ -140,13 +140,18 @@ Public Sub PkgImport_CombineWorkbooks(ctx As Object)
     End If
 
     Core_SpeedOn
-    PkgImport_CombineEngine sources, destName, rowsOut, sourcesOut
+    PkgImport_CombineEngine sources, destName, rowsOut, sourcesOut, alreadyOpen
     Core_SpeedOff
 
+    ' The "read-only, closed without saving" sentence is only true of files this run
+    ' actually opened. A source that was ALREADY open was used in place and left open,
+    ' and what got combined is its unsaved on-screen state, not the copy on disk. That
+    ' difference decides whether the numbers below are the ones the user expects, so it
+    ' is stated rather than glossed.
     Core_Done ctx, "Combined " & sourcesOut & " workbook(s) into '" & destName & "'." & vbCrLf & _
            rowsOut & " data row(s) written, read from:" & vbCrLf & "   " & folderPath & vbCrLf & vbCrLf & _
-           "Columns were lined up by their header names. Every file was opened read-only " & _
-           "and closed without saving.", TITLE
+           "Columns were lined up by their header names." & vbCrLf & _
+           PkgImport_OpenSourcesNote(alreadyOpen), TITLE
     Exit Sub
 Fail:
     Core_Fail ctx, "import.combine_workbooks", Err
@@ -173,7 +178,8 @@ End Sub
 ' difference between a combine and a colleague losing an afternoon.
 '================================================================
 Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As String, _
-                                    ByRef rowsOut As Long, ByRef sourcesOut As Long)
+                                    ByRef rowsOut As Long, ByRef sourcesOut As Long, _
+                                    ByRef alreadyOpenOut As Long)
     Dim dest As Worksheet, src As Worksheet, wbSrc As Workbook
     Dim one As Variant, headerMap As Object
     Dim destRow As Long, destCols As Long
@@ -206,6 +212,8 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
             If wbSrc Is Nothing Then
                 Set wbSrc = Workbooks.Open(Filename:=CStr(one), ReadOnly:=True, UpdateLinks:=0)
                 weOpened = True                  ' ours to close; an already-open one is not
+            Else
+                alreadyOpenOut = alreadyOpenOut + 1   ' reported: what we read was unsaved state
             End If
             Set src = wbSrc.Worksheets(1)
         Else
@@ -493,10 +501,27 @@ Private Function PkgImport_IsEngineSheet(ByVal nm As String) As Boolean
     ' tail so only the generated names match.
     ' Accepted trade: a user sheet literally named "Macros 999" is excluded too, which
     ' beats enumerating the generated pages to find out how many there are.
-    If LCase(Left$(Trim(nm), 7)) = "macros " Then
-        tail = Trim(Mid$(Trim(nm), 8))
+    ' No Trim here either, for the same reason as the exact-name list above.
+    If LCase(Left$(nm, 7)) = "macros " Then
+        tail = Mid$(nm, 8)
         If Len(tail) > 0 Then PkgImport_IsEngineSheet = PkgImport_IsDigits(tail)
     End If
+End Function
+
+' Names what the combine actually read, when that is not what the caption implies.
+' "Opened read-only and closed without saving" is true of files THIS run opened; a
+' source that was already open was read in its unsaved on-screen state and left alone.
+' Silence there would let the user read a number as coming off disk when it did not.
+Private Function PkgImport_OpenSourcesNote(ByVal alreadyOpen As Long) As String
+    If alreadyOpen <= 0 Then
+        PkgImport_OpenSourcesNote = "Every file was opened read-only and closed without saving."
+        Exit Function
+    End If
+    PkgImport_OpenSourcesNote = _
+        alreadyOpen & " of these file(s) were already open, so what was combined is " & _
+        "their CURRENT on-screen contents, including any edits not yet saved. They " & _
+        "were left open and untouched. The rest were opened read-only and closed " & _
+        "without saving."
 End Function
 
 Private Function PkgImport_IsDigits(ByVal s As String) As Boolean
@@ -561,7 +586,17 @@ Private Function PkgImport_WorkbookPaths(ByVal folderPath As String) As Collecti
     Loop
     For Each one In names
         fullPath = folderPath & CStr(one)
-        If StrComp(fullPath, ThisWorkbook.FullName, vbTextCompare) <> 0 Then out.Add fullPath
+        ' Exclude THIS workbook by path OR by file name. Path alone is not enough: when
+        ' the workbook is OneDrive/AutoSave hosted its FullName is an https:// URL, and on
+        ' a network share it can be UNC while the configured folder is a mapped drive - in
+        ' both cases the path compare misses, this workbook joins its own source list, and
+        ' the already-open probe then raises a name/path collision describing a situation
+        ' that does not exist. Name alone was the old behaviour and skipped a legitimate
+        ' same-named source in another folder; requiring BOTH to differ keeps that fix and
+        ' restores the environments the path compare broke.
+        If StrComp(fullPath, ThisWorkbook.FullName, vbTextCompare) <> 0 Then
+            If StrComp(CStr(one), ThisWorkbook.name, vbTextCompare) <> 0 Then out.Add fullPath
+        End If
     Next one
     Set PkgImport_WorkbookPaths = out
 End Function
