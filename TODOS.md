@@ -5,14 +5,15 @@ touching Core or more than one package go through `writing-plans` first. Verify 
 `pwsh build/build.ps1`; there is no headless VBA test, so also import
 `dist/MacrosBundle.bas` and run the workbook, recorded in the PR/notes.
 
-Current: **v0.4.0** (Finish Excel track 1 — packed auto-layout, three-state
-availability, `Sheet!Cell` anchored placements, fail-closed config migration,
-contract **v1.2.0** — owner-verified in Excel across three workbooks). Remote:
-`origin` = `github.com/DaftVino/sheetforge` (private). Next is **track 2**, the
-catalog build-out in waves (`docs/macro-catalog-plug-and-play.md`), and the
-**Setup-surface redesign** designed in
-`docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md`. The
-Apps Script port is deferred to last, deliberately.
+Current: **v0.10.0**, contract **v2.3.0**. Track 1 is finished and shipped
+(v0.6.0–v0.9.0). Track 2 is under way: **W1 is built and open as PR #19**, not
+yet merged, because its manual gate has not been run. Remote: `origin` =
+`github.com/DaftVino/sheetforge` (private). The Apps Script port is deferred to
+last, deliberately.
+
+**The one thing blocking progress is gate time, not build time.** 45 checklist
+items are unticked: 37 from W1 and 8 left over from track 1. Everything below is
+downstream of those.
 
 ## Before the remote (blocker) — DONE (2026-07-24)
 
@@ -27,23 +28,38 @@ Apps Script port is deferred to last, deliberately.
 
 ## Next — active
 
-- [ ] **Setup-surface progressive disclosure** — designed in
-      `docs/designs/2026-07-26-setup-surface-progressive-disclosure-design.md`,
-      out of the v0.4.0 owner gate. Two separable parts. **Part B** (small,
-      package-level, do first): move `clean.dupes`' two settings — the header
-      question and the key columns — off Setup and into a prompt at run time,
-      because both describe the range you just picked, not the deployment.
-      **Part A** (Core, contract, migration): Action catalog to the top of Setup,
-      actions default `Off`, `usedBy`-driven hide/unhide, the Chains block
-      appearing on demand, and a pending-changes formula plus Refresh button —
-      click-driven, because a live handler would need VBIDE trust (banned) or a
-      class module (the bundle is one `.bas`). The `Off` default reverses a
-      decided position and needs an **ADR** plus an outbox note. Needs
-      `brainstorming` → `writing-plans` first.
+- [ ] **Run the W1 manual gate** (`docs/designs/2026-07-28-w1-manual-gate.md`, 37
+      items) and merge **PR #19**. **Start with item 2.3** — it is the only item
+      that puts a colleague's unsaved workbook in the combine's path, which is
+      exactly where the whole-branch review found a Critical: `Workbooks.Open` on
+      an already-open file returns *the user's copy*, and closing it with alerts
+      suppressed destroyed their unsaved edits while reporting success. Fixed, but
+      unverified in Excel.
 
-- [ ] **Catalog build-out, track 2** — the macro waves in
-      `docs/macro-catalog-plug-and-play.md`. Package-level, no Core changes
-      expected.
+- [ ] **Finish the 8 unrun track-1 gate items.** Hardening 1.3, 2.2, 3.1, 4.1,
+      4.2 · reorder 2 (clipping half), 3 · reskin 4. **Reskin 4 is the likeliest
+      real finding** — the palette came off a dark-background proof and lands on
+      an explicitly white sheet, and nothing has checked the two together. Two need
+      their own build: 3.1 a hostile `PkgClean` declaring `core.legacy`, reorder 3
+      the v0.6.0 bundle from `812d88c`. `tools/GateAudit.bas` re-runs seven
+      mechanical checks in one click.
+
+- [ ] **Core pass, before W2 — `Core_Refuse` + `Core_IsEngineSheet`.** The parked
+      W1 findings compound per wave, which is the whole argument for doing this
+      now rather than after:
+      - `PkgClean_Refuse` and `PkgImport_Refuse` are byte-identical twins today.
+        W2 makes three copies.
+      - `PkgImport_IsEngineSheet` hardcodes seven sheet names Core owns as
+        `Private Const`. W3's `export`/`workbook` package needs the same test.
+      - A refusal sets `failed`/`failMsg` but not `failNumber`, so every chain
+        summary line reads `X #0 <reason>`. Every new wave inherits it.
+      - `Core_RunChain` does not abort on a failed step, it asks. A user who
+        answers Continue runs the remaining steps against a stale sheet — an
+        informed choice now, but only Core can change it.
+      Touches Core → needs `writing-plans` first.
+
+- [ ] **W2 — Validate & Reconcile (5).** The highest-value group in the catalog
+      for a multi-entity close. Do the Core pass first.
 
 ## Done (recent)
 
@@ -89,7 +105,8 @@ annotated in `docs/macro-catalog-plug-and-play.md`, now the authoritative build
 queue. 35 new actions across six waves; 8 items *Later*, 5 *Deferred*, 4
 *Declined*. "Build all 60" is explicitly not the goal.
 
-- [ ] **W1 — ingest→clean path (7)** `import.combine_worksheets`,
+- [x] **W1 — ingest→clean path (7)** — BUILT 2026-07-28 (`v0.10.0`, contract
+      **v2.3.0**), PR #19 open, **manual gate not yet run**. `import.combine_worksheets`,
       `import.combine_workbooks`, `import.delimited_file`, `clean.remove_blanks`,
       `clean.unmerge_fill`, `clean.standardize_formats`, `clean.text_to_numbers`.
       New `PkgImport` (the two combines share one private engine) + extend
@@ -116,11 +133,14 @@ so it can change.
       purpose:** the frozen contract only makes the port mechanical *after* the
       Excel feature set settles. Porting against a moving target means porting
       twice.
-- [ ] Refresh `docs/code-map.md` (`/code-map`) — absent today, and `Core.bas` is
-      ~77KB, so it is read in slices via Grep. Worth generating before the polish
-      pass touches the renderer and the panel builder.
+- [x] Refresh `docs/code-map.md` — DONE. It exists, is regenerated by
+      `node scripts/code-map.mjs`, and is current. `Core.bas` is now ~229KB, so
+      grep the map for an anchor and read the slice; never open it whole.
 
 ## Housekeeping / minor
+
+- [x] Delete the stale `.superpowers/sdd/` workspaces — DONE 2026-07-28. The W1
+      workspace is deliberately kept until PR #19 merges; it is the recovery map.
 
 - [x] Delete merged local branches (`feat/*`, `chore/sanitize-defaults`,
       `docs/freeze-contract`) — DONE 2026-07-24; only `main` remains.
