@@ -296,7 +296,7 @@ An action is one thing a package *does* (it becomes a button). Each action is:
 
 | Field | Meaning |
 |---|---|
-| `id` | Dotted `pkg.verb` token, globally unique (`importexport.import`, `clean.dupes`). |
+| `id` | Dotted `<domain>.<operation>` token, globally unique (`import.combine_worksheets`, `clean.dupes`). The domain is a controlled user-facing vocabulary, **not** the package that implements it — see §7 for the vocabulary table and the full rule. |
 | `caption` | Button label (may carry an ordinal, e.g. `"2.  Import Source Data"`). |
 | `help` | Plain-language description shown on/near the button. |
 | `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on an index surface where a platform provides one (§6), and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
@@ -557,9 +557,10 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
   digits and underscores. (The leading-letter rule is stated because the build gate
   enforces it; without it here, the gate would be stricter than the contract it claims to
   implement.) **The domain is a controlled user-facing vocabulary, NOT the package or
-  module that implements it** — an action id is a permanent dispatch key the user types by
-  hand into a Setup cell as `Label [action.id]`, so encoding the module in it would make a
-  future package split a major contract break for no benefit. The operation segment is
+  module that implements it** — an action id is a permanent dispatch key a user may type by
+  hand (in the Excel reference implementation, into a chain step cell, where only the
+  bracketed id is authoritative and any label beside it is decoration — §6), so encoding
+  the module in it would make a future package split a major contract break for no benefit. The operation segment is
   descriptive where ambiguity looms (`clean.remove_blank_rows`, never `clean.blank2`).
   **No new id is ever camelCase.** Ids are immutable; captions, help text, entry points
   and module assignment stay free to change. There is no alias or migration table, by
@@ -750,6 +751,12 @@ declared demo rows could never observe "the user configured nothing", and
 difference between an action that does nothing until told and one that silently applies a
 demo date format to whatever range a first-time user picked. A conforming implementation
 MUST NOT ship default rows for this field.
+
+`k_import`'s demo rows (§8, package `importexport`) are the opposite case and stay: a
+three-column type map is genuinely hard to guess from an empty grid, and its action already
+refuses to run against tabs that do not exist, so a stale demo row cannot silently act on
+real data. Worked examples for `k_clean_formats` live in its help text instead, where they
+teach without becoming stored configuration.
 
 **This does not reopen the rule below, it satisfies it.** A house number format is a fact
 about the deployment — the same columns get the same formats every close — not a fact
