@@ -224,6 +224,7 @@ Private Function PkgImport_AppendSheet(src As Worksheet, dest As Worksheet, head
     Dim lastR As Long, lastC As Long, c As Long, r As Long, target As Long
     Dim hdr As String, vals As Variant, colVals() As Variant
     Dim ur As Range, seenHere As Object
+    Dim n As Long, candidate As String
 
     ' Per-SOURCE header tally, not the cross-source map: two sheets each having one
     ' "Amount" column must still align onto one destination column.
@@ -250,12 +251,21 @@ Private Function PkgImport_AppendSheet(src As Worksheet, dest As Worksheet, head
         ' Two columns sharing a header WITHIN one source both map to the same destination
         ' column, so the second overwrites the first. Disambiguate rather than lose data:
         ' the duplicate becomes its own column, named so the user can see what happened.
+        '
+        ' The generated name is searched for too, not just derived from a counter: a
+        ' source carrying "Amount", "Amount" and a LITERAL "Amount (2)" would otherwise
+        ' hand columns 2 and 3 the same name, and column 3 would overwrite column 2 -
+        ' the exact data loss this block exists to prevent. Loop until the candidate is
+        ' free, then reserve it, so every column ends up owning its name exactly once.
         If seenHere.Exists(hdr) Then
-            seenHere(hdr) = seenHere(hdr) + 1
-            hdr = hdr & " (" & seenHere(hdr) & ")"
-        Else
-            seenHere.Add hdr, 1
+            n = 1
+            Do
+                n = n + 1
+                candidate = hdr & " (" & n & ")"
+            Loop While seenHere.Exists(candidate)
+            hdr = candidate
         End If
+        seenHere.Add hdr, 1
         If Not headerMap.Exists(hdr) Then
             destCols = destCols + 1
             headerMap.Add hdr, destCols
@@ -276,9 +286,8 @@ End Function
 ' ACTION - Import one delimited file with explicit parsing
 '================================================================
 Public Sub PkgImport_DelimitedFile(ctx As Object)
-    Dim picked As Variant, destName As String, dest As Worksheet, wbTxt As Workbook
-    Dim rowsOut As Long, colsOut As Long, src As Worksheet
-    Dim errNum As Long, errDesc As String
+    Dim picked As Variant, destName As String
+    Dim rowsOut As Long, colsOut As Long
     Const TITLE As String = "Import a Delimited File"
     On Error GoTo Fail
 
@@ -294,8 +303,45 @@ Public Sub PkgImport_DelimitedFile(ctx As Object)
     If Not PkgImport_DestUsable(destName, TITLE) Then Exit Sub
 
     Core_SpeedOn
-    Set wbTxt = PkgImport_OpenDelimited(CStr(picked), _
-                    Core_Cfg(ctx, "k_import_delim"), Core_Cfg(ctx, "k_import_qualifier"))
+    PkgImport_ImportDelimited CStr(picked), destName, _
+        Core_Cfg(ctx, "k_import_delim"), Core_Cfg(ctx, "k_import_qualifier"), rowsOut, colsOut
+    Core_SpeedOff
+
+    Core_Done ctx, "Imported " & Core_FileName(CStr(picked)) & " into a new sheet '" & _
+           destName & "'." & vbCrLf & rowsOut & " row(s), " & colsOut & " column(s).", TITLE
+    Exit Sub
+Fail:
+    Core_Fail ctx, "import.delimited_file", Err
+End Sub
+
+'================================================================
+' The delimited import itself, and the cleanup that goes with it.
+'
+' Same cleanup contract as the combines, and for the same reason: without it a
+' failure after OpenText leaves the source file open in a second Excel window AND
+' a half-written sheet in this workbook. Core_Fail restores application state only
+' - it knows nothing about either object.
+'
+' The cleanup lives ONE CALL DEEPER than the action on purpose. VBA will not
+' activate a second handler inside a procedure whose handler is already running -
+' only Resume, Exit Sub or End Sub clears that state - so a re-raise inside the
+' action's own Fail: block escapes the procedure entirely, Core_Fail never runs,
+' and the application is left throttled. Raising from HERE propagates out to the
+' action, whose Fail: handler is not yet active and so arms normally with Err
+' live. PkgImport_CombineEngine is shaped the same way for the same reason.
+'
+' The error is captured FIRST and re-signalled afterwards because On Error Resume
+' Next cleanup overwrites Err: without this, Core_Fail would report whatever the
+' last cleanup statement did instead of the real cause.
+'================================================================
+Private Sub PkgImport_ImportDelimited(ByVal fullPath As String, ByVal destName As String, _
+                                      ByVal delim As String, ByVal qual As String, _
+                                      ByRef rowsOut As Long, ByRef colsOut As Long)
+    Dim wbTxt As Workbook, dest As Worksheet, src As Worksheet
+    Dim errNum As Long, errDesc As String
+    On Error GoTo ImportFail
+
+    Set wbTxt = PkgImport_OpenDelimited(fullPath, delim, qual)
     Set dest = ThisWorkbook.Worksheets.Add( _
         After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
     dest.name = destName
@@ -309,35 +355,17 @@ Public Sub PkgImport_DelimitedFile(ctx As Object)
     Application.CutCopyMode = False
     wbTxt.Close SaveChanges:=False
     Set wbTxt = Nothing
-    Core_SpeedOff
-
-    Core_Done ctx, "Imported " & Core_FileName(CStr(picked)) & " into a new sheet '" & _
-           destName & "'." & vbCrLf & rowsOut & " row(s), " & colsOut & " column(s).", TITLE
     Exit Sub
-Fail:
-    ' Same cleanup contract as the combines, and for the same reason: without it a
-    ' failure after OpenText leaves the source file open in a second Excel window AND a
-    ' half-written sheet in this workbook. Core_Fail restores application state only -
-    ' it knows nothing about either object.
-    '
-    ' The error is captured FIRST and re-signalled afterwards because On Error Resume
-    ' Next cleanup overwrites Err: without this, Core_Fail would report whatever the
-    ' last cleanup statement did instead of the real cause. Re-raising under a local
-    ' On Error GoTo keeps the report inside this action - the shipped contract is that
-    ' every entry point reports through Core_Fail and lets no error escape to the
-    ' dispatcher.
+
+ImportFail:
     errNum = Err.Number
     errDesc = Err.Description
     On Error Resume Next
     Application.CutCopyMode = False
     If Not wbTxt Is Nothing Then wbTxt.Close SaveChanges:=False
     If Not dest Is Nothing Then dest.Delete       ' alerts already off under Core_SpeedOn
-    On Error GoTo Report
-    Err.Clear
+    On Error GoTo 0
     Err.Raise errNum, "PkgImport_DelimitedFile", errDesc
-    Exit Sub
-Report:
-    Core_Fail ctx, "import.delimited_file", Err
 End Sub
 
 '================================================================
@@ -390,7 +418,11 @@ End Function
 ' test is a prefix, not a list.
 Private Function PkgImport_IsEngineSheet(ByVal nm As String) As Boolean
     Dim tail As String
-    Select Case LCase(Trim(nm))
+    ' The EXACT name, with no Trim. Trimming first means a user's own sheet called
+    ' " Setup " is read as the engine's and silently dropped from every combine; the
+    ' engine's own pages are named without stray spaces, so nothing is lost by being
+    ' literal here.
+    Select Case LCase(nm)
         Case "setup", "setup menu", "_config", "_config_staged", "_packages", _
              "macros", "macros home"
             PkgImport_IsEngineSheet = True
@@ -400,6 +432,8 @@ Private Function PkgImport_IsEngineSheet(ByVal nm As String) As Boolean
     ' not the prefix: a plain Left$(nm, 7) = "macros " test also swallows a user's own
     ' "Macros Data" sheet and silently drops it from every combine. Require a numeric
     ' tail so only the generated names match.
+    ' Accepted trade: a user sheet literally named "Macros 999" is excluded too, which
+    ' beats enumerating the generated pages to find out how many there are.
     If LCase(Left$(Trim(nm), 7)) = "macros " Then
         tail = Trim(Mid$(Trim(nm), 8))
         If Len(tail) > 0 Then PkgImport_IsEngineSheet = PkgImport_IsDigits(tail)
@@ -450,8 +484,15 @@ End Function
 ' returns full paths, because calling anything that touches the file system
 ' inside a Dir() loop can corrupt the iterator on a network drive - the same
 ' reason Core_FindFile is written this way.
+'
+' "This one" is decided on the FULL PATH, not the file name. k_import_folder
+' routinely points somewhere else, and a name-only test silently drops a
+' legitimate source that merely happens to share a file name with this workbook -
+' "January.xlsx" in a close folder full of them is the obvious case. Compared
+' case-insensitively, because Windows paths are.
 Private Function PkgImport_WorkbookPaths(ByVal folderPath As String) As Collection
     Dim out As Collection, names As Collection, f As String, one As Variant
+    Dim fullPath As String
     Set out = New Collection
     Set names = New Collection
     f = Dir(folderPath & "*.xls*")
@@ -460,7 +501,8 @@ Private Function PkgImport_WorkbookPaths(ByVal folderPath As String) As Collecti
         f = Dir
     Loop
     For Each one In names
-        If LCase(CStr(one)) <> LCase(ThisWorkbook.name) Then out.Add folderPath & CStr(one)
+        fullPath = folderPath & CStr(one)
+        If StrComp(fullPath, ThisWorkbook.FullName, vbTextCompare) <> 0 Then out.Add fullPath
     Next one
     Set PkgImport_WorkbookPaths = out
 End Function
