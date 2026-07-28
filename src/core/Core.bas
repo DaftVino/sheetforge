@@ -1394,8 +1394,11 @@ Public Sub Core_BuildSetup()
     r = r + 2
 
     ' The availability map comes from the ACTIVATED config, so a rebuild reflects
-    ' the last Finalize. A fresh workbook has no _Config, so the map is empty and
-    ' AvailFor reports Button for everything - the v0.4.0 default.
+    ' the last Finalize - NOT what is currently typed on the Setup tab. Editing an
+    ' Availability cell and rebuilding without finalizing first is a no-op here, by
+    ' design (design section 2.3): the rebuild re-seeds Setup from _Config.
+    ' A fresh workbook has no _Config, so the map is empty and AvailFor reports Off
+    ' for every id - the v2.1.0 default (ADR 0003).
     Set availMap = ReadAvailMap(CfgSheet())
 
     firstFieldRow = r

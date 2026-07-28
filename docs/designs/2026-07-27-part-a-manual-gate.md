@@ -18,21 +18,40 @@ a value without naming where it lives.
 
 ---
 
-## Status — NOT RUN
+## Status — RUN AND PASSED, 2026-07-27
 
-**Nothing in Part A has been exercised in Excel.** All five tasks are structurally
-verified only: the build and the syntax checker cannot see a dialog, a rendered band, or
-a stored cell value. Every checkbox below is unticked and must stay unticked until it is
-actually run.
+**Run in Excel by the owner on 2026-07-27** against `dist/MacrosBundle.bas` at `ecf500d`,
+across workbooks A, B, C and D as specified below. All 13 items pass.
 
 | Section | Items | State |
 |---|---|---|
-| **1. Fresh install** | 0/3 | Not run |
-| **2. Legacy and stored configs** | 0/4 | Not run |
-| **3. Fail-closed on a bad cell** | 0/2 | Not run |
-| **4. Field disclosure** | 0/3 | Not run |
-| **5. Runtime** | 0/1 | Not run |
-| **Total** | **0/13** | **Not run** |
+| **1. Fresh install** | 3/3 | Passed |
+| **2. Legacy and stored configs** | 4/4 | Passed |
+| **3. Fail-closed on a bad cell** | 2/2 | Passed |
+| **4. Field disclosure** | 3/3 | Passed |
+| **5. Runtime** | 1/1 | Passed |
+| **Total** | **13/13** | **Passed** |
+
+### Two items were unrunnable as first written — the instructions were wrong, not the code
+
+Both were corrected mid-run and then passed. Recording them because the corrections are the
+gate's real output, and issue #3 exists precisely because a checklist that cannot be followed
+as written is worse than no checklist:
+
+- **§3 item 2 said to *type* an unrecognised value.** You cannot. `AvailDropdown` applies list
+  validation with `xlValidAlertStop` (`Core.bas:2120`), so Excel refuses a typed entry — the
+  alert is the dropdown working. The item now specifies a **paste**, which bypasses validation
+  and is also the only realistic way a bad value reaches a real deployment.
+- **Every §4 item went straight from editing an `Availability` cell to `Core_BuildSetup`.**
+  `Core_BuildSetup` reads the map from the **activated `_Config`** (`Core.bas:1399`), never from
+  what is currently typed on the Setup tab, so a rebuild without a Finalize in between is a
+  no-op and all three items looked broken while working correctly. Every §4 step is now
+  **edit → `Core_FinalizeSetup` → `Core_BuildSetup`**. A stale comment at `Core.bas:1396` that
+  still described the pre-Task-1 default was corrected at the same time.
+
+§4 item 3 was also rewritten after the run: its expected result is "nothing moves and the off
+band does not appear at all", which the original wording never said, and it now names the
+on-screen block to look at and both dialogs `Suggest Import Types` can produce.
 
 ### The item that matters most
 
@@ -51,6 +70,10 @@ package declared one, so nothing could relegate. Task 4 wired `usedBy` onto
 `PkgImportExport`'s nine fields, which makes it reachable. **There is no earlier passing run
 to compare against** — a failure here may be a genuine Core bug rather than a Part A
 regression, so investigate before assuming Part A broke it.
+
+**Outcome: passed on 2026-07-27**, once the missing Finalize was added to the steps. This is
+the empty-band guard's first recorded pass in the relegating direction; it is the baseline
+every later run compares against.
 
 ### Three items exist because a whole-branch review caught real defects
 
@@ -191,7 +214,7 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
 
 ## 1. A fresh install shows a deliberate catalog (workbook A)
 
-- [ ] **Every `Availability` cell reads `Off`.** On the Setup tab, in the **Action catalog**
+- [x] **Every `Availability` cell reads `Off`.** On the Setup tab, in the **Action catalog**
       block, all eight actions — `Remove Duplicates [clean.dupes]`,
       `Trim & Clean Text [clean.trim]`, `Fill Blanks Down [clean.filldown]`,
       `1.  Clear Input Tabs [importexport.clear]`, `2.  Import Source Data [importexport.import]`,
@@ -203,10 +226,10 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
       A blank cell here is a failure, not a variant: blank now blocks Finalize (§3 item 1),
       so it would mean `AvailLabel` is not rendering the token.
 
-- [ ] **No buttons are drawn.** There is no `Macros 1` tab (nor `Macros`, nor `Macros 2`)
+- [x] **No buttons are drawn.** There is no `Macros 1` tab (nor `Macros`, nor `Macros 2`)
       anywhere in the workbook. Every action is `Off`, so there is nothing to place.
 
-- [ ] **Every setting has already stepped out of the way.** There is **no**
+- [x] **Every setting has already stepped out of the way.** There is **no**
       `IMPORT / EXPORT` band on the Setup tab. Instead there is one band headed
 
       ```
@@ -227,7 +250,7 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
 
 ## 2. Existing configurations are untouched
 
-- [ ] **A v0.3.0 legacy workbook keeps every button (workbook C).**
+- [x] **A v0.3.0 legacy workbook keeps every button (workbook C).**
       **THE LOAD-BEARING ITEM — see "The item that matters most" above.**
       After Setup step 8, every `Availability` cell in workbook C's Action catalog reads
       **`Button`**, and running `Core_FinalizeSetup` then `Core_BuildControlPanel` draws
@@ -240,7 +263,7 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
       **If any cell reads `Off`, STOP.** Contract §5's pinned legacy default has been lost
       and a working installation would be stripped of its buttons. Do not work around it.
 
-- [ ] **A marked v0.5.0 config keeps every stored choice verbatim (workbook B).**
+- [x] **A marked v0.5.0 config keeps every stored choice verbatim (workbook B).**
       After Setup step 9, the Action catalog reads **exactly** what was set in Setup step 4:
       `Remove Duplicates [clean.dupes]` → `Off`; `Trim & Clean Text [clean.trim]` →
       `Chains only`; `4.  Export Dashboard (.xlsx) [importexport.export]` → `Off`;
@@ -251,7 +274,7 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
       makes contract v2.1.0 additive rather than breaking. If those five come back `Off`,
       the default is being applied to stored values and the change IS breaking.
 
-- [ ] **A newly-registered action arrives Off (workbook B).**
+- [x] **A newly-registered action arrives Off (workbook B).**
       Simulates a package upgrade adding an action to a config that predates it.
       Alt+F11 → in the Project pane select the `_Config` sheet → *Properties* →
       set `Visible` to `-1 - xlSheetVisible`. On `_Config`, find the Action catalog block and
@@ -262,7 +285,7 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
       Expected: `Fill Blanks Down [clean.filldown]` reads **`Off`**, and every other action
       still reads what it read before. Under v0.5.0 it would have come back `Button`.
 
-- [ ] **A `_Config` with no Action catalog block at all reads Off, and that is
+- [x] **A `_Config` with no Action catalog block at all reads Off, and that is
       deliberate (workbook B).**
       The third provenance, and the one where the two safe answers point in opposite
       directions. Reached directly rather than with a fourth bundle, because it is the
@@ -300,7 +323,7 @@ computing page-break metrics for a newly added sheet. Diagnosed in full in the P
 Set every action back to `Button` first, then Finalize, so you are starting from a valid
 config.
 
-- [ ] **A blank cell blocks Finalize.** Clear the `Availability` cell for
+- [x] **A blank cell blocks Finalize.** Clear the `Availability` cell for
       `Trim & Clean Text [clean.trim]` (select it, press Delete). Alt+F8 →
       `Core_FinalizeSetup`. Expected: the report refuses to activate and contains
 
@@ -312,10 +335,20 @@ config.
       Blank used to read as `Button`. With the default at `Off`, reading a cleared cell as
       either value is wrong and unrecoverable from the result, so it blocks instead.
 
-- [ ] **An unrecognised value is no longer laundered into `Button`.** Type `maybe` into the
-      `Availability` cell for `Trim & Clean Text [clean.trim]` (type it, do not pick from the
-      dropdown). Alt+F8 → `Core_FinalizeSetup` — expect the same block as above, naming
-      `clean.trim`. Then Alt+F8 → `Core_BuildSetup`.
+- [x] **An unrecognised value is no longer laundered into `Button`.** Get `maybe` into the
+      `Availability` cell for `Trim & Clean Text [clean.trim]`.
+
+      **You cannot type it.** `AvailDropdown` applies list validation with
+      `xlValidAlertStop` ([Core.bas:2120](../../src/core/Core.bas#L2120)), so Excel refuses a
+      typed entry with a "The value doesn't match the data validation restrictions" alert —
+      that alert is the dropdown working, not a failure. **Paste instead:** type `maybe` into
+      any scratch cell, copy it, and paste over the `Availability` cell. Excel's paste carries
+      the source cell's (absent) validation with it and lands the value. That is also the only
+      realistic way a bad value reaches a real deployment, which is what makes it the right
+      thing to test.
+
+      Alt+F8 → `Core_FinalizeSetup` — expect the same block as above, naming `clean.trim`.
+      Then Alt+F8 → `Core_BuildSetup`.
 
       Expected: the cell comes back **blank**. **It must NOT come back as `Button`.**
       That silent rewrite was issue #10: `AvailLabel`'s `Case Else` returned `"Button"`, the
@@ -327,9 +360,17 @@ config.
 
 Set every action to `Button` first and Finalize, so the Setup tab is in its "all on" state.
 
-- [ ] **All-off hides a package's band and moves its fields to the off band.**
+**Finalize between every toggle and every rebuild.** `Core_BuildSetup` reads the availability
+map from the **activated** `_Config` ([Core.bas:1399](../../src/core/Core.bas#L1399)), not from
+what is currently typed on the Setup tab. Change an `Availability` cell and rebuild without
+finalizing first and the rebuild re-seeds Setup from the old config — nothing moves, and the
+item looks broken when it is working. Every step below is therefore
+**edit → `Core_FinalizeSetup` → `Core_BuildSetup`**.
+
+- [x] **All-off hides a package's band and moves its fields to the off band.**
       Set **every** `importexport.*` action to `Off` — all five: `clear`, `import`,
-      `updateMaster`, `export`, `suggestTypes`. Alt+F8 → `Core_BuildSetup`.
+      `updateMaster`, `export`, `suggestTypes`. Alt+F8 → `Core_FinalizeSetup`, then Alt+F8 →
+      `Core_BuildSetup`.
 
       Expected: the `IMPORT / EXPORT` band **is gone**, and a band headed
 
@@ -347,34 +388,73 @@ Set every action to `Button` first and Finalize, so the Setup tab is in its "all
       declared `usedBy` then. Task 4 changed that; this item supersedes it.
 
       Confirm nothing you typed was lost: the values in the off band are the values that
-      were in the main band. Set the five actions back to `Button` and rebuild before
-      continuing.
+      were in the main band. Set the five actions back to `Button`, Finalize, and rebuild
+      before continuing.
 
-- [ ] **Per-action disclosure — one action off relegates only its own fields.**
+- [x] **Per-action disclosure — one action off relegates only its own fields.**
       Set **only** `4.  Export Dashboard (.xlsx) [importexport.export]` to `Off`; leave the
-      other four `importexport.*` actions at `Button`. Alt+F8 → `Core_BuildSetup`.
+      other four `importexport.*` actions at `Button`. Alt+F8 → `Core_FinalizeSetup`, then
+      Alt+F8 → `Core_BuildSetup`.
 
       Expected: the `IMPORT / EXPORT` band is **still there**, holding `k_import`,
       `k_master_prefix`, `k_master_dest`, `k_master_sheet` and `k_master_cols`. The off band
       holds exactly the four export fields — `k_export_base`, `k_settings_sheet`,
       `k_export_offset`, `k_export_tabs` — and nothing else.
 
-- [ ] **`Suggest Import Types` keeps `k_import` visible on its own.**
+- [x] **`Suggest Import Types` keeps `k_import` visible on its own.**
       Set `1.  Clear Input Tabs [importexport.clear]` and `2.  Import Source Data
       [importexport.import]` to `Off`, leaving `Suggest Import Types
-      [importexport.suggestTypes]` at `Button`. Alt+F8 → `Core_BuildSetup`.
+      [importexport.suggestTypes]` at `Button`. Alt+F8 → `Core_FinalizeSetup`, then Alt+F8 →
+      `Core_BuildSetup`.
 
-      Expected: `k_import` **stays in the `IMPORT / EXPORT` band**, not the off band. Then
-      Finalize and click **Suggest Import Types** — it must still write its suggested type
-      map into `k_import`'s rows.
+      **Expected — nothing moves. The off band does not appear at all.** Two actions are now
+      `Off`, but every field still names at least one action that is on, so none of them is
+      relegated:
+
+      | Field(s) | `usedBy` | Still on? |
+      |---|---|---|
+      | `k_export_base`, `k_settings_sheet`, `k_export_offset`, `k_export_tabs` | `export` | yes — `Button` |
+      | `k_import` | `clear`, `import`, `suggestTypes` | **`suggestTypes` only** |
+      | `k_master_prefix`, `k_master_dest`, `k_master_sheet`, `k_master_cols` | `updateMaster` | yes — `Button` |
+
+      `PkgClean` declares no fields, so there is nothing else on the tab. If the
+      `SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON` band appears at all, something is wrong.
+
+      **The row that matters is `k_import`** — the one field whose only surviving action is
+      `suggestTypes`. On the Setup tab it is the block labelled
+      **`Import files (one row per input tab)`**, under the `IMPORT FILES` sub-heading inside
+      the `IMPORT / EXPORT` band: a bold three-column header reading
+      `Input tab (in this workbook)` / `Source file (name starts with...)` / `Column types`,
+      then four yellow rows `IN_Data1` … `IN_Data4`.
+
+      - **Pass:** that block is where it has always been, in the normal `IMPORT / EXPORT` band.
+      - **Fail:** it has dropped into the collapsed band at the bottom of the tab. That would
+        mean `FieldInUse` stopped at the two `Off` actions instead of continuing to the third
+        — the "one runnable is enough" rule at
+        [Core.bas:412](../../src/core/Core.bas#L412) — and the fix is in Core, not the gate.
+
+      Then Finalize again and click **Suggest Import Types**.
+
+      You almost certainly have no `Source File A`-style workbooks sitting in the folder, and
+      that is fine — this half is a smoke test that the helper can still find `k_import`'s rows,
+      not a test of type inference. Expect a dialog reading
+      `Suggested type maps filled for 0 import row(s)`, followed by
+      `No source file found for:` and the four `IN_Data` tabs. The four `Column types` cells
+      keep the values they already had ([PkgImportExport.bas:472](../../src/packages/PkgImportExport.bas#L472)
+      writes the existing map back when no file matches). **That is a pass.**
+
+      The failure signal is the *other* dialog —
+      `No import rows on the Setup tab yet` — which means `Core_SetupTable` could not read the
+      block at all.
 
       This is why `k_import` names `suggestTypes` in its `usedBy` even though that action
       reads no config key: it is a setup helper that *writes* into those rows via
-      `Core_SetupSetColumn`. Relegate them and it would be targeting a collapsed band.
+      `Core_SetupSetColumn`. Relegate them and it would be filling in a collapsed band the
+      user cannot see — and the dialog explicitly tells them to go review what it wrote.
 
 ## 5. Runtime behaviour on a fresh workbook (workbook D — a throwaway)
 
-- [ ] **`Core_Run` on a workbook with no `_Config` reports the action is off.**
+- [x] **`Core_Run` on a workbook with no `_Config` reports the action is off.**
       Workbook A has been Finalized by now, so this needs its own workbook.
       Take a **new** blank `.xlsm`, import `dist/MacrosBundle.bas`, and do **not** run
       `Core_BuildSetup` or `Core_FinalizeSetup` — there must be no `_Config` sheet at all.
