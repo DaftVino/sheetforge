@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.1.0** (2026-07-27) · SemVer, independent of the
+**Contract version: 2.2.0** (2026-07-27) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -190,6 +190,25 @@ is placed there regardless of its `tier` — off-ness takes precedence, so this
 the actual workbook (tabs exist, files match, per-package required fields
 present) and reports problems *before* writing the config store.
 
+**Durable replacement (v2.2.0, normative):** activating MUST NOT destroy the
+existing store before its replacement exists. An implementation MUST **stage the
+replacement, verify it, and only then swap it into place** — write the new store
+under a reserved staging name (§7), confirm it is structurally complete (reference:
+its action-catalog key row is present), and only after that confirmation remove the
+old store and promote the staged one. Delete-then-write is non-conforming: the store
+is the only memory that survives a rebuild, there is no undo, and an interruption in
+that window leaves nothing — which the next build reads as "never configured" and
+overwrites with defaults, turning a crash into silent total loss.
+
+This is **not** a claim of atomicity, and an implementation MUST NOT present it as
+one; a host that offers no transaction cannot give one. The requirement is that the
+irreducible window contain a *complete replacement* rather than *nothing*. It follows
+that a reader MUST adopt an orphaned staged store when the live one is missing —
+that adoption is what makes the surviving state recoverable rather than merely
+present, and it is unambiguous because a staged store never outlives a successful
+activate. Ordering *within* the store (§5's marker-last rule) is a separate concern
+and is unaffected.
+
 **Portability note:** the config store being a hidden sheet is Excel-specific.
 Any platform may use an equivalent key→value store, but the **Setup grid layout
 and the keys are identical across platforms**. Values are exchanged as strings;
@@ -239,6 +258,21 @@ with no path forward, an implementation MAY proceed with the rebuild anyway —
 but only after an explicit, non-default confirmation that names exactly what
 will be discarded and what is preserved, and only on an affirmative response
 to it. Proceeding without that confirmation remains non-conforming.
+
+**How a reader decides the marker is absent (v2.2.0, normative).** "Absent" is a
+claim about the store's *era*, and it is the permissive branch — it routes to the
+pinned legacy defaults below. A reader MUST NOT conclude "absent" merely because the
+marker cell is empty, and MUST NOT decide it from a **user-editable display caption**
+such as a column header. It MUST require positive corroborating evidence that the
+store predates the marker — structural evidence the newer format cannot produce, such
+as the complete absence of a column that the newer format always writes. Failing that
+test, an empty marker is a **removed** marker: fail closed and refuse to activate.
+The marker is machine-owned precisely so this decision is not left to something the
+user can retype; a reader that leans on a caption re-opens the hole the marker exists
+to close. *(The reference implementation previously classified a marker-less block by
+reading its visible `Availability` header back, so renaming that header by hand
+promoted a tampered current block to the legacy path and activated every action as
+`button`.)*
 
 **Absent is not invalid.** An attribute or column introduced after the stored
 marker's version (for example `availability`, §6, in a store marked pre-v1.2.0)
@@ -524,6 +558,21 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
   sentinels; no package action id may use it. The reference implementation uses
   `core.legacy` as a provenance flag inside the in-memory availability map, so an id
   colliding with it would be read as engine state rather than as an action.
+  **Enforced (v2.2.0, normative):** an implementation MUST refuse to activate a
+  configuration in which any package action id falls in `core.*`, naming the offending
+  id, exactly as it already refuses `chain.*`. Declaring the reservation is not enough:
+  this section states no character rule for action ids, so a sentinel living in the same
+  keyspace as real ids cannot be assumed collision-proof, and a collision on
+  `core.legacy` would resolve every unlisted action to `button` instead of `off` —
+  silently reverting §6's v2.1.0 default on that deployment, destructive actions
+  included.
+- **Reserved (sheet names, v2.2.0):** in the Excel reference implementation the sheet
+  names `_Config` (the activated store) and `_Config_staged` (where Finalize stages a
+  replacement before swapping it into place) are engine-owned. A user sheet taking
+  either name would be read as engine state — `_Config_staged` in particular is
+  **adopted as the configuration** when `_Config` is missing, which is how an
+  interrupted activate heals (§5). A platform substitutes its own two names but MUST
+  reserve both: staged-then-swap needs somewhere to stage.
 - **Reserved:** the display category `Chains` (engine-generated, holds chain
   buttons) and, in the Excel reference implementation, the sheet name
   `Macros Home`. A platform substitutes its own index surface name. The name
@@ -687,6 +736,21 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.2.0 (additive):** three hardening rules, none of which touches a stored value's
+  meaning. (a) **Durable replacement (§5):** activating MUST stage, verify, then swap;
+  delete-then-write is now non-conforming, and a reader MUST adopt an orphaned staged
+  store. (b) **Marker absence must be earned (§5):** "absent" requires positive
+  structural corroboration and MUST NOT be decided from a user-editable caption; an
+  unexplained empty marker is "removed" and fails closed. (c) **`core.*` enforced
+  (§7):** refusing a package action id in that namespace becomes normative rather
+  than declared.
+  **Additive by the two-axes rule:** every existing valid store keeps its meaning and
+  keeps working. (b) is the only one that changes any outcome, and only for a store
+  that is *already* non-conforming — a v1.2+ block whose machine-owned marker was
+  removed by hand. That store previously activated as all-`button`; it is now refused.
+  No conforming writer emits it, for the same reason §6's blank-cell case is additive:
+  the marker is written on every render. `SCHEMA_VER` does not move — it stays `"v2.0"`
+  and every v0.5.0 and v0.6.0 config remains readable.
 - **v2.1.0 (additive):** `availability` defaults to `off` (§6); the pre-v1.2.0 legacy
   default is pinned to `button` independently (§5); reserves the `core.*` action-id
   namespace (§7); restates relegation presentation for disclosure (§3). **Additive, not
