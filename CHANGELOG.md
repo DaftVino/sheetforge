@@ -4,6 +4,53 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-27
+
+### Fixed
+
+- **Finalize can no longer lose your entire configuration if Excel dies at the wrong
+  moment.** Activating used to delete the saved configuration *before* copying the new
+  one into its place, leaving a moment in which the workbook held no configuration at
+  all. A crash, a hang you force-quit, or any failure inside that copy destroyed
+  everything you had set up — every setting, every button placement, every Availability
+  choice — with no undo and no warning. Worse, the next **Create Setup Tab** read the
+  hole as "never configured" and rebuilt defaults over it, so the loss was silent.
+  Activating now copies first, checks the copy is complete, and only then replaces the
+  old one. If anything goes wrong before that check, your saved configuration is
+  untouched and a message says so. If a crash interrupts the swap itself, the next
+  action recovers the configuration automatically instead of discarding it.
+  **This is not a claim that activating is now atomic** — Excel offers no such
+  guarantee, and the remaining gap is documented rather than papered over. (#8)
+- **A hand-edited configuration can no longer talk its way onto the legacy path.** The
+  engine decides whether a saved configuration predates the Availability column by
+  reading a hidden format marker. When that marker was missing, it used to settle the
+  question by reading a *visible column heading* back — so renaming that heading by hand
+  was enough to make a current, tampered configuration look ancient, which activated
+  every action as a live button, destructive ones included. The decision is now made
+  from structure the newer format always writes and the older one never did, and an
+  unexplained missing marker is refused rather than trusted. (#12)
+- **A package can no longer take over an engine-reserved action id.** The contract has
+  reserved the `core.*` namespace since v0.6.0, but Finalize never enforced it the way it
+  enforces `chain.*`. A package declaring `core.legacy` would have collided with the
+  engine's own provenance flag and quietly turned every action you had not explicitly
+  switched on back into a button — reverting v0.6.0's Off default on that deployment.
+  Finalize now refuses it by name. (#13)
+
+### Changed
+
+- **Contract v2.2.0** (additive). Staged-then-swap activation and orphan adoption are now
+  normative (§5); deciding a format marker is "absent" requires positive structural
+  evidence and may not rest on a user-editable caption (§5); refusing a package action id
+  in `core.*` is normative rather than declared (§7); `_Config` and `_Config_staged` are
+  reserved sheet names (§7). No stored value changes meaning and `SCHEMA_VER` stays
+  `"v2.0"`, so every v0.5.0 and v0.6.0 configuration remains readable.
+- **Manual checklists now pass a blind dry-run before they reach the owner.** A subagent
+  holding the checklist and the built bundle, but forbidden from reading `src/`, flags
+  every item that cannot be executed, cannot be judged, or would pass on a broken build.
+  Added to the pipeline in `CLAUDE.md` along with an authoring rule. The v0.4.0 gate lost
+  six items mid-run to this and the v0.6.0 gate still lost two; the reviews all passed
+  them, because every review asked "does this match the code?" and it did. (#3)
+
 ## [0.6.0] - 2026-07-27
 
 ### Changed

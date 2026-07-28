@@ -34,14 +34,17 @@ This repo is **source-first**, not export-first (`docs/adr/0001-source-first-vba
 4. **Naming is mandatory — flat namespace.** Entry points `Pkg<Name>_<Verb>`; manifests `Pkg<Name>_Manifest`; Core's API `Core_*`; everything else `Private`. Shared helpers live ONLY in Core.
 5. **VBA hygiene.** `Option Explicit` everywhere; the 25 line-continuation limit per statement (one `Collection.Add` per line, not a giant `Array(...)`); wrap every action in the speed pattern (ScreenUpdating/Calculation/EnableEvents off → on) with guaranteed restore in the error handler; quote every path (folders have spaces and capitals).
 6. **Keep the contract portable.** Freeze the config schema + action ids in `spec/contract.md` as the language-neutral source of truth so the later Apps Script port is mechanical.
+7. **Manual-verification checklists are written for someone who has not read the code.** Each item states the observable result first, then what a failure looks like, then why. An item whose expected result equals the default state proves nothing. Claims about Excel's own behaviour are **assumptions** until the gate confirms them — mark them.
 
 ## Pipeline
 
-`brainstorming` → `writing-plans` for anything touching Core or more than one package → author in `src/` → build (`dist/MacrosBundle.bas`) → `/review` over the `src/` diff → `/ship`. Verify by importing the bundle and running the workbook; record that manual run in the PR.
+`brainstorming` → `writing-plans` for anything touching Core or more than one package → author in `src/` → build (`dist/MacrosBundle.bas`) → `/review` over the `src/` diff → **blind dry-run** → `/ship`. Verify by importing the bundle and running the workbook; record that manual run in the PR.
+
+**Blind dry-run — required before any `docs/designs/*-manual-gate.md` reaches the owner.** Hand a subagent the checklist and the built bundle and **forbid it from reading `src/`**; the blindness is the mechanism, because it reproduces the only reader who matters. It flags every item it cannot execute (undefined term, missing precondition, unstated setup), cannot judge (no observable expected result), or that would pass no matter what the build did — ask that last one out loud: *could this item pass on a broken build?* One agent costs less than one keyboard round trip, and the 2026-07-27 Part A gate still lost two items mid-run to steps that were wrong about Excel rather than about the code.
 
 ## Off
 
-- `test-driven-development` — no VBA runner; Excel cannot be driven headlessly on CI. Verification is the build plus a manual run of the imported workbook.
+- `test-driven-development` — no VBA runner; Excel cannot be driven headlessly on CI. Verification is `build.ps1` + `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` + the owner's manual run against a dry-run-gated checklist.
 - `/qa`, `/browse`, the design family — no web surface (the `docs/designs/` Setup-page work is design-on-a-sheet, not a web UI).
 - `/land-and-deploy`, `/canary`, `/gas-deploy`, `/benchmark` — delivered as one imported `.bas`, not deployed, and nothing to benchmark.
 
