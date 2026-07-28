@@ -254,7 +254,11 @@ $markerAt = $markerLines[0] - 1
 # BUILD FAILURE, not a skip: silently parsing 11 of 12 rows leaves the build green while
 # the 12th domain quietly stops being enforced, which is the exact failure this gate
 # exists to prevent.
-$domainStatus = [ordered]@{}
+# Ordinal (case-sensitive) dictionary, NOT @{} or [ordered]@{}. PowerShell hashtable
+# keys are case-INSENSITIVE, so `$domainStatus.ContainsKey('Import')` would be true for
+# a stored 'import' - quietly accepting an id whose domain is mis-cased, which is the
+# same camelCase hole the -c operators close everywhere else in this block.
+$domainStatus = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
 $sawHeader = $false
 $sawSeparator = $false
 for ($i = $markerAt + 1; $i -lt $contractLines.Count; $i++) {
@@ -283,7 +287,7 @@ for ($i = $markerAt + 1; $i -lt $contractLines.Count; $i++) {
     # corrupts the rendered table, so it must not parse cleanly here either.
     if ($ln -cmatch '^\s*\|\s*`([a-z][a-z0-9_]*)`\s*\|\s*(active|reserved|grandfathered)\s*\|[^|]*\|\s*$') {
         $dom = $matches[1]
-        if ($domainStatus.Contains($dom)) {
+        if ($domainStatus.ContainsKey($dom)) {
             $vocabProblems.Add("contract.md:${lineNo}: domain '$dom' is listed more than once.")
         } else {
             $domainStatus[$dom] = $matches[2]
@@ -313,7 +317,12 @@ $legacyIds = @(
     'importexport.clear', 'importexport.import', 'importexport.updateMaster',
     'importexport.export', 'importexport.suggestTypes'
 )
-$legacySet = @{}; $legacyIds | ForEach-Object { $legacySet[$_] = $true }
+# Ordinal, for the same reason as $domainStatus: a case-insensitive set makes
+# $legacySet.ContainsKey('Clean.Dupes') true, which skips the shape check on a
+# mis-cased id and then misattributes the resulting duplicate error to the real,
+# permanent declaration - pointing a future maintainer at breaking an immutable id.
+$legacySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$legacyIds | ForEach-Object { [void]$legacySet.Add($_) }
 
 # Entry points that Core_Run can actually dispatch. Core_Run reaches a handler through
 # Application.Run, which cannot call a Private or Friend procedure - so "a Sub of that
@@ -321,10 +330,26 @@ $legacySet = @{}; $legacyIds | ForEach-Object { $legacySet[$_] = $true }
 # a single ctx argument exists. A Private Sub with the right name would sail through a
 # name-only check and fail at the button, which is the most expensive place to find it.
 # (In VBA an unqualified `Sub Foo` is Public, so both spellings count.)
+#
+# IgnoreCase is passed EXPLICITLY. [regex]::Match is case-SENSITIVE in .NET, unlike
+# PowerShell's -match operator - so without this, `public sub Foo(ctx as object)` is not
+# found and this guard reports "no dispatchable handler" for a handler that is really
+# there. VBA is case-insensitive, so matching its syntax case-sensitively is simply wrong.
+#
+# KNOWN LIMITATION, pre-existing and NOT fixed here: the duplicate-procedure, block-balance
+# and module-declaration guards above and below still match VBA keywords case-sensitively,
+# so a module written as `public sub` fails one of those instead. Making the whole file
+# casing-agnostic is a separate change to guards with their own rationale; this comment
+# exists so the next person finds the limitation instead of rediscovering it.
+#
+# $dispatchable itself stays a case-INSENSITIVE hashtable on purpose, because VBA resolves
+# procedure names case-insensitively and so does Application.Run - an entry point declared
+# `PkgFoo_Bar` and referenced as `pkgfoo_bar` really does dispatch.
+$vbaIC = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
 $dispatchable = @{}
 foreach ($f in $asciiCandidates) {
     foreach ($line in (Get-Content -LiteralPath $f)) {
-        $m = [regex]::Match($line, '^\s*(?:Public\s+)?(?:Static\s+)?Sub\s+([A-Za-z_]\w*)\s*\(\s*(?:ByRef\s+|ByVal\s+)?\w+\s+As\s+Object\s*\)')
+        $m = [regex]::Match($line, '^\s*(?:Public\s+)?(?:Static\s+)?Sub\s+([A-Za-z_]\w*)\s*\(\s*(?:ByRef\s+|ByVal\s+)?\w+\s+As\s+Object\s*\)', $vbaIC)
         if ($m.Success) { $dispatchable[$m.Groups[1].Value] = Split-Path $f -Leaf }
     }
 }
@@ -333,14 +358,16 @@ foreach ($f in $asciiCandidates) {
 $addActionRe = 'Core_AddAction\s+\w+\s*,\s*"([^"]*)"\s*,\s*"[^"]*"\s*,\s*"([^"]*)"'
 $idShapeRe = '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'
 $allowed = ($domainStatus.Keys | Where-Object { $domainStatus[$_] -ne 'reserved' } | Sort-Object) -join ', '
-$idSeen = @{}
+# Ordinal: two ids differing only in case are two DIFFERENT ids by section 7's rules,
+# and each must be judged on its own rather than one masking the other.
+$idSeen = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
 $idProblems = New-Object System.Collections.Generic.List[string]
 foreach ($f in $asciiCandidates) {
     $leaf = Split-Path $f -Leaf
     $srcLines = Get-Content -LiteralPath $f
     for ($i = 0; $i -lt $srcLines.Count; $i++) {
         if ($srcLines[$i] -match "^\s*'") { continue }             # commented-out example
-        $m = [regex]::Match($srcLines[$i], $addActionRe)
+        $m = [regex]::Match($srcLines[$i], $addActionRe, $vbaIC)
         if (-not $m.Success) {
             # A CALL to Core_AddAction that does not parse is a failure, not a skip.
             # Otherwise a wave that wraps its arguments differently - a line continuation
@@ -367,7 +394,7 @@ foreach ($f in $asciiCandidates) {
             $idSeen[$id] = $where
         }
 
-        if (-not $legacySet.ContainsKey($id)) {
+        if (-not $legacySet.Contains($id)) {
             # -cnotmatch, NOT -notmatch. See the case-sensitivity note above.
             if ($id -cnotmatch $idShapeRe) {
                 $idProblems.Add("malformed action id '$id' at $where - must be exactly two segments, <domain>.<operation>, each starting with a lowercase letter and continuing with lowercase letters/digits/underscores. Never camelCase.")
@@ -375,11 +402,11 @@ foreach ($f in $asciiCandidates) {
         }
 
         $domain = if ($id -match '^([^.]+)\.') { $matches[1] } else { $id }
-        if (-not $domainStatus.Contains($domain)) {
+        if (-not $domainStatus.ContainsKey($domain)) {
             $idProblems.Add("unknown domain '$domain' in action id '$id' at $where - not in the vocabulary table in spec/contract.md section 7. Allowed: $allowed.")
         } elseif ($domainStatus[$domain] -eq 'reserved') {
             $idProblems.Add("reserved domain '$domain' in action id '$id' at $where - '$domain.*' is reserved for the engine in spec/contract.md section 7 and no package action may use it.")
-        } elseif ($domainStatus[$domain] -eq 'grandfathered' -and -not $legacySet.ContainsKey($id)) {
+        } elseif ($domainStatus[$domain] -eq 'grandfathered' -and -not $legacySet.Contains($id)) {
             # 'grandfathered' means "these exact shipped ids are permanent", NOT "this
             # domain is open for business". Without this branch a wave could add
             # importexport.some_new_id and pass, which is precisely what section 7's
