@@ -557,10 +557,9 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
   digits and underscores. (The leading-letter rule is stated because the build gate
   enforces it; without it here, the gate would be stricter than the contract it claims to
   implement.) **The domain is a controlled user-facing vocabulary, NOT the package or
-  module that implements it** — an action id is a permanent dispatch key a user may type by
-  hand (in the Excel reference implementation, into a chain step cell, where only the
-  bracketed id is authoritative and any label beside it is decoration — §6), so encoding
-  the module in it would make a future package split a major contract break for no benefit. The operation segment is
+  module that implements it** — an action id is a permanent dispatch key stored in the
+  config (§5), so encoding the module in it would make a future package split a major
+  contract break for no benefit. The operation segment is
   descriptive where ambiguity looms (`clean.remove_blank_rows`, never `clean.blank2`).
   **No new id is ever camelCase.** Ids are immutable; captions, help text, entry points
   and module assignment stay free to change. There is no alias or migration table, by
