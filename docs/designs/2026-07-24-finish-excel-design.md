@@ -299,6 +299,145 @@ concrete answer to designing a 60-button layout while only 7 actions exist.
 
 ## 5. Handoff log
 
+### 2026-07-28 — track 1 finished and shipped (v0.7.0–v0.9.0); W1 approved, not started
+
+**Branch / commits.** All on `main`, five PRs merged: **#14** Part A (v0.6.0),
+**#15** Core hardening (v0.7.0), **#16** Setup reorder (v0.8.0), **#17** identity
+reskin (v0.9.0), **#18** a re-land. `main` is at **v0.9.0 / contract v2.2.0**;
+`SCHEMA_VER` deliberately still `"v2.0"`.
+
+**#16 and #17 merged into their base branches, not `main`.** They were stacked PRs
+whose bases were the branch below them, and merging all three back-to-back beat
+GitHub's retarget — 11 commits stranded one level down, and #18 exists purely to
+bring them over. **If you stack PRs again: merge one, wait for the retarget, then
+merge the next** — or base every PR on `main` up front and accept the noisier diff.
+
+**What shipped.** `src/core/Core.bas` (now 229.3K), `spec/contract.md` (v2.0.0 →
+v2.2.0), `CLAUDE.md`, README + CHANGELOG (logo), **new** `tools/GateAudit.bas`,
+**new** `docs/assets/sheetforge-logo.png`, **new** `docs/macro_code_library.md`
+(owner-authored, 30.8K), and four gate documents. Build: `Core + 2 package(s)`,
+`Sub 62/62`, `Function 129/129`, 191 unique procedures. Test count unchanged:
+**none, by repo policy** — VBA has no headless runner.
+
+**Closed:** #6, #10 · #8, #12, #13, #3 · #11.
+
+**Corrections made during execution — DO NOT REVERT:**
+
+- **`ClearCatalogBlock` clears row by row and skips merged rows** (`114dfa3`).
+  *Reason:* `TintRow` merges columns B:E, and a blanket `Range.ClearContents` over
+  D:E is a **partial** clear of that merge → `1004 We can't do that to a merged
+  cell`, aborting the rebuild. Do not simplify it back to a range clear, and do not
+  widen it to B:E — a merged row carries no id and no availability, so skipping it
+  is correct, not a workaround.
+- **`CfgSheet` adopts an orphaned `_Config_staged` when `_Config` is missing.**
+  *Reason:* staged-then-swap alone opens a *new* way to lose data — a stage sheet
+  left by an interrupted swap would be cleared by the next activate, destroying the
+  only surviving copy. Verified by hand; gate item 1.2 passed.
+- **`MarkerVerdict` requires positive proof of the pre-v1.2 shape** (`LooksPreV12`)
+  instead of reading the visible `Availability` header back. *Reason:* a
+  user-editable caption was deciding a machine-owned question; renaming it promoted
+  a tampered block to the legacy path and armed every destructive action. The
+  residual hole is documented as gate item 2.2, not a silence.
+- **`firstContentRow` is assigned ABOVE the compose call in `Core_BuildSetup`.**
+  *Reason:* Chain `Steps` cells are `WrapText` multi-line; anchoring AutoFit below
+  compose clips them. That is why the rename from `firstFieldRow` exists at all.
+- **Semantic colours are NOT in the identity palette.** The yellow input cells
+  (`255,242,204`) and the two warning reds (`150,0,0`, `192,0,0`) were left alone.
+  *Reason:* the brand red is close enough that reusing it for chrome stops a warning
+  reading as a warning. `ForgeRed` appears only on the Setup sheet tab, where no
+  text sits on it.
+- **The palette is five `Private Function`s, not `Const`s**, placed AFTER every
+  module-level declaration. *Reason:* VBA rejects `Const c As Long = RGB(...)`
+  ("constant expression required"), and a procedure inside the declaration block
+  fails the build with "module-level declaration after a procedure".
+- **`GateAudit`'s spacing check asserts nothing.** *Reason:* it reported FAIL on a
+  correct build — it counted blanks before the next KEY row, but the spacer sits
+  before the next BLOCK. It cannot be repaired into an assertion: with no chains
+  defined the 20 chain input rows are themselves empty, so row-blankness does not
+  delimit the block. Do not re-arm it.
+- **Gate helpers loop column A; they never call `Range.Find`** — see below.
+
+**Discovered (empirical — each cost a round trip, none is recorded anywhere else):**
+
+- **`Range.Find` returns `Nothing` on a very-hidden `_Config`.** Every argument was
+  named (`LookIn:=xlValues, LookAt:=xlWhole, MatchCase:=False`), so this is not the
+  inherited-`LookIn` trap. Evidence: the sheet demonstrably held `k_core_layout` at
+  row 11 and a plain loop found it immediately. Core's own `FindKeyRow` loops
+  column A — match it.
+- **`xlSheetVeryHidden` is `2`, not `-2`** (`-1` visible, `0` hidden). A gate
+  written against `-2` fails the owner at item 1 on a correct build.
+- **Excel's module import never replaces a same-named module.** Importing
+  `MacrosBundle.bas` over an existing `MacrosBundle` adds `MacrosBundle1`,
+  duplicating ~191 procedures → `Ambiguous name detected` on compile and doubled
+  Alt+F8 entries. **Always remove the old module first.**
+- **`Left$(s, n)` with `n > Len(s)` returns the whole string rather than raising.**
+  Verified by executing the logic in **VBScript via `cscript`** across ten cases
+  including `""`, `"c"` and `"core"`. VBScript is the closest locally executable
+  dialect; **onecompiler.com/vb is VB.NET and cannot compile this project** — no
+  `Application`, no `Worksheet`, no `CreateObject`.
+- **`IMPORT / EXPORT` is `UCase()` of the package display name, composed at run
+  time.** Grepping the bundle for it finds nothing; that is not evidence it is
+  unemitted. A subagent reported it as a defect and was wrong.
+- **The blind dry-run reads VBA; it does not execute it.** It caught 13 + 6 + 7
+  authoring defects across three gates and **zero** runtime defects — both helper
+  failures above sailed straight through it. It is an authoring gate, not a test.
+- **`build.ps1` catches "module-level declaration after a procedure"**, a real VBA
+  compile rule and the closest thing to CI here. It caught the palette placement.
+
+**Still open — the manual gate, 8 of 15 items unrun. All need the human.**
+Passed: hardening 1.1, 1.2, 2.1 · reorder 1 · reskin 1, 2, 3, plus the spacing half
+of reorder 2 confirmed by eye. Both load-bearing items (#8 crash recovery, #12
+fail-closed) passed. Unrun: **hardening 1.3, 2.2, 3.1, 4.1, 4.2** · **reorder 2
+(clipping half), 3** · **reskin 4 (dark Excel theme)**. Two need their own build —
+3.1 a hostile `PkgClean` declaring `core.legacy`, and reorder 3 the v0.6.0 bundle
+from `812d88c`. **Reskin 4 is the likeliest real finding:** the palette came off a
+dark-background proof and lands on an explicitly white sheet, and nothing has
+checked the two together. `tools/GateAudit.bas` re-runs six mechanical checks in
+one click.
+
+Not blocking: `.superpowers/sdd/` still needs deleting **by hand** (the permission
+classifier refused twice); `.vscode/` stays untracked deliberately.
+
+**Next phase — W1, the ingest→clean path (7 actions). Approved by the owner
+2026-07-28; no code written.** Scope and ids frozen in §3.4 above. Build in this
+order, because the first item is what makes the other seven safe to write:
+
+1. **Contract v2.3.0** — add the nine-domain vocabulary table to §7 (`import` ·
+   `clean` · `validate` · `enrich` · `format` · `summarize` · `export` ·
+   `workbook` · `backup`; reserved `chain.*` and `core.*`; grandfathered
+   `importexport.*`) and the seven new ids to §8. **§7 has no vocabulary table
+   today** — §3.1 assumes one exists and it does not.
+2. **`build.ps1` id enforcement** — extract literal `Core_AddAction` ids, fail on
+   duplicates and on any domain absent from that table. **`build.ps1` still has no
+   id check at all**, exactly as the 2026-07-24 entry recorded. Until it does,
+   nothing stops a wave shipping `import.combineWorksheets` — and ids are immutable
+   with no alias table by design, so a wrong one is unfixable.
+3. **`PkgImport.bas`** (new) — `import.combine_worksheets`,
+   `import.combine_workbooks`, `import.delimited_file`; the two combines share one
+   private `PkgImport_CombineEngine`.
+4. **`PkgClean.bas`** (+4) — `clean.remove_blanks`, `clean.unmerge_fill`,
+   `clean.standardize_formats`, `clean.text_to_numbers`; the last calls the
+   existing `Core_Coerce` rather than reimplementing coercion.
+5. **Gate + `GateAudit` extension** — manifest-shaped checks (every action has a
+   manifest entry, an entry point, a valid domain) automate the way the colour
+   checks did. Only click-every-button stays manual.
+
+`Core_AddAction` already takes `category:=` — §3.2 shipped in track 1; do not
+re-add it.
+
+**Read manifest.** This design (22.1K, §3 is the whole track-2 spec) ·
+`docs/macro-catalog-plug-and-play.md` (16.3K, the authoritative build queue) ·
+`docs/macro_code_library.md` (30.8K, **new** — the owner's reference
+implementation, 49 snippets; §1 and §2 cover W1. **Its snippets are test
+scaffolding, not package code**: `ActiveSheet`/`Selection`, hardcoded paths marked
+`' <-- set`, no speed wrapper, no error handler, none runtime-tested — converting
+one is most of the work) · `spec/contract.md` (54.1K — **over the slice threshold,
+never read front to back**; grep `## 7.` and `## 8.`) · `build/build.ps1` (16.6K,
+for the new id checks) · `src/packages/PkgClean.bas` (11.0K, the package pattern to
+copy) · `src/core/Core.bas` (229.3K — **never read whole**; grep
+`docs/code-map.md` (29.3K, current at `8886fa8`) for an anchor, then read that
+slice only).
+
 ### 2026-07-24 — design agreed by the owner; no code written yet
 
 **Branch / commits.** `docs/finish-excel-design` off `main` (`0d0cccd`), one
