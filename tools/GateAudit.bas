@@ -46,6 +46,7 @@ Public Sub GateAudit_Run()
 
     AuditSheets
     AuditOrder
+    AuditActionCatalog
     AuditSpacing
     AuditSetupColours
     AuditPanelColours
@@ -133,6 +134,91 @@ Private Sub AuditOrder()
         Fal "_core_end is the last key row", "it sits above another key row"
     End If
 End Sub
+
+' Every action id this build should expose. The seven W1 ids plus the eight
+' shipped before them - contract section 8. One Add per line, matching how Core's
+' own CoreCandidates is written: a 15-element Array(...) would fit inside VBA's
+' 25-continuation limit, but a one-per-line list diffs cleanly when a wave adds
+' an id, which is the whole reason this list exists.
+Private Function ExpectedIds() As Collection
+    Dim c As New Collection
+    c.Add "importexport.clear"
+    c.Add "importexport.import"
+    c.Add "importexport.updateMaster"
+    c.Add "importexport.export"
+    c.Add "importexport.suggestTypes"
+    c.Add "clean.dupes"
+    c.Add "clean.trim"
+    c.Add "clean.filldown"
+    c.Add "clean.remove_blanks"
+    c.Add "clean.unmerge_fill"
+    c.Add "clean.standardize_formats"
+    c.Add "clean.text_to_numbers"
+    c.Add "import.combine_worksheets"
+    c.Add "import.combine_workbooks"
+    c.Add "import.delimited_file"
+    Set ExpectedIds = c
+End Function
+
+' Every declared action reaches the Setup Action catalog. This is the whole
+' "did the action make it to the surface" question, and it is answerable
+' WITHOUT running any action - which matters, because several of them delete
+' rows or create sheets and a gate must not do that to get its answer.
+'
+' Ids live in column 10 (RID_COL, hidden) of the catalog block, which starts at
+' the k_core_layout key row and ends at the next key row.
+Private Sub AuditActionCatalog()
+    Dim w As Worksheet, want As Collection, found As Object
+    Dim rStart As Long, rEnd As Long, r As Long
+    Dim id As String, one As Variant, extras As String, nFound As Long
+    Head "ACTION CATALOG COVERAGE      [W1]"
+
+    Set w = Sh("Setup")
+    If w Is Nothing Then Skp "action catalog coverage", "no Setup sheet": Exit Sub
+    rStart = KeyRow(w, "k_core_layout")
+    If rStart = 0 Then Skp "action catalog coverage", "k_core_layout key row not found": Exit Sub
+    rEnd = NextKeyRowAt(w, rStart)
+    If rEnd <= rStart + 1 Then Skp "action catalog coverage", "the catalog block is empty": Exit Sub
+
+    Set found = CreateObject("Scripting.Dictionary")
+    found.CompareMode = 1
+    For r = rStart + 1 To rEnd - 1
+        id = Trim(CStr(w.Cells(r, 10).Value))
+        If Len(id) > 0 Then
+            If Not found.Exists(id) Then found.Add id, r
+            nFound = nFound + 1
+        End If
+    Next r
+    Say "  catalog rows " & (rStart + 1) & "-" & (rEnd - 1) & ", " & nFound & " id(s) present"
+
+    Set want = ExpectedIds()
+    For Each one In want
+        If found.Exists(CStr(one)) Then
+            Pas "catalog lists " & CStr(one)
+        Else
+            Fal "catalog lists " & CStr(one), "no row in column J carries that id"
+        End If
+    Next one
+
+    ' An id on the sheet that no package declares is exactly as interesting as a
+    ' missing one - it is how a stale build announces itself. Reported, not failed:
+    ' a deployment may legitimately carry a package this list does not know about.
+    For Each one In found.Keys
+        If Not AuditIdExpected(want, CStr(one)) Then extras = extras & vbCrLf & "     " & CStr(one)
+    Next one
+    If Len(extras) > 0 Then
+        Say "  UNEXPECTED ids on the sheet (stale build, or a package this audit does not know):" & extras
+    Else
+        Say "  no unexpected ids"
+    End If
+End Sub
+
+Private Function AuditIdExpected(want As Collection, ByVal id As String) As Boolean
+    Dim one As Variant
+    For Each one In want
+        If StrComp(CStr(one), id, vbTextCompare) = 0 Then AuditIdExpected = True: Exit Function
+    Next one
+End Function
 
 ' INFORMATIONAL ONLY - deliberately asserts nothing. Read the geometry, then look.
 '
