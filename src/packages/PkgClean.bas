@@ -25,7 +25,8 @@ Option Explicit
 Public Sub PkgClean_Manifest(reg As Object)
     Core_DeclarePackage reg, "clean", "Clean & Standardize", "1.0.0"
 
-    ' This package declares NO fields, deliberately, so it renders no band on Setup.
+    ' This package declares exactly ONE field - k_clean_formats, below - and from
+    ' v0.5.0 to v2.2.0 it declared none at all and rendered no band on Setup.
     ' Both of its former settings - the key column(s) and whether the first row is a
     ' header - describe THE RANGE THE USER JUST PICKED, not the deployment, so they
     ' are asked for at run time instead. The key columns are the clearer case: they
@@ -172,7 +173,7 @@ End Sub
 ' INSIDE the picked range while holding data outside it; deleting the
 ' whole row would then destroy something the user never selected. Those
 ' rows are counted, reported, and left alone. Only rows blank across the
-' sheet's whole used extent are deleted.
+' sheet's whole used extent - and free of merged cells - are deleted.
 '================================================================
 Public Sub PkgClean_RemoveBlanks(ctx As Object)
     Dim rng As Range, ws As Worksheet
@@ -218,9 +219,17 @@ End Sub
 
 ' Fills four collections of ABSOLUTE sheet row/column numbers:
 '   rowsIn  - blank inside the picked range
-'   rowsDel - blank inside AND across the sheet's used extent (safe to delete)
+'   rowsDel - blank inside AND across the sheet's used extent AND touching no
+'             merged block (safe to delete)
 ' and the same pair for columns. Numbers are collected ascending; the caller
 ' deletes in reverse.
+'
+' CountA = 0 is NOT on its own a licence to delete. A row that holds no values can
+' still be one stripe of a merged block - the middle row of a three-row merged
+' title is the everyday case - and deleting it damages or destroys that merge,
+' including the part of it sitting outside the user's selection. Such a row stays
+' out of rowsDel, which automatically lands it in the held-back count the caller
+' reports, so the user is told rather than surprised.
 Private Sub PkgClean_ScanBlanks(rng As Range, ByRef rowsIn As Collection, ByRef rowsDel As Collection, _
                                 ByRef colsIn As Collection, ByRef colsDel As Collection)
     Dim ws As Worksheet, r As Long, c As Long
@@ -233,16 +242,38 @@ Private Sub PkgClean_ScanBlanks(rng As Range, ByRef rowsIn As Collection, ByRef 
     For r = rng.Row To rng.Row + rng.Rows.Count - 1
         If Application.CountA(Application.Intersect(ws.Rows(r), rng)) = 0 Then
             rowsIn.Add r
-            If Application.CountA(ws.Rows(r)) = 0 Then rowsDel.Add r
+            If Application.CountA(ws.Rows(r)) = 0 Then
+                If Not PkgClean_HasMerge(ws.Rows(r)) Then rowsDel.Add r
+            End If
         End If
     Next r
     For c = rng.Column To rng.Column + rng.Columns.Count - 1
         If Application.CountA(Application.Intersect(ws.Columns(c), rng)) = 0 Then
             colsIn.Add c
-            If Application.CountA(ws.Columns(c)) = 0 Then colsDel.Add c
+            If Application.CountA(ws.Columns(c)) = 0 Then
+                If Not PkgClean_HasMerge(ws.Columns(c)) Then colsDel.Add c
+            End If
         End If
     Next c
 End Sub
+
+' True when ANY cell in rng belongs to a merged block.
+'
+' Range.MergeCells is a Variant with three answers, not two: False when no cell in
+' the range is merged, True when every cell is, and NULL when the range is mixed -
+' which is the ordinary answer for a whole row carrying one merged block, and the
+' case that matters most here. Null is tested first because CBool(Null) raises
+' error 94, so a plain CBool(rng.MergeCells) would blow up on exactly the input
+' this function exists to recognise.
+Private Function PkgClean_HasMerge(rng As Range) As Boolean
+    Dim v As Variant
+    v = rng.MergeCells
+    If IsNull(v) Then
+        PkgClean_HasMerge = True
+    Else
+        PkgClean_HasMerge = CBool(v)
+    End If
+End Function
 
 ' The preview the deferred destructive items lack. vbYesNo, not vbYesNoCancel:
 ' here the title-bar X returns vbNo, and vbNo is the SAFE answer - it deletes
@@ -257,6 +288,11 @@ Private Function PkgClean_ConfirmBlanks(rng As Range, rowsIn As Collection, rows
           "   " & colsDel.Count & " completely blank column(s)" & vbCrLf & vbCrLf
     held = PkgClean_HeldBackNote(rowsIn.Count - rowsDel.Count, colsIn.Count - colsDel.Count)
     If Len(held) > 0 Then msg = msg & held & vbCrLf & vbCrLf
+    ' Spell out what "blank" means. It is decided on CONTENT only - no values, no
+    ' formulas - and nothing here inspects formatting or notes, so a row that looks
+    ' empty but carries a fill colour or a comment counts as blank and goes.
+    msg = msg & "Blank means no values and no formulas. Formatting or notes on an " & _
+          "otherwise empty row or column go with it." & vbCrLf & vbCrLf
     msg = msg & "Whole rows and columns are removed, so everything below and to the " & _
           "right shifts up and left. This cannot be undone with Ctrl+Z." & vbCrLf & vbCrLf & _
           "Delete them?"
@@ -265,12 +301,17 @@ End Function
 
 ' Names what was deliberately NOT deleted. Returns "" when nothing was held back,
 ' so the caller can test Len() rather than compare against a sentence.
+'
+' Two reasons land a row here and the sentence names both, because the user cannot
+' tell them apart from the count: it holds data outside the selection, or it is part
+' of a merged block. Deleting either changes something outside what was picked.
 Private Function PkgClean_HeldBackNote(ByVal heldRows As Long, ByVal heldCols As Long) As String
     If heldRows = 0 And heldCols = 0 Then Exit Function
     PkgClean_HeldBackNote = _
         heldRows & " row(s) and " & heldCols & " column(s) are blank inside your " & _
-        "selection but hold data outside it, so they were left alone - deleting them " & _
-        "would have removed data you did not select."
+        "selection but were left alone - each one either holds data outside your " & _
+        "selection or is part of a merged block, and deleting it would have changed " & _
+        "something you did not select."
 End Function
 
 '================================================================
