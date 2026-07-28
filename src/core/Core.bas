@@ -1316,8 +1316,30 @@ Private Sub ClearCatalogBlock(cfgWs As Worksheet, idsToClear As Object)
     If cKr = 0 Then Exit Sub
     cNk = NextKeyRow(cfgWs, cKr)
     If idsToClear Is Nothing Then
-        cfgWs.Range(cfgWs.Cells(cKr, RID_COL), cfgWs.Cells(cNk - 1, RID_COL)).ClearContents
-        cfgWs.Range(cfgWs.Cells(cKr, VAL_COL + 1), cfgWs.Cells(cNk - 1, VAL_COL + 2)).ClearContents
+        ' ROW BY ROW, skipping merged rows - NOT a blanket Range.ClearContents over
+        ' the whole span. TintRow merges columns B:E, and clearing D:E is a PARTIAL
+        ' clear of that merge, which raises 1004 "We can't do that to a merged cell"
+        ' and aborts the rebuild.
+        '
+        ' The span is layout-key-row .. next-key-row - 1, so what falls inside it
+        ' depends on which block happens to follow the catalog. v0.9.0 put Chains
+        ' immediately after it, and RenderChainsBlock opens with BlockIntro -> two
+        ' merged TintRows - so from that release this fired every time a damaged
+        ' config was cleared. It was reachable before that too, whenever the off band
+        ' rendered (its banner is also a TintRow); with every action switched on there
+        ' is no off band, only a blank spacer before END_KEY, which is why it went
+        ' unseen. Found by the v0.7.0 manual gate, item 2.1.
+        '
+        ' Do not "fix" this by reordering the blocks again or by widening the clear to
+        ' B:E: a merged row carries no id and no availability, so it is never data
+        ' this needs to clear. Skipping it is correct, not a workaround.
+        For ci = cKr To cNk - 1
+            If Not cfgWs.Cells(ci, 2).MergeCells Then
+                cfgWs.Cells(ci, RID_COL).ClearContents
+                cfgWs.Cells(ci, VAL_COL + 1).ClearContents
+                cfgWs.Cells(ci, VAL_COL + 2).ClearContents
+            End If
+        Next ci
     Else
         For ci = cKr + 1 To cNk - 1
             cid = LCase(Trim(CStr(cfgWs.Cells(ci, RID_COL).Value)))
