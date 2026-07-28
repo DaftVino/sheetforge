@@ -260,6 +260,50 @@ Private mRegCache   As Collection
 Private mRegCacheOk As Boolean
 
 '================================================================
+' IDENTITY PALETTE  (v0.9.0 - issue #11)
+'================================================================
+' Sampled from docs/designs/sheetforge-design-proof.png. That proof is a DARK-first
+' mobile concept and NONE of its product surface is in scope - it is a colour
+' reference only. These are its values adapted to the surfaces Core actually draws,
+' which sit on a WHITE sheet (Core_BuildSetup sets Cells.Interior white).
+'
+' This replaces TWO unrelated identities that had drifted apart: purple on the Setup
+' tab (112,48,160 / 54,32,100 / 90,70,120) and blue on the Macros pages (31,78,121).
+' One palette now covers both.
+'
+' Functions, not Const: VBA rejects `Const c As Long = RGB(...)` ("constant
+' expression required") because RGB is a function call, and hard-coding the packed
+' Long instead (FORGE_NAVY would be 3022353) is unreadable and unreviewable.
+'
+' SEMANTIC colours are deliberately NOT in here and were NOT changed - they carry
+' meaning rather than identity, and folding them into a brand palette would erase
+' the distinction: the yellow input cells (255,242,204) that mean "fill this in",
+' and the two warning reds (150,0,0 caution, 192,0,0 error). The brand red is close
+' enough to those that reusing it for chrome would make a warning unreadable AS a
+' warning - so the brand red is confined to the Setup tab strip, where no text sits
+' on it.
+'
+' Contrast on white, all well past WCAG AA for body text:
+'   ForgeNavy  15.1:1     ForgeSteel  10.6:1
+' and on ForgeTint, the band fill:
+'   ForgeNavy  13.0:1     ForgeSteel   9.1:1
+Private Function ForgeRed() As Long        ' brand accent - fills only, never behind text
+    ForgeRed = RGB(187, 30, 32)
+End Function
+Private Function ForgeNavy() As Long       ' headings and titles
+    ForgeNavy = RGB(17, 30, 46)
+End Function
+Private Function ForgeSteel() As Long      ' secondary/help text, and the Macros tab strip
+    ForgeSteel = RGB(49, 60, 74)
+End Function
+Private Function ForgeTint() As Long       ' band + card header fill
+    ForgeTint = RGB(226, 232, 238)
+End Function
+Private Function ForgeRule() As Long       ' hairline borders
+    ForgeRule = RGB(214, 221, 228)
+End Function
+
+'================================================================
 ' 1. MANIFEST-BUILDING API  (called inside Pkg<Name>_Manifest reg)
 '================================================================
 Public Sub Core_DeclarePackage(reg As Object, ByVal id As String, _
@@ -1272,8 +1316,30 @@ Private Sub ClearCatalogBlock(cfgWs As Worksheet, idsToClear As Object)
     If cKr = 0 Then Exit Sub
     cNk = NextKeyRow(cfgWs, cKr)
     If idsToClear Is Nothing Then
-        cfgWs.Range(cfgWs.Cells(cKr, RID_COL), cfgWs.Cells(cNk - 1, RID_COL)).ClearContents
-        cfgWs.Range(cfgWs.Cells(cKr, VAL_COL + 1), cfgWs.Cells(cNk - 1, VAL_COL + 2)).ClearContents
+        ' ROW BY ROW, skipping merged rows - NOT a blanket Range.ClearContents over
+        ' the whole span. TintRow merges columns B:E, and clearing D:E is a PARTIAL
+        ' clear of that merge, which raises 1004 "We can't do that to a merged cell"
+        ' and aborts the rebuild.
+        '
+        ' The span is layout-key-row .. next-key-row - 1, so what falls inside it
+        ' depends on which block happens to follow the catalog. v0.9.0 put Chains
+        ' immediately after it, and RenderChainsBlock opens with BlockIntro -> two
+        ' merged TintRows - so from that release this fired every time a damaged
+        ' config was cleared. It was reachable before that too, whenever the off band
+        ' rendered (its banner is also a TintRow); with every action switched on there
+        ' is no off band, only a blank spacer before END_KEY, which is why it went
+        ' unseen. Found by the v0.7.0 manual gate, item 2.1.
+        '
+        ' Do not "fix" this by reordering the blocks again or by widening the clear to
+        ' B:E: a merged row carries no id and no availability, so it is never data
+        ' this needs to clear. Skipping it is correct, not a workaround.
+        For ci = cKr To cNk - 1
+            If Not cfgWs.Cells(ci, 2).MergeCells Then
+                cfgWs.Cells(ci, RID_COL).ClearContents
+                cfgWs.Cells(ci, VAL_COL + 1).ClearContents
+                cfgWs.Cells(ci, VAL_COL + 2).ClearContents
+            End If
+        Next ci
     Else
         For ci = cKr + 1 To cNk - 1
             cid = LCase(Trim(CStr(cfgWs.Cells(ci, RID_COL).Value)))
@@ -1387,7 +1453,7 @@ End Function
 
 Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
-    Dim firstFieldRow As Long, availMap As Object, bandFirst As Long, bandLast As Long
+    Dim firstContentRow As Long, availMap As Object, bandFirst As Long, bandLast As Long
     On Error GoTo Fail
     InvalidateRegistry              ' a build begins here - see InvalidateRegistry
 
@@ -1413,7 +1479,7 @@ Public Sub Core_BuildSetup()
     Application.ScreenUpdating = False
     Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(1))
     ws.name = SETUP_SHEET
-    ws.Tab.Color = RGB(112, 48, 160)
+    ws.Tab.Color = ForgeRed()
     ws.Cells.Interior.Color = RGB(255, 255, 255)
     ws.Columns("A").ColumnWidth = 9
     ws.Columns("B").ColumnWidth = 50
@@ -1428,7 +1494,7 @@ Public Sub Core_BuildSetup()
     ws.Cells(r, 2).Value = "Toolkit Setup"
     ws.Cells(r, 2).Font.Size = 16
     ws.Cells(r, 2).Font.Bold = True
-    ws.Cells(r, 2).Font.Color = RGB(112, 48, 160)
+    ws.Cells(r, 2).Font.Color = ForgeNavy()
     r = r + 1
     ws.Cells(r, 2).Value = "Fill in the YELLOW cells, then click  'Finalize Setup Tab'  on the Setup Menu tab."
     ws.Cells(r, 2).Font.Italic = True
@@ -1452,7 +1518,21 @@ Public Sub Core_BuildSetup()
     ' for every id - the v2.1.0 default (ADR 0003).
     Set availMap = ReadAvailMap(CfgSheet())
 
-    firstFieldRow = r
+    ' AutoFit starts HERE, above Compose, not at the first package field. Compose
+    ' now renders first (below) and its Chain "Steps" cells are WrapText multi-line;
+    ' anchoring AutoFit after it would clip them. Named firstContentRow rather than
+    ' firstFieldRow because it is no longer the first field.
+    firstContentRow = r
+
+    ' Action catalog FIRST, then Chains, then the per-package settings bands. The
+    ' catalog is the surface a first-time user has to act on before anything else
+    ' works - as of v0.6.0 every action arrives Off, so a Setup tab that opens on
+    ' someone else's export paths buries the one block that turns the tool on.
+    ' Settings for actions you have not enabled yet are the least urgent thing on
+    ' the sheet, which is also why the off band collapses at the bottom.
+    r = RenderComposeSection(ws, r)
+    r = r + 1
+
     Dim banner As String
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
@@ -1476,11 +1556,9 @@ Public Sub Core_BuildSetup()
         End If
     Next reg
 
-    r = RenderComposeSection(ws, r)
-
-    ' The off band goes BELOW Compose on purpose: the action catalog is where the
-    ' user turns things on and off, so it must never sit under a collapsed section.
-    r = r + 1
+    ' The off band stays LAST: settings whose actions are all Off are the least
+    ' urgent thing on the sheet, and the action catalog that switches them on is now
+    ' at the very top rather than immediately above them.
     r = RenderOffBand(ws, r, availMap, bandFirst, bandLast)
 
     ' Sentinel key in column A. The config readers bound a list/table block by
@@ -1494,7 +1572,7 @@ Public Sub Core_BuildSetup()
     ' Long labels in column B are set to wrap (below); auto-size the field rows
     ' so a wrapped label is fully visible instead of being clipped by the value
     ' cell in column C.
-    ws.Rows(firstFieldRow & ":" & r).AutoFit
+    ws.Rows(firstContentRow & ":" & r).AutoFit
 
     ' Group AFTER AutoFit: AutoFit sizes rows and would otherwise fight the
     ' collapse, and a collapsed row's height is irrelevant anyway.
@@ -1629,11 +1707,11 @@ Private Function RenderOffBand(ws As Worksheet, ByVal r As Long, availMap As Obj
                 "They are kept and still saved, so nothing you typed is lost - set the " & _
                 "action back to 'Button' and they move up into the main list. Click the + " & _
                 "in the left margin to open this section.", _
-                9, False, True, RGB(90, 70, 120))
+                9, False, True, ForgeSteel())
     bandFirst = r
     For Each reg In BuildRegistry()
         If HasAnyTier(reg, availMap, False) Then
-            r = TintRow(ws, r, CStr(reg("name")), 10, True, False, RGB(90, 70, 120))
+            r = TintRow(ws, r, CStr(reg("name")), 10, True, False, ForgeSteel())
             r = RenderTier(ws, r, reg, "simple", False, UCase(CStr(reg("name"))), availMap, False)
             r = RenderTier(ws, r, reg, "advanced", False, UCase(CStr(reg("name"))), availMap, False)
         End If
@@ -1708,7 +1786,7 @@ Private Function TintRow(ws As Worksheet, ByVal r As Long, ByVal txt As String, 
     Dim lines As Long
     With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
         .Merge
-        .Interior.Color = RGB(221, 217, 240)
+        .Interior.Color = ForgeTint()
         .WrapText = True
         .VerticalAlignment = xlTop
     End With
@@ -1730,8 +1808,8 @@ End Function
 ' config block readers. Returns the row for the header/key row.
 Private Function BlockIntro(ws As Worksheet, ByVal r As Long, _
                             ByVal label As String, ByVal help As String) As Long
-    r = TintRow(ws, r, label, 11, True, False, RGB(54, 32, 100))
-    If Trim(help) <> "" Then r = TintRow(ws, r, help, 9, False, True, RGB(90, 70, 120))
+    r = TintRow(ws, r, label, 11, True, False, ForgeNavy())
+    If Trim(help) <> "" Then r = TintRow(ws, r, help, 9, False, True, ForgeSteel())
     BlockIntro = r
 End Function
 
@@ -1788,16 +1866,27 @@ End Function
 '   declarations section at the top (VBA requires module-level Const there;
 '   a Const between procedures is a compile error).
 '================================================================
+' Action catalog FIRST, Chains second. The catalog is the only block a new
+' deployment MUST touch - every action arrives Off as of v0.6.0, so nothing runs
+' until someone sets an Availability cell. Chains build on actions that are already
+' switched on, so asking for them first inverted the dependency: the reader was
+' invited to compose buttons out of actions they had not enabled yet.
+'
+' Order here is presentation only. Every reader locates its block by key
+' (FindKeyRow/NextKeyRow), so a _Config written in the old order still reads
+' correctly and no migration is needed - the sheet is simply re-emitted in the new
+' order at the next Finalize.
 Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     r = SectionHeader(ws, r, "COMPOSE YOUR BUTTONS")
-    r = TintRow(ws, r, "Build multi-step buttons (Chains) and arrange buttons " & _
-                "onto pages (Placement). Leave every code blank for the automatic, " & _
-                "category-packed layout.", _
+    r = TintRow(ws, r, "Turn actions on in the Action catalog below - each one is " & _
+                "Off until you pick Button or Chains only. Then build multi-step " & _
+                "buttons (Chains) and arrange them onto pages (Placement). Leave " & _
+                "every code blank for the automatic, category-packed layout.", _
                 10, False, True, RGB(90, 90, 90))
     r = r + 1
-    r = RenderChainsBlock(ws, r)
-    r = r + 1
     r = RenderPlacementBlock(ws, r)
+    r = r + 1
+    r = RenderChainsBlock(ws, r)
     RenderComposeSection = r
 End Function
 
@@ -3288,7 +3377,7 @@ Private Sub BuildAdminPanel()
     Set ws = EnsurePanelSheet(ADMIN_SHEET, False)
     With ws.Range("B2")
         .Value = "Setup Menu"
-        .Font.Size = 16: .Font.Bold = True: .Font.Color = RGB(31, 78, 121)
+        .Font.Size = 16: .Font.Bold = True: .Font.Color = ForgeNavy()
     End With
     ' Fix round 2, fix 1: EnsurePanelSheet's row-height reset pins row 2 at
     ' StandardHeight, which does not grow for a 16pt title, so set it literally
@@ -3356,7 +3445,7 @@ Private Function EnsurePanelSheet(ByVal nm As String, ByVal atFront As Boolean) 
     ' before anything else sizes a specific row, so every subsequent
     ' RowHeight/AutoFit call in this build starts from a clean sheet.
     ws.Cells.RowHeight = ws.StandardHeight
-    ws.Tab.Color = RGB(31, 78, 121)
+    ws.Tab.Color = ForgeSteel()
     ws.Cells.Interior.Color = RGB(255, 255, 255)
     ws.Columns("A").ColumnWidth = 2
     ws.Columns("B").ColumnWidth = 47
@@ -3462,7 +3551,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
         .Value = CStr(page("title"))
         .Font.Size = 15
         .Font.Bold = True
-        .Font.Color = RGB(31, 78, 121)
+        .Font.Color = ForgeNavy()
     End With
 
     colKeys = SortedKeys(cols)
@@ -3490,8 +3579,8 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
                 .Value = hdr
                 .Font.Bold = True
                 .Font.Size = 11
-                .Font.Color = RGB(54, 32, 100)
-                .Interior.Color = RGB(221, 217, 240)
+                .Font.Color = ForgeNavy()
+                .Interior.Color = ForgeTint()
                 .WrapText = True    ' fix round 1: a long category used to spill into the gutter
             End With
         End If
@@ -3518,7 +3607,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
                 With .Borders(xlEdgeBottom)
                     .LineStyle = xlContinuous
                     .Weight = xlHairline
-                    .Color = RGB(221, 221, 226)
+                    .Color = ForgeRule()
                 End With
             End With
             If dRow > lastRow Then lastRow = dRow
@@ -4276,7 +4365,7 @@ Private Sub Yellow(rng As Range)
 End Sub
 
 Private Function SectionHeader(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
-    SectionHeader = TintRow(ws, r, txt, 11, True, False, RGB(54, 32, 100))
+    SectionHeader = TintRow(ws, r, txt, 11, True, False, ForgeNavy())
 End Function
 
 Private Sub PopulateReferenceLists(ws As Worksheet, ByVal startRow As Long)

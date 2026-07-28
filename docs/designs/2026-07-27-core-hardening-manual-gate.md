@@ -16,15 +16,46 @@ here. Excel-behaviour claims that remain unverified are marked `ASSUMPTION`.
 
 ---
 
-## Status — NOT RUN
+## Status — PART RUN, 2026-07-28
 
 | Section | Items | State |
 |---|---|---|
-| 1. Interrupted activate survives (#8) | 0/3 | Not run |
-| 2. A removed marker fails closed (#12) | 0/2 | Not run |
+| 1. Interrupted activate survives (#8) | 2/3 | **1.1 + 1.2 passed**; 1.3 not run |
+| 2. A removed marker fails closed (#12) | 1/2 | **2.1 passed**; 2.2 not run |
 | 3. `core.*` is refused (#13) | 0/1 | Not run |
 | 4. Part A did not regress | 0/2 | Not run |
-| **Total** | **0/8** | **Not run** |
+| **Total** | **3/8** | 1.1 via `tools/GateAudit.bas` |
+
+The two that ran are the two that carry the section: **1.2** (recovery from an
+interrupted activate) and **2.1** (a removed marker refuses instead of falling through to
+the legacy path). Neither can pass on a broken build.
+
+### The run found a real Core defect — fixed, and 2.1 re-run against the fix
+
+**`Core_BuildSetup error: We can't do that to a merged cell`**, on the rebuild after 2.1's
+refusal. `TintRow` merges columns B:E; `ClearCatalogBlock` blanket-cleared D:E across the
+span from the catalog key row to the next key row, and clearing D:E of a B:E merge is a
+*partial* clear, which raises 1004 and aborts. The user was left with a damaged config, a
+refusal they could not act on, and no way forward.
+
+What sits inside that span depends on which block follows the catalog, which is why it
+surfaced now: moving the Action catalog to the top put Chains directly after it, and
+`RenderChainsBlock` opens with two merged `TintRow`s. It was reachable before that too
+whenever the off band rendered, but with every action switched on there is no off band —
+only a blank spacer before `END_KEY` — so the common path never touched a merge and nobody
+had run the rare one. **This path had never been executed in Excel before.**
+
+`ClearCatalogBlock` now clears row by row and skips merged rows. Item 2.1 was re-run
+against the fixed build and passed, with the refusal message and no 1004.
+
+### And a defect in this gate's own helpers
+
+`Range.Find` returned `Nothing` on a `_Config` that demonstrably held `k_core_layout` at
+row 11 — with every argument named, so it was not the usual inherited-`LookIn` trap.
+Most likely because `_Config` is `xlSheetVeryHidden`. The helpers now loop column A, which
+is what `FindKeyRow` in Core does and what they should have done from the start. **The
+blind dry-run could not have caught this**: it reads VBA, it does not execute it. Worth
+remembering as the boundary of that mechanism.
 
 **Two of the eight are preconditions, not evidence.** Items 1.1 and 1.3 pass unchanged on
 a pre-fix build — normal activation was never broken. They are here to prove the fixture is
@@ -73,52 +104,75 @@ hostile bundle — build it when you reach it, not now.
        MsgBox msg, vbInformation, "Sheets"
    End Sub
 
+   ' Row of the catalog key, or 0. A LOOP, not Range.Find.
+   '
+   ' The 2026-07-27 run proved Find unusable here: every helper below used
+   ' Columns(1).Find with fully-named arguments and it still returned Nothing on a
+   ' _Config that demonstrably contained k_core_layout at row 11 - almost certainly
+   ' because _Config is xlSheetVeryHidden. Core itself never uses Find for this
+   ' either; FindKeyRow loops column A. Match that and the problem disappears.
+   Private Function GateKeyRow(w As Worksheet) As Long
+       Dim i As Long, lastR As Long
+       lastR = w.Cells(w.Rows.Count, 1).End(xlUp).Row
+       For i = 1 To lastR
+           If LCase(Trim(CStr(w.Cells(i, 1).Value))) = "k_core_layout" Then
+               GateKeyRow = i
+               Exit Function
+           End If
+       Next i
+   End Function
+
    ' Prints the catalog block's marker cell and its column D header BEFORE you
    ' change anything, so the later confirmation cannot be satisfied by a cell
-   ' that was always empty.
+   ' that was always empty. On failure it dumps every key it DID find, so a
+   ' not-found result tells you something instead of just stopping.
    Public Sub GateShowMarker()
-       Dim w As Worksheet, c As Range
+       Dim w As Worksheet, r As Long, i As Long, lastR As Long, v As String, dump As String
        Set w = ThisWorkbook.Worksheets("_Config")
-       Set c = w.Columns(1).Find(What:="k_core_layout", LookIn:=xlValues, _
-                                 LookAt:=xlWhole, MatchCase:=False)
-       If c Is Nothing Then
-           MsgBox "k_core_layout NOT FOUND - stop and report this.", vbCritical
+       r = GateKeyRow(w)
+       If r = 0 Then
+           lastR = w.Cells(w.Rows.Count, 1).End(xlUp).Row
+           For i = 1 To lastR
+               v = Trim(CStr(w.Cells(i, 1).Value))
+               If Len(v) > 0 And Len(dump) < 700 Then dump = dump & i & ": [" & v & "]" & vbCrLf
+           Next i
+           MsgBox "_Config visible=" & w.Visible & "   last row in col A=" & lastR & _
+                  vbCrLf & vbCrLf & "Keys actually in column A:" & vbCrLf & dump, _
+                  vbExclamation, "k_core_layout not in column A"
            Exit Sub
        End If
-       MsgBox "row=" & c.Row & vbCrLf & _
-              "marker (col J) = [" & w.Cells(c.Row, 10).Value & "]" & vbCrLf & _
-              "header (col D) = [" & w.Cells(c.Row, 4).Value & "]" & vbCrLf & _
-              "header (col E) = [" & w.Cells(c.Row, 5).Value & "]", _
+       MsgBox "row=" & r & vbCrLf & _
+              "marker (col J) = [" & w.Cells(r, 10).Value & "]" & vbCrLf & _
+              "header (col D) = [" & w.Cells(r, 4).Value & "]" & vbCrLf & _
+              "header (col E) = [" & w.Cells(r, 5).Value & "]", _
               vbInformation, "Before"
    End Sub
 
    Public Sub GateTamperMarker()
-       Dim w As Worksheet, c As Range
+       Dim w As Worksheet, r As Long
        Set w = ThisWorkbook.Worksheets("_Config")
-       Set c = w.Columns(1).Find(What:="k_core_layout", LookIn:=xlValues, _
-                                 LookAt:=xlWhole, MatchCase:=False)
-       If c Is Nothing Then MsgBox "not found", vbCritical: Exit Sub
-       w.Cells(c.Row, 10).ClearContents        ' blank the hidden marker
-       w.Cells(c.Row, 4).Value = "Avail"       ' rename the visible header
-       MsgBox "Marker blanked, header renamed to 'Avail'.", vbInformation
+       r = GateKeyRow(w)
+       If r = 0 Then MsgBox "not found - run GateShowMarker for the dump", vbCritical: Exit Sub
+       w.Cells(r, 10).ClearContents         ' blank the hidden marker
+       w.Cells(r, 4).Value = "Avail"        ' rename the visible header
+       MsgBox "Row " & r & ": marker blanked, header renamed to 'Avail'.", vbInformation
    End Sub
 
    ' Clears column E across the whole catalog block - the second half of item 2.2.
    ' Bounds the block by the next key row rather than guessing a row count.
    Public Sub GateClearColumnE()
-       Dim w As Worksheet, c As Range, i As Long, lastR As Long, n As Long
+       Dim w As Worksheet, r As Long, i As Long, lastR As Long, n As Long
        Set w = ThisWorkbook.Worksheets("_Config")
-       Set c = w.Columns(1).Find(What:="k_core_layout", LookIn:=xlValues, _
-                                 LookAt:=xlWhole, MatchCase:=False)
-       If c Is Nothing Then MsgBox "not found", vbCritical: Exit Sub
+       r = GateKeyRow(w)
+       If r = 0 Then MsgBox "not found", vbCritical: Exit Sub
        lastR = w.Cells(w.Rows.Count, 1).End(xlUp).Row
-       n = c.Row
-       For i = c.Row + 1 To lastR
+       n = r
+       For i = r + 1 To lastR
            If Len(Trim(CStr(w.Cells(i, 1).Value))) > 0 Then Exit For
            n = i
        Next i
-       w.Range(w.Cells(c.Row, 5), w.Cells(n, 5)).ClearContents
-       MsgBox "Cleared column E, rows " & c.Row & "-" & n & ".", vbInformation
+       w.Range(w.Cells(r, 5), w.Cells(n, 5)).ClearContents
+       MsgBox "Cleared column E, rows " & r & "-" & n & ".", vbInformation
    End Sub
 
    Public Sub GateRenameConfigToStaged()
@@ -147,7 +201,7 @@ not -2 — the first draft of this gate had that backwards.)
 
 ## 1. An interrupted activate does not lose the configuration (#8)
 
-- [ ] **Precondition — a normal Finalize leaves no staging sheet behind.**
+- [x] **Precondition — a normal Finalize leaves no staging sheet behind.**
       Alt+F8 → `GateDumpSheets`.
 
       Expected: a line `_Config   visible=2`, the `Setup` tab, the `Macros` page(s), and
@@ -158,7 +212,7 @@ not -2 — the first draft of this gate had that backwards.)
 
       *Precondition, not evidence — this passes on a pre-fix build too.*
 
-- [ ] **The state a crash leaves behind is recovered, not discarded.** This is the whole of
+- [x] **The state a crash leaves behind is recovered, not discarded.** This is the whole of
       #8. Alt+F8 → `GateRenameConfigToStaged`.
 
       The workbook now holds a complete configuration under the staging name and **no
@@ -202,7 +256,7 @@ not -2 — the first draft of this gate had that backwards.)
 
 ## 2. A removed marker fails closed (#12)
 
-- [ ] **Renaming the visible header no longer promotes a tampered block to legacy.**
+- [x] **Renaming the visible header no longer promotes a tampered block to legacy.**
 
       First, Alt+F8 → `GateShowMarker`. **Before you change anything**, confirm the dialog
       shows a **non-empty** `marker (col J)` (it should read `v2.0`) and
