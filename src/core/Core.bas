@@ -35,6 +35,10 @@ Option Explicit
 ' ---- sheet names ----
 Private Const SETUP_SHEET    As String = "Setup"
 Private Const CONFIG_SHEET   As String = "_Config"     ' hidden, written by Finalize
+' Where Finalize stages the new config before swapping it into place (issue #8).
+' Only ever exists DURING an activate; if you find one in a workbook, an activate was
+' interrupted and CfgSheet will adopt it. Must stay <= 31 chars (Excel sheet-name limit).
+Private Const CONFIG_STAGE   As String = "_Config_staged"
 Private Const MACRO_SHEET    As String = "Macros"
 Private Const ADMIN_SHEET    As String = "Setup Menu"   ' Create/Finalize controls; hideable
 Private Const PACKAGES_SHEET As String = "_Packages"   ' optional enable/disable layer
@@ -555,9 +559,38 @@ Private Function DefaultTable3Reg(reg As Object, ByVal key As String, _
 End Function
 
 ' ---- raw sheet readers (config source = _Config, or any given sheet) ----
+' The ONE accessor for the activated config - and, since issue #8, the one place
+' that recovers an interrupted activate.
+'
+' Finalize activates by copying Setup to CONFIG_STAGE, verifying it, then deleting
+' the old _Config and renaming the stage into place. A crash in the gap between that
+' delete and that rename leaves a workbook holding a COMPLETE config under the stage
+' name and no _Config at all. Adopting it here means every reader recovers without
+' knowing anything about staging - and, critically, that Core_BuildSetup does not
+' read "no config yet" and re-seed Setup with defaults ON TOP of a config that is
+' sitting right there. That silent overwrite is the actual data loss in #8; the
+' missing sheet is only how it starts.
+'
+' Adoption is safe because a stage sheet never outlives a SUCCESSFUL activate: the
+' success path renames it to CONFIG_SHEET, and Finalize deletes a stale one before
+' every copy. Its existence alongside a missing _Config is therefore proof of an
+' interrupted swap, not ambiguity.
+'
+' The repair is best-effort: if the rename is refused (protected workbook), the sheet
+' is still returned, so reading keeps working even when healing cannot.
 Private Function CfgSheet() As Worksheet
     On Error Resume Next
     Set CfgSheet = ThisWorkbook.Worksheets(CONFIG_SHEET)
+    On Error GoTo 0
+    If Not CfgSheet Is Nothing Then Exit Function
+
+    On Error Resume Next
+    Set CfgSheet = ThisWorkbook.Worksheets(CONFIG_STAGE)
+    On Error GoTo 0
+    If CfgSheet Is Nothing Then Exit Function
+    On Error Resume Next
+    CfgSheet.name = CONFIG_SHEET
+    CfgSheet.Visible = xlSheetVeryHidden
     On Error GoTo 0
 End Function
 
@@ -948,6 +981,24 @@ End Function
 
 Private Function IsChainId(ByVal id As String) As Boolean
     IsChainId = (LCase(Left$(id, 6)) = "chain.")
+End Function
+
+' The SECOND reserved action-id namespace (contract section 7, v2.1.0), enforced at
+' Finalize exactly like chain.* - see ComposeReport (a).
+'
+' Not cosmetic symmetry. AVAIL_LEGACY_KEY ("core.legacy") lives INSIDE the
+' availability dictionary alongside real action ids, so a package declaring an
+' action with that exact id occupies the sentinel key. AvailFor would then find the
+' legacy key present on every map it builds and resolve EVERY absent id to Button
+' instead of Off - silently undoing the v2.1.0 default on that deployment, for
+' destructive actions included. Section 7 states no character rule for action ids,
+' so the sentinel cannot be asserted collision-proof on its own (ADR 0003 decision
+' 2); the namespace has to be enforced rather than merely declared.
+'
+' Left$ with a length past the end of the string returns the whole string rather
+' than raising, so a 1- or 2-character id is safe here - same as IsChainId above.
+Private Function IsCoreId(ByVal id As String) As Boolean
+    IsCoreId = (LCase(Left$(id, 5)) = "core.")
 End Function
 
 Private Function IsQuiet(ctx As Object) As Boolean
@@ -2285,10 +2336,12 @@ End Function
 '                    version: a real different build wrote this.
 '   "unparseable" - marker present but does not parse as a version at all:
 '                    corruption, not version skew.
-'   "tampered"    - marker ABSENT, but the visible header at VAL_COL + 1
-'                    already reads "Availability" - that column only exists in
-'                    a v1.2+ block, so the marker was removed or edited by
-'                    hand rather than never having existed.
+'   "tampered"    - marker ABSENT, and the block does NOT have the pre-v1.2
+'                    shape (see LooksPreV12): it still carries content at
+'                    VAL_COL + 2, a column that only exists in a v1.2+ block,
+'                    so the marker was removed or edited by hand rather than
+'                    never having existed. This is the DEFAULT for a missing
+'                    marker as of v2.2.0 - "absent" now has to be earned.
 ' For a reader (ReadAvailMap/ReadCodeMap), only "absent" vs "anything else"
 ' matters: "absent" means legacy columns, every other verdict means the v1.2+
 ' column layout is where this block actually put its data - even "tampered"
@@ -2298,19 +2351,52 @@ End Function
 ' verdict and refuse to ACTIVATE on anything but "absent"/"same-major".
 ' detail is filled with a plain factual explanation for every verdict except
 ' "absent"/"same-major" - callers append their own call to action.
+' Does this marker-less block actually HAVE the pre-v1.2 shape? (issue #12)
+'
+' This used to ask whether the visible header at VAL_COL + 1 still read
+' "Availability", and call the block "tampered" only if it did. That fails OPEN in
+' the one direction that matters: rename that header by hand and a v1.2+ block whose
+' marker was deleted is classified "absent", which sends it down the legacy path and
+' activates every action - destructive ones included - as Button. A user-editable
+' visible caption was the sole discriminator for a machine-owned decision, which is
+' exactly what contract section 5 says the marker exists to avoid.
+'
+' The burden is now inverted: a missing marker means "tampered" UNLESS the block
+' positively corroborates the pre-v1.2 layout. The corroborating evidence is a THIRD
+' COLUMN THAT WAS NEVER WRITTEN. A pre-v1.2 block has two columns - Action at
+' VAL_COL, "Page code" at VAL_COL + 1 - and never touches VAL_COL + 2. A v1.2+ block
+' inserted Availability at VAL_COL + 1 and pushed Placement to VAL_COL + 2, so ANY
+' content at VAL_COL + 2 proves the v1.2+ layout and no rename can hide it. Verified
+' against the v0.3.0 bundle's own renderer, not assumed.
+'
+' Content, not caption, on purpose: the only way to defeat this is to clear
+' VAL_COL + 2 across the entire block, which destroys every placement code in the
+' store. That is not a disguise - it leaves nothing worth misreading. And that is the
+' honest limit of this function: a block hand-edited into an exact pre-v1.2 shape IS
+' a pre-v1.2 shape as far as any sheet-level evidence goes. The marker is the only
+' real authority; this only decides what to do once it is gone.
+Private Function LooksPreV12(ws As Worksheet, ByVal keyRow As Long) As Boolean
+    Dim nk As Long, i As Long
+    nk = NextKeyRow(ws, keyRow)
+    For i = keyRow To nk - 1
+        If Len(Trim(CStr(ws.Cells(i, VAL_COL + 2).Value))) > 0 Then Exit Function
+    Next i
+    LooksPreV12 = True
+End Function
+
 Private Function MarkerVerdict(ws As Worksheet, ByVal keyRow As Long, ByRef detail As String) As String
     Dim marker As String, mMajor As Long
     detail = ""
     If ws Is Nothing Or keyRow < 1 Then MarkerVerdict = "absent": Exit Function
     marker = BlockSchema(ws, keyRow)
     If Len(marker) = 0 Then
-        If LCase(Trim(CStr(ws.Cells(keyRow, VAL_COL + 1).Value))) = LCase(AVAIL_HEADER) Then
-            detail = "The hidden format marker for the Action catalog block is missing, even " & _
-                     "though its layout looks like this version's, so saved Availability " & _
-                     "choices cannot be trusted."
-            MarkerVerdict = "tampered"
-        Else
+        If LooksPreV12(ws, keyRow) Then
             MarkerVerdict = "absent"
+        Else
+            detail = "The hidden format marker for the Action catalog block is missing, even " & _
+                     "though the block still has this version's third column, so saved " & _
+                     "Availability choices cannot be trusted."
+            MarkerVerdict = "tampered"
         End If
         Exit Function
     End If
@@ -2571,11 +2657,17 @@ Private Function ComposeReport(ws As Worksheet, ByRef structural As Long) As Str
         End Select
     Next k
 
-    ' (a) no package action id may live in the reserved chain.* namespace
+    ' (a) no package action id may live in EITHER reserved namespace (contract
+    '     section 7): chain.*, or core.* as of v2.1.0. The core.* arm is not
+    '     symmetry - see IsCoreId for what a "core.legacy" action would do to the
+    '     availability map.
     For Each regX In BuildRegistry()
         For Each aX In regX("actions")
             If IsChainId(CStr(aX("id"))) Then
                 s = s & "RESERVED: action id '" & aX("id") & "' uses chain.*" & vbCrLf
+                structural = structural + 1
+            ElseIf IsCoreId(CStr(aX("id"))) Then
+                s = s & "RESERVED: action id '" & aX("id") & "' uses core.*" & vbCrLf
                 structural = structural + 1
             End If
         Next aX
@@ -2826,24 +2918,73 @@ Public Sub Core_FinalizeSetup()
     AssignChainIds ws          ' mint ids now, after confirm, before the copy persists them
 
     ' --- activate: copy Setup -> hidden _Config ---
+    '
+    ' COPY FIRST, VERIFY, THEN SWAP (issue #8). This used to delete the old _Config
+    ' and then copy Setup into its place, leaving a window - between the delete and
+    ' the rename - in which the workbook had NO _Config at all. A crash, a hang the
+    ' user force-quits, or any failure inside ws.Copy in that window destroyed the
+    ' entire stored configuration: every setting, every placement, every Availability
+    ' choice, with no undo and no warning. _Config is the only memory that survives a
+    ' rebuild.
+    '
+    ' The order is now copy -> verify -> delete -> rename, so the destructive step is
+    ' reached only once a complete, checked replacement already exists on disk. If the
+    ' copy or the verification fails, the old _Config is still there, untouched.
+    '
+    ' This does NOT make the activate atomic - Excel offers no transaction - and it is
+    ' not claimed to. A crash in the (now much smaller) gap leaves the new config under
+    ' the stage name instead of no config at all, which CfgSheet adopts on the next
+    ' read. Total, silent loss becomes a state that heals itself. ADR 0003 decision
+    ' 4's marker-last ordering within the block is unaffected by any of this.
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-    ' Remove any prior _Config. It is stored xlSheetVeryHidden, and a very-hidden
-    ' sheet can resist .Delete (the delete then silently fails under On Error
-    ' Resume Next, _Config survives, and the rename below collides -> "That name is
-    ' already taken", orphaning a "Setup (2)" copy on every retry). Unhiding it
-    ' first makes the delete reliable.
-    Dim old As Worksheet
-    Set old = Nothing
+
+    Dim old As Worksheet, staged As Worksheet
+    ' CfgSheet, not a raw Worksheets() lookup: it performs the orphan-stage recovery
+    ' described above, so by the time we clear a leftover stage below, that stage is
+    ' guaranteed redundant rather than the only surviving copy.
+    Set old = CfgSheet()
+
+    Set staged = Nothing
     On Error Resume Next
-    Set old = ThisWorkbook.Worksheets(CONFIG_SHEET)
+    Set staged = ThisWorkbook.Worksheets(CONFIG_STAGE)
     On Error GoTo Fail
+    If Not staged Is Nothing Then
+        staged.Visible = xlSheetVisible
+        staged.Delete
+        Set staged = Nothing
+    End If
+
+    ws.Copy After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
+    Set staged = ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
+    staged.name = CONFIG_STAGE
+
+    ' Verify BEFORE anything destructive. A truncated or empty copy that went on to
+    ' replace a good _Config would be the same total loss by a slower route, so the
+    ' copy has to prove it carries the action catalog block before the old one dies.
+    If FindKeyRow(staged, LAYOUT_KEY) = 0 Then
+        staged.Delete
+        Application.DisplayAlerts = True
+        Application.ScreenUpdating = True
+        MsgBox "Activation stopped: the copy of the Setup tab did not come through " & _
+               "complete - its Action catalog block is missing." & vbCrLf & vbCrLf & _
+               "Your saved configuration has NOT been changed and nothing was lost. " & _
+               "Click 'Finalize Setup Tab' again to retry.", _
+               vbExclamation, "Finalize Setup Tab"
+        Exit Sub
+    End If
+
+    ' Now the swap. Remove the prior _Config: it is stored xlSheetVeryHidden, and a
+    ' very-hidden sheet can resist .Delete (the delete then silently fails under
+    ' On Error Resume Next, _Config survives, and the rename below collides -> "That
+    ' name is already taken", orphaning a "Setup (2)" copy on every retry). Unhiding
+    ' it first makes the delete reliable. That reasoning is unchanged from before
+    ' issue #8 - it simply happens later now.
     If Not old Is Nothing Then
         old.Visible = xlSheetVisible
         old.Delete
     End If
-    ws.Copy After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
-    Set cfg = ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
+    Set cfg = staged
     cfg.name = CONFIG_SHEET
     ws.Activate                        ' a very-hidden sheet cannot be the active sheet
     cfg.Visible = xlSheetVeryHidden
