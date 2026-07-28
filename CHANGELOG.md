@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-27
+
+### Changed
+
+- **The Action catalog is now the first thing on the Setup tab, and Chains comes second.**
+  The tab opens on the block you have to act on: since v0.6.0 every action arrives `Off`,
+  so nothing runs until you set an `Availability` cell — and until now that block sat
+  below another package's export paths and file prefixes. Chains moved below the catalog
+  for the same reason: a chain is built out of actions that are already switched on, so
+  being asked to compose one first inverted the order you actually work in. The grey help
+  line above the block now says so, instead of leading with Chains.
+
+  **Nothing about your saved configuration changes.** This is presentation only. Every
+  reader finds its block by name rather than by position, so a configuration saved by an
+  earlier version is read exactly as before; the tab is simply re-drawn in the new order
+  the next time you click **Create Setup Tab**.
+
+  Completes the layout half of the Setup-surface redesign, whose default-`Off` and
+  appear-when-used halves shipped in v0.6.0.
+
 ## [0.7.0] - 2026-07-27
 
 ### Fixed
