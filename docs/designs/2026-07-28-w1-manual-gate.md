@@ -7,9 +7,9 @@
 > and eight of track 1's fifteen items are still unrun for exactly that reason.
 >
 > **Run each section in order, and do not credit a "nothing happened" item on its own.**
-> Items 1.4, 3.4, 4.2 and 4.3 all expect *no change* — and a completely broken build that
+> Items 1.4, 3.4 and 4.2 all expect *no change* — and a completely broken build that
 > does nothing when you click would pass every one of them. Each is only evidence once the
-> positive-path item in the same section (1.1, 3.1, 4.1, 4.4) has already passed. They are
+> positive-path item in the same section (1.1, 3.1, 4.4) has already passed. They are
 > marked **[pairs with N]** below.
 
 **Build under test:** `dist/MacrosBundle.bas`, built from branch `feat/w1-ingest-clean`.
@@ -172,13 +172,17 @@ value in `A17` on an otherwise blank row 17).
 - [ ] **4.2 [pairs with 4.4] — Answer No. Nothing is deleted.**
   Every row and column is still there.
 
-- [ ] **4.3 [pairs with 4.4] — ⚠️ Answer by clicking the title-bar X rather than a button.
-  Nothing is deleted.**
-  *Expected — but NOT verified:* the dialog has Yes and No only, and the X is assumed to
-  return the same as No.
-  *Why this is on the list:* the whole safety argument for a two-button dialog is that its
-  escape hatch is the safe answer. If the X does something else, this action needs a third
-  button. **This item is why the dialog is shaped the way it is — please actually try it.**
+- [ ] **4.3 — The confirmation dialog's title-bar X is greyed out, and the dialog cannot be
+  left without answering Yes or No.**
+  With the dialog from 4.1 on screen, look at the X in its top-right corner: it is grey
+  rather than black. Click it — nothing happens, the dialog stays. Press Esc — nothing
+  happens either. Answer **No** to get out of it (which also gives you item 4.2).
+
+  *Failure looks like:* the X is black and live, and clicking it closes the dialog.
+  *Why:* Windows disables the close button on a message box that has no Cancel button. That
+  is the whole safety argument for using two buttons here — there is no way to dismiss this
+  dialog by accident, so nothing can be deleted or skipped without a deliberate answer. If
+  the X turns out to be live, this action needs a third button. **Please actually try it.**
 
 - [ ] **4.4 — Answer Yes. The blank rows go; the row with data outside your selection
   SURVIVES.**
@@ -353,7 +357,7 @@ failure reads as "the assumption was wrong" rather than "the macro is broken":
 
 | Assumption | Item that tests it |
 |---|---|
-| A `vbYesNo` MsgBox's title-bar X returns `vbNo` | 4.3 |
+| A `vbYesNo` MsgBox has its title-bar X **disabled** — with no Cancel button there is nothing for a dismissal to mean, so the dialog cannot be closed without answering (Esc does nothing either) | 4.3 |
 | `Workbooks.OpenText` leaves the file as `ActiveWorkbook` | 3.1 |
 | `OpenText`'s `Local:=True` coexists with an explicit `TextQualifier` | 3.1 |
 | `Application.GetOpenFilename` returns `False` on Cancel | 3.4 |

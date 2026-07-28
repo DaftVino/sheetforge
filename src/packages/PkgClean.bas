@@ -185,6 +185,13 @@ Public Sub PkgClean_RemoveBlanks(ctx As Object)
 
     Set rng = AskRange(TITLE)
     If rng Is Nothing Then Exit Sub                  ' user cancelled
+    Set rng = PkgClean_NarrowToUsed(rng)
+    If rng Is Nothing Then
+        MsgBox "The range you picked is entirely outside the used area of the sheet, so " & _
+               "there is nothing in it to examine." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", vbInformation, TITLE
+        Exit Sub
+    End If
     Set ws = rng.Parent
 
     Core_SpeedOn
@@ -276,9 +283,12 @@ Private Function PkgClean_HasMerge(rng As Range) As Boolean
 End Function
 
 ' The preview the deferred destructive items lack. vbYesNo, not vbYesNoCancel:
-' here the title-bar X returns vbNo, and vbNo is the SAFE answer - it deletes
-' nothing. (clean.dupes needs the third button because its vbNo is destructive.)
-' Defaults to No.
+' Windows DISABLES the title-bar X on a message box that has no Cancel button, so
+' this dialog cannot be dismissed at all - Esc does nothing either, and it has to be
+' answered Yes or No. That is what makes two buttons safe HERE: there is no
+' accidental exit that could be mistaken for consent to delete. (clean.dupes carries
+' the third button for the opposite need - with only Yes and No, a user who wants to
+' abandon the action has to pick one of two answers that both act.) Defaults to No.
 Private Function PkgClean_ConfirmBlanks(rng As Range, rowsIn As Collection, rowsDel As Collection, _
                                         colsIn As Collection, colsDel As Collection, _
                                         ByVal title As String) As Boolean
@@ -326,6 +336,13 @@ Public Sub PkgClean_UnmergeFill(ctx As Object)
 
     Set rng = AskRange(TITLE)
     If rng Is Nothing Then Exit Sub
+    Set rng = PkgClean_NarrowToUsed(rng)
+    If rng Is Nothing Then
+        MsgBox "The range you picked is entirely outside the used area of the sheet, so " & _
+               "there are no merged cells in it." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", vbInformation, TITLE
+        Exit Sub
+    End If
 
     Core_SpeedOn
     ' Collect the merge addresses FIRST. Unmerging inside the loop that is
@@ -410,6 +427,7 @@ Public Sub PkgClean_StandardizeFormats(ctx As Object)
     If rng Is Nothing Then Exit Sub
 
     If Not Core_CfgTable(ctx, "k_clean_formats", cols, fmts, spare) Then
+        PkgClean_Refuse ctx, "No column formats are set up yet."
         MsgBox "No column formats are set up yet." & vbCrLf & vbCrLf & _
                "Fill in the 'Column formats' table on the Setup tab, Finalize, and run " & _
                "this again." & vbCrLf & vbCrLf & "Nothing has been changed.", vbExclamation, TITLE
@@ -546,6 +564,39 @@ End Sub
 '================================================================
 ' Package-private helpers
 '================================================================
+
+' Narrow a picked range to the part of the sheet that actually holds anything.
+' Returns Nothing when the pick lies entirely outside the used area - the caller
+' reports that and stops, having changed nothing.
+'
+' Selecting whole columns is how people pick "this table" - A:D is one click on the
+' column headers - and it hands these two actions roughly four million cells. Both
+' do COM work PER CELL or per row (an Intersect and a CountA each, a MergeArea read
+' each), so the screen freezes for minutes, and clean.remove_blanks then asks Excel
+' to delete about a million rows one at a time inside its destructive block. Nothing
+' outside UsedRange can hold a value, a formula or a merge, so the intersection
+' examines the same data and finishes in seconds.
+'
+' Everything downstream uses the NARROWED range, including the range named in the
+' messages, so what the user is told matches what was actually looked at.
+Private Function PkgClean_NarrowToUsed(rng As Range) As Range
+    If rng Is Nothing Then Exit Function
+    Set PkgClean_NarrowToUsed = Application.Intersect(rng, rng.Parent.UsedRange)
+End Function
+
+' Mark ctx as failed on a refusal - a path that shows its reason and returns WITHOUT
+' doing the work. Core's RunAction decides a step succeeded by the ABSENCE of this
+' flag, so a refusal that only shows a MsgBox is reported to a chain as a green tick
+' beside a step that did nothing. Writes wrapped the way Core_Fail wraps its own, so
+' a ctx that never received these keys cannot raise from inside a refusal path.
+'
+' The MsgBox stays, quiet or not: a chain that stops has to say why.
+Private Sub PkgClean_Refuse(ctx As Object, ByVal reason As String)
+    On Error Resume Next
+    ctx("failed") = True
+    ctx("failMsg") = reason
+    On Error GoTo 0
+End Sub
 
 ' Prompt the user to select a range. Returns Nothing if they cancel
 ' (InputBox Type:=8 returns Boolean False on cancel, which fails the Set).

@@ -69,7 +69,7 @@ Public Sub PkgImport_CombineWorksheets(ctx As Object)
     ' cheapest failure should be the earliest one, and a refusal after the user
     ' has answered questions reads as a bug.
     destName = Trim(Core_Cfg(ctx, "k_import_dest"))
-    If Not PkgImport_DestUsable(destName, TITLE) Then Exit Sub
+    If Not PkgImport_DestUsable(ctx, destName, TITLE) Then Exit Sub
 
     Set sources = New Collection
     For Each ws In ThisWorkbook.Worksheets
@@ -78,6 +78,7 @@ Public Sub PkgImport_CombineWorksheets(ctx As Object)
         End If
     Next ws
     If sources.Count = 0 Then
+        PkgImport_Refuse ctx, "There are no data sheets to combine in this workbook."
         MsgBox "There are no data sheets to combine in this workbook." & vbCrLf & vbCrLf & _
                "Every sheet here belongs to the macro toolkit itself." & vbCrLf & vbCrLf & _
                "Nothing has been changed.", vbExclamation, TITLE
@@ -107,13 +108,14 @@ Public Sub PkgImport_CombineWorkbooks(ctx As Object)
     On Error GoTo Fail
 
     destName = Trim(Core_Cfg(ctx, "k_import_dest"))
-    If Not PkgImport_DestUsable(destName, TITLE) Then Exit Sub
+    If Not PkgImport_DestUsable(ctx, destName, TITLE) Then Exit Sub
 
     folderPath = PkgImport_ResolveFolder(Core_Cfg(ctx, "k_import_folder"))
     If Len(folderPath) = 0 Then
         ' Blank config AND an unsaved workbook: there is no "this workbook's folder" yet.
         ' Caught explicitly, because otherwise it reaches Dir() as an empty path and
         ' surfaces as an engine error rather than the one-sentence fix it actually is.
+        PkgImport_Refuse ctx, "This workbook has never been saved, so it has no folder to read from."
         MsgBox "This workbook has never been saved, so it has no folder to read from." & _
                vbCrLf & vbCrLf & "Save it first, or set 'Folder to read workbooks from' " & _
                "on the Setup tab." & vbCrLf & vbCrLf & _
@@ -121,6 +123,7 @@ Public Sub PkgImport_CombineWorkbooks(ctx As Object)
         Exit Sub
     End If
     If Not PkgImport_FolderExists(folderPath) Then
+        PkgImport_Refuse ctx, "This folder was not found: " & folderPath
         MsgBox "This folder was not found:" & vbCrLf & vbCrLf & "   " & folderPath & vbCrLf & vbCrLf & _
                "Check 'Folder to read workbooks from' on the Setup tab, Finalize, and run " & _
                "this again." & vbCrLf & vbCrLf & "Nothing has been changed.", vbExclamation, TITLE
@@ -129,6 +132,7 @@ Public Sub PkgImport_CombineWorkbooks(ctx As Object)
 
     Set sources = PkgImport_WorkbookPaths(folderPath)
     If sources.Count = 0 Then
+        PkgImport_Refuse ctx, "No workbooks were found in: " & folderPath
         MsgBox "No workbooks were found in:" & vbCrLf & vbCrLf & "   " & folderPath & vbCrLf & vbCrLf & _
                "This workbook itself is always skipped." & vbCrLf & vbCrLf & _
                "Nothing has been changed.", vbExclamation, TITLE
@@ -163,6 +167,10 @@ End Sub
 ' so a failure leaves the workbook as it found it. That cleanup is the
 ' reason this has its own handler rather than letting the caller's
 ' Core_Fail see the error directly.
+'
+' It closes ONLY the workbooks it opened itself. weOpened tracks that per
+' source - see PkgImport_AlreadyOpen for why the distinction is the
+' difference between a combine and a colleague losing an afternoon.
 '================================================================
 Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As String, _
                                     ByRef rowsOut As Long, ByRef sourcesOut As Long)
@@ -170,6 +178,7 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
     Dim one As Variant, headerMap As Object
     Dim destRow As Long, destCols As Long
     Dim errNum As Long, errDesc As String
+    Dim weOpened As Boolean
     On Error GoTo EngineFail
 
     Set headerMap = CreateObject("Scripting.Dictionary")
@@ -183,8 +192,21 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
     For Each one In sources
         Set src = Nothing
         Set wbSrc = Nothing
+        weOpened = False
         If VarType(one) = vbString Then
-            Set wbSrc = Workbooks.Open(Filename:=CStr(one), ReadOnly:=True, UpdateLinks:=0)
+            ' Ask whether the file is ALREADY open before opening it. Workbooks.Open on
+            ' a file that is already open does not hand back a read-only second copy -
+            ' it hands back the copy the user has on screen, unsaved edits and all - and
+            ' closing that with SaveChanges:=False throws those edits away. Nothing warns
+            ' them: DisplayAlerts is False under Core_SpeedOn, so Excel's "reopening will
+            ' discard your changes" prompt never appears, and this action would report a
+            ' successful combine over the top of it. Sources and this workbook usually sit
+            ' in one folder, so somebody having a source open is the ordinary case here.
+            Set wbSrc = PkgImport_AlreadyOpen(CStr(one))
+            If wbSrc Is Nothing Then
+                Set wbSrc = Workbooks.Open(Filename:=CStr(one), ReadOnly:=True, UpdateLinks:=0)
+                weOpened = True                  ' ours to close; an already-open one is not
+            End If
             Set src = wbSrc.Worksheets(1)
         Else
             Set src = one
@@ -197,7 +219,13 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
             sourcesOut = sourcesOut + 1
         End If
 
-        If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+        ' A workbook the user already had open is left exactly as it was found: open,
+        ' on whatever sheet it was on, with its unsaved edits intact.
+        If weOpened Then
+            If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+        End If
+        Set wbSrc = Nothing                      ' nothing left for EngineFail to close
+        weOpened = False
     Next one
 
     rowsOut = destRow - 2
@@ -207,7 +235,11 @@ EngineFail:
     errNum = Err.Number
     errDesc = Err.Description
     On Error Resume Next
-    If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+    ' Same rule on the error path: close only what this run opened. A failure must not
+    ' cost the user the workbook they had open any more than a success does.
+    If weOpened Then
+        If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+    End If
     ' DisplayAlerts is already False under Core_SpeedOn, so this does not prompt;
     ' Core_Fail's RestoreSpeed puts it back either way.
     If Not dest Is Nothing Then dest.Delete
@@ -300,7 +332,7 @@ Public Sub PkgImport_DelimitedFile(ctx As Object)
     If VarType(picked) = vbBoolean Then Exit Sub                  ' user cancelled
 
     destName = PkgImport_SheetNameFor(CStr(picked))
-    If Not PkgImport_DestUsable(destName, TITLE) Then Exit Sub
+    If Not PkgImport_DestUsable(ctx, destName, TITLE) Then Exit Sub
 
     Core_SpeedOn
     PkgImport_ImportDelimited CStr(picked), destName, _
@@ -378,9 +410,11 @@ End Sub
 ' ThisWorkbook.Worksheets("Master").Delete under On Error Resume Next,
 ' which silently destroys whatever the user had on that sheet. Nothing in
 ' this package deletes a sheet it did not create in the same run.
-Private Function PkgImport_DestUsable(ByVal destName As String, ByVal title As String) As Boolean
+Private Function PkgImport_DestUsable(ctx As Object, ByVal destName As String, _
+                                      ByVal title As String) As Boolean
     Dim bad As String, i As Long
     If Len(destName) = 0 Then
+        PkgImport_Refuse ctx, "No name is set for the sheet this creates."
         MsgBox "No name is set for the sheet this creates." & vbCrLf & vbCrLf & _
                "Fill in 'Name for the combined sheet this creates' on the Setup tab, " & _
                "Finalize, and run this again." & vbCrLf & vbCrLf & _
@@ -388,6 +422,8 @@ Private Function PkgImport_DestUsable(ByVal destName As String, ByVal title As S
         Exit Function
     End If
     If Len(destName) > 31 Then
+        PkgImport_Refuse ctx, "'" & destName & "' is " & Len(destName) & _
+            " characters. Excel sheet names stop at 31."
         MsgBox "'" & destName & "' is " & Len(destName) & " characters. Excel sheet names " & _
                "stop at 31." & vbCrLf & vbCrLf & "Nothing has been changed.", vbExclamation, title
         Exit Function
@@ -395,6 +431,8 @@ Private Function PkgImport_DestUsable(ByVal destName As String, ByVal title As S
     bad = ":\/?*[]"
     For i = 1 To Len(bad)
         If InStr(destName, Mid$(bad, i, 1)) > 0 Then
+            PkgImport_Refuse ctx, "'" & destName & "' contains " & Mid$(bad, i, 1) & _
+                ", which Excel does not allow in a sheet name."
             MsgBox "'" & destName & "' contains " & Mid$(bad, i, 1) & ", which Excel does not " & _
                    "allow in a sheet name." & vbCrLf & vbCrLf & _
                    "None of these are allowed:  : \ / ? * [ ]" & vbCrLf & vbCrLf & _
@@ -403,6 +441,8 @@ Private Function PkgImport_DestUsable(ByVal destName As String, ByVal title As S
         End If
     Next i
     If Core_SheetExists(destName) Then
+        PkgImport_Refuse ctx, "A sheet named '" & destName & "' already exists in this " & _
+            "workbook, and this action will not overwrite it."
         MsgBox "A sheet named '" & destName & "' already exists in this workbook, and this " & _
                "action will not overwrite it." & vbCrLf & vbCrLf & _
                "Rename or delete that sheet, then run " & title & " again." & vbCrLf & vbCrLf & _
@@ -411,6 +451,25 @@ Private Function PkgImport_DestUsable(ByVal destName As String, ByVal title As S
     End If
     PkgImport_DestUsable = True
 End Function
+
+' Mark ctx as failed on a refusal - a path that shows its reason and returns
+' WITHOUT doing the work. Core's RunAction decides a step succeeded by the ABSENCE
+' of this flag, so a refusal that only shows a MsgBox is reported to a chain as a
+' green tick; the steps after it then run against whatever was already on the sheet,
+' and the summary says every step was fine. import.combine_worksheets refuses on
+' every run after the first - its destination sheet now exists - so without this the
+' flagship chain is wrong from day two and looks right.
+'
+' Writes wrapped the way Core_Fail wraps its own: a ctx that never received these
+' keys must not raise from inside a refusal path.
+'
+' The MsgBox stays, quiet or not. A chain that stops has to say why.
+Private Sub PkgImport_Refuse(ctx As Object, ByVal reason As String)
+    On Error Resume Next
+    ctx("failed") = True
+    ctx("failMsg") = reason
+    On Error GoTo 0
+End Sub
 
 ' Sheets the engine owns. Combining one of these into a data sheet would
 ' be meaningless at best; _Config in particular is the activated config
@@ -505,6 +564,47 @@ Private Function PkgImport_WorkbookPaths(ByVal folderPath As String) As Collecti
         If StrComp(fullPath, ThisWorkbook.FullName, vbTextCompare) <> 0 Then out.Add fullPath
     Next one
     Set PkgImport_WorkbookPaths = out
+End Function
+
+' The workbook at this path IF it is already open in this Excel instance, else
+' Nothing. The caller uses what comes back in place and does NOT close it.
+'
+' This exists because Workbooks.Open is not a question - it is an answer. Handed a
+' path that is already open it returns the open workbook, ReadOnly:=True and all,
+' complete with whatever the user has typed and not yet saved. Closing that with
+' SaveChanges:=False discards their work, and under Core_SpeedOn DisplayAlerts is
+' False, so the prompt Excel would normally raise ("reopening will discard your
+' changes") never reaches them. They would see a combine report success and lose an
+' afternoon's edits in the same second.
+'
+' Probed by FILE NAME, because that is how the Workbooks collection is keyed - there
+' is no lookup by path. The name alone is not proof of identity, so the path is
+' confirmed afterwards: k_import_folder routinely points somewhere other than this
+' workbook's folder, and a close folder full of "January.xlsx" is the everyday shape
+' of this data. A same-name / different-path collision is raised rather than guessed
+' at - Excel will not hold two workbooks of one name open, so the combine cannot
+' proceed either way, and saying so beats silently combining last month's file.
+Private Function PkgImport_AlreadyOpen(ByVal fullPath As String) As Workbook
+    Dim wb As Workbook, nm As String, openPath As String
+    nm = Core_FileName(fullPath)
+    If Len(nm) = 0 Then Exit Function
+
+    On Error Resume Next
+    Set wb = Workbooks(nm)
+    On Error GoTo 0
+    If wb Is Nothing Then Exit Function          ' not open: the caller opens it itself
+
+    On Error Resume Next
+    openPath = wb.FullName
+    On Error GoTo 0
+    If StrComp(openPath, fullPath, vbTextCompare) = 0 Then
+        Set PkgImport_AlreadyOpen = wb
+        Exit Function
+    End If
+    Err.Raise vbObjectError + 1025, "PkgImport_AlreadyOpen", _
+        "A different workbook named '" & nm & "' is already open (" & openPath & "). " & _
+        "Excel cannot have two workbooks of the same name open at once. Close that one, " & _
+        "then run this again."
 End Function
 
 ' A sheet name from a file name: drop the extension, replace the characters
