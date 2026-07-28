@@ -1387,7 +1387,7 @@ End Function
 
 Public Sub Core_BuildSetup()
     Dim ws As Worksheet, reg As Object, f As Object, r As Long, nPkgs As Long
-    Dim firstFieldRow As Long, availMap As Object, bandFirst As Long, bandLast As Long
+    Dim firstContentRow As Long, availMap As Object, bandFirst As Long, bandLast As Long
     On Error GoTo Fail
     InvalidateRegistry              ' a build begins here - see InvalidateRegistry
 
@@ -1452,7 +1452,21 @@ Public Sub Core_BuildSetup()
     ' for every id - the v2.1.0 default (ADR 0003).
     Set availMap = ReadAvailMap(CfgSheet())
 
-    firstFieldRow = r
+    ' AutoFit starts HERE, above Compose, not at the first package field. Compose
+    ' now renders first (below) and its Chain "Steps" cells are WrapText multi-line;
+    ' anchoring AutoFit after it would clip them. Named firstContentRow rather than
+    ' firstFieldRow because it is no longer the first field.
+    firstContentRow = r
+
+    ' Action catalog FIRST, then Chains, then the per-package settings bands. The
+    ' catalog is the surface a first-time user has to act on before anything else
+    ' works - as of v0.6.0 every action arrives Off, so a Setup tab that opens on
+    ' someone else's export paths buries the one block that turns the tool on.
+    ' Settings for actions you have not enabled yet are the least urgent thing on
+    ' the sheet, which is also why the off band collapses at the bottom.
+    r = RenderComposeSection(ws, r)
+    r = r + 1
+
     Dim banner As String
     For Each reg In BuildRegistry()
         nPkgs = nPkgs + 1
@@ -1476,11 +1490,9 @@ Public Sub Core_BuildSetup()
         End If
     Next reg
 
-    r = RenderComposeSection(ws, r)
-
-    ' The off band goes BELOW Compose on purpose: the action catalog is where the
-    ' user turns things on and off, so it must never sit under a collapsed section.
-    r = r + 1
+    ' The off band stays LAST: settings whose actions are all Off are the least
+    ' urgent thing on the sheet, and the action catalog that switches them on is now
+    ' at the very top rather than immediately above them.
     r = RenderOffBand(ws, r, availMap, bandFirst, bandLast)
 
     ' Sentinel key in column A. The config readers bound a list/table block by
@@ -1494,7 +1506,7 @@ Public Sub Core_BuildSetup()
     ' Long labels in column B are set to wrap (below); auto-size the field rows
     ' so a wrapped label is fully visible instead of being clipped by the value
     ' cell in column C.
-    ws.Rows(firstFieldRow & ":" & r).AutoFit
+    ws.Rows(firstContentRow & ":" & r).AutoFit
 
     ' Group AFTER AutoFit: AutoFit sizes rows and would otherwise fight the
     ' collapse, and a collapsed row's height is irrelevant anyway.
@@ -1788,16 +1800,27 @@ End Function
 '   declarations section at the top (VBA requires module-level Const there;
 '   a Const between procedures is a compile error).
 '================================================================
+' Action catalog FIRST, Chains second. The catalog is the only block a new
+' deployment MUST touch - every action arrives Off as of v0.6.0, so nothing runs
+' until someone sets an Availability cell. Chains build on actions that are already
+' switched on, so asking for them first inverted the dependency: the reader was
+' invited to compose buttons out of actions they had not enabled yet.
+'
+' Order here is presentation only. Every reader locates its block by key
+' (FindKeyRow/NextKeyRow), so a _Config written in the old order still reads
+' correctly and no migration is needed - the sheet is simply re-emitted in the new
+' order at the next Finalize.
 Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     r = SectionHeader(ws, r, "COMPOSE YOUR BUTTONS")
-    r = TintRow(ws, r, "Build multi-step buttons (Chains) and arrange buttons " & _
-                "onto pages (Placement). Leave every code blank for the automatic, " & _
-                "category-packed layout.", _
+    r = TintRow(ws, r, "Turn actions on in the Action catalog below - each one is " & _
+                "Off until you pick Button or Chains only. Then build multi-step " & _
+                "buttons (Chains) and arrange them onto pages (Placement). Leave " & _
+                "every code blank for the automatic, category-packed layout.", _
                 10, False, True, RGB(90, 90, 90))
     r = r + 1
-    r = RenderChainsBlock(ws, r)
-    r = r + 1
     r = RenderPlacementBlock(ws, r)
+    r = r + 1
+    r = RenderChainsBlock(ws, r)
     RenderComposeSection = r
 End Function
 
