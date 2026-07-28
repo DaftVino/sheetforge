@@ -23,7 +23,7 @@ only by item 0.4. If it is missing from your checkout, skip 0.4 and mark it UNTE
 
 ## 0. Setup — do this first, in this order
 
-- [ ] **0.1 — Remove any existing `MacrosBundle` module BEFORE importing.**
+- [x] **0.1 — Remove any existing `MacrosBundle` module BEFORE importing.**
   In the VBE (Alt+F11), right-click any module named `MacrosBundle` or `MacrosBundle1` in
   the Project pane and choose *Remove*. Say **No** when it offers to export.
   **Then** File ▸ Import File ▸ `dist/MacrosBundle.bas`.
@@ -33,37 +33,143 @@ only by item 0.4. If it is missing from your checkout, skip 0.4 and mark it UNTE
   *Why:* Excel's import never replaces a same-named module — it adds a numbered copy,
   duplicating ~216 procedures. Confirmed by hand on 2026-07-28.
 
-- [ ] **0.2 — Debug ▸ Compile VBAProject reports nothing.**
+- [x] **0.2 — Debug ▸ Compile VBAProject reports nothing.**
   The menu item greys out when compilation succeeds.
 
   *Failure looks like:* a dialog naming a line, with that line highlighted.
   *Why:* this is the only real compiler in the pipeline. `build.ps1` does structural checks
   and `vba-syntax-check.mjs` parses, but neither is VBA.
 
-- [ ] **0.3 — Run `Core_BuildSetup` (Alt+F8), then Finalize.**
+- [x] **0.3 — Run `Core_BuildSetup` (Alt+F8), then Finalize.**
   The Setup tab appears. Set the seven new actions to `Button` in the Action catalog block,
   then Finalize. The Macros pages rebuild with the new buttons on them.
 
   *Failure looks like:* an action missing from the catalog, or Finalize refusing.
   *Why:* since v0.6.0 every action arrives `Off`, so nothing below runs until you do this.
 
-- [ ] **0.4 — Import `tools/GateAudit.bas` and run `GateAudit_Run`.**
+- [x] **0.4 — Import `tools/GateAudit.bas` and run `GateAudit_Run`.**
   The report names all fifteen action ids as present in the catalog.
 
   *Failure looks like:* a `FAIL` line naming an id that did not reach the Setup surface.
   *Why:* it automates the "did the action appear at all" question for every action at once,
-  so the items below can be about behaviour instead.
+  so the items below can be about behaviour instea
+
+  # USER RESPONSE:
+
+  ```SHEETFORGE GATE AUDIT
+  Workbook: New Microsoft Excel Worksheet (4).xlsx
+  ==================================================================
+  
+  SHEETS
+    PASS  Setup sheet exists
+    PASS  _Config exists
+    PASS  _Config visibility (2 = very hidden)  (2)
+    PASS  no _Config_staged left behind        [hardening 1.1]
+  
+  BLOCK ORDER ON SETUP        [reorder 1]
+    rows: catalog=11  chains=30  first package key=55  _core_end=169
+    PASS  Action catalog is above Chains
+    PASS  Chains is above the package settings bands
+    PASS  _core_end is the last key row
+  
+  ACTION CATALOG COVERAGE      [W1]
+    catalog rows 12-29, 15 id(s) present
+    PASS  catalog lists importexport.clear
+    PASS  catalog lists importexport.import
+    PASS  catalog lists importexport.updateMaster
+    PASS  catalog lists importexport.export
+    PASS  catalog lists importexport.suggestTypes
+    PASS  catalog lists clean.dupes
+    PASS  catalog lists clean.trim
+    PASS  catalog lists clean.filldown
+    PASS  catalog lists clean.remove_blanks
+    PASS  catalog lists clean.unmerge_fill
+    PASS  catalog lists clean.standardize_formats
+    PASS  catalog lists clean.text_to_numbers
+    PASS  catalog lists import.combine_worksheets
+    PASS  catalog lists import.combine_workbooks
+    PASS  catalog lists import.delimited_file
+    no unexpected ids
+  
+  BLOCK GEOMETRY              [reorder 2 - INFO, not a check]
+    chains key row      : 30
+    next key row        : 55
+    last populated row  : 54  (blank rows after it: 0)
+    -> spacing is a LOOK, not a number. Confirm by eye that there is exactly
+       one blank row between the Chains block and the IMPORT / EXPORT band.
+  
+  SETUP COLOURS               [reskin 1 and 3]
+    PASS  Setup sheet tab = ForgeRed  (2105019)
+    PASS  B1 title font = ForgeNavy  (3022353)
+    PASS  band header font = ForgeNavy  (3022353)
+    PASS  band header fill = ForgeTint  (15657186)
+    PASS  caution font = 150, NOT the brand red  (150)
+    PASS  yellow input cells survived (first at D12)
+  
+  MACROS PAGES                [reskin 2]
+    PASS  Setup Menu tab = ForgeSteel  (4865073)
+    PASS  Setup Menu B2 font = ForgeNavy  (3022353)
+    SKIP  Macros 1 colours  -  sheet not found - Finalize with at least one Button action
+    SKIP  Setup and Macros tabs stay distinct  -  a sheet is missing
+  
+  BRAND RED CONFINED          [reskin 3]
+    cells on Setup using the brand red as a font colour: 0
+    PASS  brand red appears on no Setup cell (tab strip only)
+  ==================================================================
+  PASS 31    FAIL 0    SKIP 2
+  
+  STILL MANUAL - this macro cannot check these:
+    hardening 1.2/1.3  crash recovery, and Finalize after it
+    hardening 2.1/2.2  marker refusal dialog, and the residual hole
+    hardening 3.1      core.* refusal (needs a hostile build)
+    hardening 4.1/4.2  fresh-install default, blank cell blocks Finalize
+    reorder   3        v0.6.0 old-order config upgrade
+    reskin    4        legibility on a dark Excel theme
+  ```
+
+---
+
+## How to run an action, and what "it" means below
+
+Every section below is headed with an **action id** (`import.combine_worksheets`). Each
+section's items are about that one action, and where an item says "it", it means that
+action.
+
+**To run one:** go to the `Macros 1` tab and click the action's button. The button caption
+is not the id — it is the plain-language name in the table below. If a button is missing,
+that action is still set to `Off` in the Setup tab's Action catalog; set it to `Button`,
+Finalize, and it appears.
+
+| Section | Action id | Button caption | Reads from |
+|---|---|---|---|
+| 1 | `import.combine_worksheets` | **Combine All Worksheets** | Tabs **inside this workbook** |
+| 2 | `import.combine_workbooks` | **Combine All Workbooks in a Folder** | Other **files** in a folder |
+| 3 | `import.delimited_file` | **Import a Delimited File** | One CSV/TXT you pick |
+| 4 | `clean.remove_blanks` | **Remove Blank Rows & Columns** | A range you select |
+| 5 | `clean.unmerge_fill` | **Unmerge & Fill Down** | A range you select |
+| 6 | `clean.standardize_formats` | **Standardize Formats** | A range you select |
+| 7 | `clean.text_to_numbers` | **Convert Text to Numbers** | A range you select |
+
+**Sections 1 and 2 are different jobs and need different setups.** Section 1 combines *tabs
+in this workbook* and never looks at another file. Section 2 combines *other workbook files*
+in a folder and never looks at your tabs. Do not set up one expecting the other.
 
 ---
 
 ## 1. `import.combine_worksheets`
 
-Make a scratch workbook with three data sheets. Give them **the same headers in a
-different column order** — e.g. Sheet1 `Store | Date | Amount`, Sheet2 `Date | Amount |
-Store`. Put two or three data rows on each.
+**Setup — in the toolkit workbook itself, not a separate one.** Add three new tabs to
+**this** workbook (the one holding Setup and Macros 1). This action combines the tabs it
+finds beside it; it cannot read another file.
+
+Give the three tabs **the same headers in a different column order** — e.g. Sheet1
+`Store | Date | Amount`, Sheet2 `Date | Amount | Store`, Sheet3 `Amount | Store | Date`.
+Put two or three data rows on each.
+
+**Run:** click **Combine All Worksheets** on the `Macros 1` tab.
 
 - [ ] **1.1 — It creates one new sheet named from Setup (default `Master`) holding every
-  source row, with each value under its own header.**
+  row from those three tabs, with each value under its own header.**
   `Amount` values from Sheet2 land in the `Amount` column, not in the column that happened
   to be third.
 
@@ -99,10 +205,15 @@ Store`. Put two or three data rows on each.
 
 ## 2. `import.combine_workbooks`
 
-Put two or three workbooks in a folder. Set `Folder to read workbooks from` on Setup, or
-leave it blank to use this workbook's own folder.
+**Setup — separate files, not tabs.** Put two or three **other workbooks** in a folder,
+each with a data sheet as its first tab. Set `Folder to read workbooks from` on Setup and
+Finalize, or leave it blank to use the folder this workbook is saved in. (If you leave it
+blank, make sure that folder holds only the files you want combined — the action opens every
+`.xls*` it finds there.)
 
-- [ ] **2.1 — It combines the first sheet of each file, and the source files are unchanged
+**Run:** click **Combine All Workbooks in a Folder** on the `Macros 1` tab.
+
+- [ ] **2.1 — It combines the first sheet of each file in that folder, and the source files are unchanged
   afterwards.**
   Re-open one source and confirm it is untouched and was not saved.
 
@@ -146,6 +257,9 @@ leave it blank to use this workbook's own folder.
 
 ## 3. `import.delimited_file`
 
+**Run:** click **Import a Delimited File** on the `Macros 1` tab. It asks you to pick the
+file.
+
 - [ ] **3.1 — Pick a CSV whose text fields contain commas inside quotes. The columns split
   correctly.**
   A field like `"Smith, John"` stays in one cell.
@@ -176,7 +290,10 @@ Build a range with some entirely blank rows in the middle, and **at least one ro
 blank inside your selection but has data outside it** (e.g. select `B2:M40`, and put a
 value in `A17` on an otherwise blank row 17).
 
-- [ ] **4.1 — It shows a count BEFORE deleting anything, and names what it will not touch.**
+**Run:** click **Remove Blank Rows & Columns** on the `Macros 1` tab, then select that range
+when it asks.
+
+- [ ] **4.1 — Remove Blank Rows & Columns shows a count BEFORE deleting anything, and names what it will not touch.**
   The dialog states how many blank rows and columns it will delete, and separately that N
   rows and columns were left alone because each one "either holds data outside your
   selection or is part of a merged block".
@@ -233,6 +350,8 @@ value in `A17` on an otherwise blank row 17).
 Make a range with merged blocks — some wholly inside what you will select, and **one that
 crosses the edge of your selection**.
 
+**Run:** click **Unmerge & Fill Down** on the `Macros 1` tab, then select the range.
+
 - [ ] **5.1 — Blocks inside the selection are unmerged, and every cell they covered holds
   the block's value.**
   *Failure looks like:* unmerged but only the top-left cell populated — the rest blank.
@@ -254,7 +373,9 @@ crosses the edge of your selection**.
 
 ## 6. `clean.standardize_formats`
 
-- [ ] **6.1 — With the `Column formats` table on Setup EMPTY, it refuses and says where to
+**Run:** click **Standardize Formats** on the `Macros 1` tab, then select the range.
+
+- [ ] **6.1 — With the `Column formats` table on Setup EMPTY, Standardize Formats refuses and says where to
   configure it.**
   Message points at the Setup tab. Nothing on the sheet changes.
 
@@ -281,6 +402,11 @@ crosses the edge of your selection**.
 ---
 
 ## 7. `clean.text_to_numbers`
+
+**Setup:** put some text that looks like numbers in a few cells — `$1,234.56`, `12%`, a
+plain `42` typed with a leading apostrophe.
+
+**Run:** click **Convert Text to Numbers** on the `Macros 1` tab, then select the range.
 
 - [ ] **7.1 — Text like `$1,234.56` becomes a real number, right-aligned, usable in
   `=SUM()`.**
