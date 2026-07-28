@@ -241,7 +241,7 @@ if ($markerLines.Count -ne 1) {
     Write-Host "BUILD FAILED - action id validation:" -ForegroundColor Red
     if ($markerLines.Count -eq 0) {
         Write-Host "  marker '$vocabMarker' not found in spec/contract.md." -ForegroundColor Red
-        Write-Host "  Section 7 must carry that marker on its own line directly above the domain table." -ForegroundColor Red
+        Write-Host "  Section 7 must carry that marker on its own line above the domain table (a blank line between the two is fine)." -ForegroundColor Red
     } else {
         Write-Host "  marker '$vocabMarker' appears $($markerLines.Count) times in spec/contract.md (lines $($markerLines -join ', ')). It must appear exactly once." -ForegroundColor Red
     }
@@ -254,6 +254,15 @@ $markerAt = $markerLines[0] - 1
 # BUILD FAILURE, not a skip: silently parsing 11 of 12 rows leaves the build green while
 # the 12th domain quietly stops being enforced, which is the exact failure this gate
 # exists to prevent.
+#
+# ONLY a genuinely blank line ends the table. This previously broke on any non-pipe
+# line once the header had been seen, which made a stray prose line mid-table a SILENT
+# truncation: verified by inserting one after the `validate` row, which cut the
+# vocabulary to three domains and then failed the build claiming the shipped
+# `importexport` ids had an unknown domain - the wrong error entirely, pointing at
+# innocent source. Worse, the same line placed after the last USED domain truncates the
+# vocabulary with the build still green. Anything else after the header is malformed and
+# is reported as such.
 # Ordinal (case-sensitive) dictionary, NOT @{} or [ordered]@{}. PowerShell hashtable
 # keys are case-INSENSITIVE, so `$domainStatus.ContainsKey('Import')` would be true for
 # a stored 'import' - quietly accepting an id whose domain is mis-cased, which is the
@@ -265,7 +274,10 @@ for ($i = $markerAt + 1; $i -lt $contractLines.Count; $i++) {
     $ln = $contractLines[$i]
     $lineNo = $i + 1
     if ($ln -notmatch '^\s*\|') {
-        if ($sawHeader) { break } else { continue }      # blank line between marker and table
+        if (-not $sawHeader) { continue }                # blank line between marker and table
+        if ([string]::IsNullOrWhiteSpace($ln)) { break } # the terminating blank: table ends here
+        $vocabProblems.Add("contract.md:${lineNo}: a non-table line inside the domain table. The table runs from the header row to the first BLANK line, so nothing else may sit between them - move this line below the table (leaving a blank line after the last row). Found: $($ln.Trim())")
+        break
     }
     if (-not $sawHeader) {
         if ($ln.Trim() -cne '| domain | status | meaning |') {
@@ -357,8 +369,38 @@ foreach ($f in $asciiCandidates) {
     }
 }
 
+# Truncate a VBA line at its first comment apostrophe that is OUTSIDE a string literal,
+# and return the code portion. VBA has no escape character: a quote inside a string
+# literal is written by DOUBLING it, so toggling the state on every `"` gets it right -
+# the doubled pair toggles off then straight back on, leaving the walk inside the string.
+#
+# Needed because the Core_AddAction detector below tests the whole line rather than only
+# its start, and Core.bas mentions the name in a TRAILING comment. Without this the gate
+# would fail the build on a comment, and - the other way round - a commented-out
+# declaration would be validated as if it were a real one.
+function Get-VbaCodePortion([string]$line) {
+    $inStr = $false
+    for ($j = 0; $j -lt $line.Length; $j++) {
+        $ch = $line[$j]
+        if ($ch -eq '"') { $inStr = -not $inStr }
+        elseif ($ch -eq "'" -and -not $inStr) { return $line.Substring(0, $j) }
+    }
+    return $line
+}
+
 # Core_AddAction reg, "<id>", "<caption>", "<entryPoint>", "<help>" [, "<category>"]
-$addActionRe = 'Core_AddAction\s+\w+\s*,\s*"([^"]*)"\s*,\s*"[^"]*"\s*,\s*"([^"]*)"'
+#
+# The trailing `\s*,` is load-bearing: without it `"Handler" & suffix,` matches as far as
+# the closing quote and the gate validates "Handler" as though it were the whole entry
+# point, checking a name the running code never registers. Requiring the delimiter makes
+# a built-up entry point fail to parse, which the unparseable-call check below then
+# reports. Every real call has a help argument after the entry point, so the comma is
+# always there.
+$addActionRe = 'Core_AddAction\s+\w+\s*,\s*"([^"]*)"\s*,\s*"[^"]*"\s*,\s*"([^"]*)"\s*,'
+# Core_AddAction's OWN declaration in Core.bas contains the name in code, not as a call.
+# The detector below matches anywhere on the line, so the declaration needs an explicit
+# carve-out - (?i) because VBA is case-insensitive, like every other syntax pattern here.
+$addActionDeclRe = '(?i)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?(?:Sub|Function)\s+Core_AddAction\b'
 $idShapeRe = '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'
 $allowed = ($domainStatus.Keys | Where-Object { $domainStatus[$_] -ne 'reserved' } | Sort-Object) -join ', '
 # Ordinal: two ids differing only in case are two DIFFERENT ids by section 7's rules,
@@ -369,8 +411,11 @@ foreach ($f in $asciiCandidates) {
     $leaf = Split-Path $f -Leaf
     $srcLines = Get-Content -LiteralPath $f
     for ($i = 0; $i -lt $srcLines.Count; $i++) {
-        if ($srcLines[$i] -match "^\s*'") { continue }             # commented-out example
-        $m = [regex]::Match($srcLines[$i], $addActionRe, $vbaIC)
+        # Judge the CODE only. A whole-line comment collapses to "" and falls out below;
+        # a trailing comment can neither trip the detector nor be read as a declaration.
+        $code = Get-VbaCodePortion $srcLines[$i]
+        if ($code -notmatch '\S') { continue }                     # blank, or all comment
+        $m = [regex]::Match($code, $addActionRe, $vbaIC)
         if (-not $m.Success) {
             # A CALL to Core_AddAction that does not parse is a failure, not a skip.
             # Otherwise a wave that wraps its arguments differently - a line continuation
@@ -379,11 +424,15 @@ foreach ($f in $asciiCandidates) {
             # having checked nothing. Fail loudly and make the author either reformat the
             # call or extend this regex deliberately.
             #
-            # Anchored at statement position, NOT a bare substring match: Core.bas both
-            # DECLARES `Public Sub Core_AddAction(...)` and mentions the name in a
-            # trailing comment, and a substring test fails the build on each of them.
-            if ($srcLines[$i] -match '^\s*(?:Call\s+)?Core_AddAction\b') {
-                $idProblems.Add("${leaf}:$($i + 1): a Core_AddAction call this gate cannot parse. Put the id, caption and entry point as three literal strings on this line (a continuation may follow the entry point). Line: $($srcLines[$i].Trim())")
+            # Matched ANYWHERE in the code portion, not anchored at statement position.
+            # The old `^\s*(?:Call\s+)?Core_AddAction\b` anchor was a bypass, verified:
+            # `If True Then Core_AddAction reg, _` with the arguments on a continuation
+            # line registered `tidy.bogus` and the build exited 0. The two things the
+            # anchor was really protecting against - Core.bas's own declaration and its
+            # trailing-comment mention - are handled precisely instead, by
+            # $addActionDeclRe and by Get-VbaCodePortion.
+            if ($code -match '(?i)Core_AddAction' -and $code -notmatch $addActionDeclRe) {
+                $idProblems.Add("${leaf}:$($i + 1): a Core_AddAction call this gate cannot parse. Put the whole call at the start of its own line, with the id, caption and entry point as three literal strings followed by a comma (a continuation may follow that comma). Line: $($srcLines[$i].Trim())")
             }
             continue
         }
