@@ -260,6 +260,50 @@ Private mRegCache   As Collection
 Private mRegCacheOk As Boolean
 
 '================================================================
+' IDENTITY PALETTE  (v0.9.0 - issue #11)
+'================================================================
+' Sampled from docs/designs/sheetforge-design-proof.png. That proof is a DARK-first
+' mobile concept and NONE of its product surface is in scope - it is a colour
+' reference only. These are its values adapted to the surfaces Core actually draws,
+' which sit on a WHITE sheet (Core_BuildSetup sets Cells.Interior white).
+'
+' This replaces TWO unrelated identities that had drifted apart: purple on the Setup
+' tab (112,48,160 / 54,32,100 / 90,70,120) and blue on the Macros pages (31,78,121).
+' One palette now covers both.
+'
+' Functions, not Const: VBA rejects `Const c As Long = RGB(...)` ("constant
+' expression required") because RGB is a function call, and hard-coding the packed
+' Long instead (FORGE_NAVY would be 3022353) is unreadable and unreviewable.
+'
+' SEMANTIC colours are deliberately NOT in here and were NOT changed - they carry
+' meaning rather than identity, and folding them into a brand palette would erase
+' the distinction: the yellow input cells (255,242,204) that mean "fill this in",
+' and the two warning reds (150,0,0 caution, 192,0,0 error). The brand red is close
+' enough to those that reusing it for chrome would make a warning unreadable AS a
+' warning - so the brand red is confined to the Setup tab strip, where no text sits
+' on it.
+'
+' Contrast on white, all well past WCAG AA for body text:
+'   ForgeNavy  15.1:1     ForgeSteel  10.6:1
+' and on ForgeTint, the band fill:
+'   ForgeNavy  13.0:1     ForgeSteel   9.1:1
+Private Function ForgeRed() As Long        ' brand accent - fills only, never behind text
+    ForgeRed = RGB(187, 30, 32)
+End Function
+Private Function ForgeNavy() As Long       ' headings and titles
+    ForgeNavy = RGB(17, 30, 46)
+End Function
+Private Function ForgeSteel() As Long      ' secondary/help text, and the Macros tab strip
+    ForgeSteel = RGB(49, 60, 74)
+End Function
+Private Function ForgeTint() As Long       ' band + card header fill
+    ForgeTint = RGB(226, 232, 238)
+End Function
+Private Function ForgeRule() As Long       ' hairline borders
+    ForgeRule = RGB(214, 221, 228)
+End Function
+
+'================================================================
 ' 1. MANIFEST-BUILDING API  (called inside Pkg<Name>_Manifest reg)
 '================================================================
 Public Sub Core_DeclarePackage(reg As Object, ByVal id As String, _
@@ -1413,7 +1457,7 @@ Public Sub Core_BuildSetup()
     Application.ScreenUpdating = False
     Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(1))
     ws.name = SETUP_SHEET
-    ws.Tab.Color = RGB(112, 48, 160)
+    ws.Tab.Color = ForgeRed()
     ws.Cells.Interior.Color = RGB(255, 255, 255)
     ws.Columns("A").ColumnWidth = 9
     ws.Columns("B").ColumnWidth = 50
@@ -1428,7 +1472,7 @@ Public Sub Core_BuildSetup()
     ws.Cells(r, 2).Value = "Toolkit Setup"
     ws.Cells(r, 2).Font.Size = 16
     ws.Cells(r, 2).Font.Bold = True
-    ws.Cells(r, 2).Font.Color = RGB(112, 48, 160)
+    ws.Cells(r, 2).Font.Color = ForgeNavy()
     r = r + 1
     ws.Cells(r, 2).Value = "Fill in the YELLOW cells, then click  'Finalize Setup Tab'  on the Setup Menu tab."
     ws.Cells(r, 2).Font.Italic = True
@@ -1641,11 +1685,11 @@ Private Function RenderOffBand(ws As Worksheet, ByVal r As Long, availMap As Obj
                 "They are kept and still saved, so nothing you typed is lost - set the " & _
                 "action back to 'Button' and they move up into the main list. Click the + " & _
                 "in the left margin to open this section.", _
-                9, False, True, RGB(90, 70, 120))
+                9, False, True, ForgeSteel())
     bandFirst = r
     For Each reg In BuildRegistry()
         If HasAnyTier(reg, availMap, False) Then
-            r = TintRow(ws, r, CStr(reg("name")), 10, True, False, RGB(90, 70, 120))
+            r = TintRow(ws, r, CStr(reg("name")), 10, True, False, ForgeSteel())
             r = RenderTier(ws, r, reg, "simple", False, UCase(CStr(reg("name"))), availMap, False)
             r = RenderTier(ws, r, reg, "advanced", False, UCase(CStr(reg("name"))), availMap, False)
         End If
@@ -1720,7 +1764,7 @@ Private Function TintRow(ws As Worksheet, ByVal r As Long, ByVal txt As String, 
     Dim lines As Long
     With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
         .Merge
-        .Interior.Color = RGB(221, 217, 240)
+        .Interior.Color = ForgeTint()
         .WrapText = True
         .VerticalAlignment = xlTop
     End With
@@ -1742,8 +1786,8 @@ End Function
 ' config block readers. Returns the row for the header/key row.
 Private Function BlockIntro(ws As Worksheet, ByVal r As Long, _
                             ByVal label As String, ByVal help As String) As Long
-    r = TintRow(ws, r, label, 11, True, False, RGB(54, 32, 100))
-    If Trim(help) <> "" Then r = TintRow(ws, r, help, 9, False, True, RGB(90, 70, 120))
+    r = TintRow(ws, r, label, 11, True, False, ForgeNavy())
+    If Trim(help) <> "" Then r = TintRow(ws, r, help, 9, False, True, ForgeSteel())
     BlockIntro = r
 End Function
 
@@ -3311,7 +3355,7 @@ Private Sub BuildAdminPanel()
     Set ws = EnsurePanelSheet(ADMIN_SHEET, False)
     With ws.Range("B2")
         .Value = "Setup Menu"
-        .Font.Size = 16: .Font.Bold = True: .Font.Color = RGB(31, 78, 121)
+        .Font.Size = 16: .Font.Bold = True: .Font.Color = ForgeNavy()
     End With
     ' Fix round 2, fix 1: EnsurePanelSheet's row-height reset pins row 2 at
     ' StandardHeight, which does not grow for a 16pt title, so set it literally
@@ -3379,7 +3423,7 @@ Private Function EnsurePanelSheet(ByVal nm As String, ByVal atFront As Boolean) 
     ' before anything else sizes a specific row, so every subsequent
     ' RowHeight/AutoFit call in this build starts from a clean sheet.
     ws.Cells.RowHeight = ws.StandardHeight
-    ws.Tab.Color = RGB(31, 78, 121)
+    ws.Tab.Color = ForgeSteel()
     ws.Cells.Interior.Color = RGB(255, 255, 255)
     ws.Columns("A").ColumnWidth = 2
     ws.Columns("B").ColumnWidth = 47
@@ -3485,7 +3529,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
         .Value = CStr(page("title"))
         .Font.Size = 15
         .Font.Bold = True
-        .Font.Color = RGB(31, 78, 121)
+        .Font.Color = ForgeNavy()
     End With
 
     colKeys = SortedKeys(cols)
@@ -3513,8 +3557,8 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
                 .Value = hdr
                 .Font.Bold = True
                 .Font.Size = 11
-                .Font.Color = RGB(54, 32, 100)
-                .Interior.Color = RGB(221, 217, 240)
+                .Font.Color = ForgeNavy()
+                .Interior.Color = ForgeTint()
                 .WrapText = True    ' fix round 1: a long category used to spill into the gutter
             End With
         End If
@@ -3541,7 +3585,7 @@ Private Function RenderPage(layout As Object, ByVal tabNum As Long, _
                 With .Borders(xlEdgeBottom)
                     .LineStyle = xlContinuous
                     .Weight = xlHairline
-                    .Color = RGB(221, 221, 226)
+                    .Color = ForgeRule()
                 End With
             End With
             If dRow > lastRow Then lastRow = dRow
@@ -4299,7 +4343,7 @@ Private Sub Yellow(rng As Range)
 End Sub
 
 Private Function SectionHeader(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
-    SectionHeader = TintRow(ws, r, txt, 11, True, False, RGB(54, 32, 100))
+    SectionHeader = TintRow(ws, r, txt, 11, True, False, ForgeNavy())
 End Function
 
 Private Sub PopulateReferenceLists(ws As Worksheet, ByVal startRow As Long)

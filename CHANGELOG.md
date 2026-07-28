@@ -1,8 +1,35 @@
+<img src="docs/assets/sheetforge-logo.png" alt="sheetforge" width="200">
+
 # Changelog
 
 All notable changes to this project are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.9.0] - 2026-07-27
+
+### Changed
+
+- **The generated sheets now look like sheetforge.** The Setup tab and the Macros pages
+  carried two unrelated colour schemes that had drifted apart — purple on one, blue on the
+  other — neither of which was the product's identity. Both are replaced by the steel-and-red
+  palette from the identity proof: a red Setup tab strip, deep-navy headings, steel-grey
+  help text, and a pale steel band fill. The Macros tab strip is steel rather than red, so
+  the two surfaces stay distinguishable at a glance.
+
+  **Colours that mean something were left alone.** The yellow input cells still mean "fill
+  this in", and the two warning reds still mean "careful" and "this is broken". Those are
+  not decoration, and the brand red is close enough to them that reusing it for chrome
+  would make a warning stop reading as a warning — so the brand red appears only on the
+  Setup tab strip, where no text sits on it.
+
+  Presentation only: additive under contract §10's two-axes rule, and no stored
+  configuration changes meaning.
+
+- **The logo is on the README and this changelog.** It stays out of the build. A `.bas`
+  cannot carry a PNG, and the alternatives — shipping a second file, or base64-encoding a
+  2 MB asset into a 270 KB bundle — would each break the one-file-import model that is the
+  whole delivery story. The README copy is resized to 38 KB so neither page pulls 2 MB.
 
 ## [0.8.0] - 2026-07-27
 
