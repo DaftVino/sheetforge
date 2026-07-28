@@ -21,10 +21,10 @@ unverified are marked `ASSUMPTION`.
 | Item | State |
 |---|---|
 | 1. Setup tab wears the identity | **Passed** |
-| 2. Macros pages match, and stay distinguishable | Not run |
-| 3. Semantic colours survived | Not run |
+| 2. Macros pages match, and stay distinguishable | **Passed** |
+| 3. Semantic colours survived | **Passed** |
 | 4. Legible on a dark Excel theme | Not run |
-| **Total 1/4** | **Part run** |
+| **Total 3/4** | Items 1-3 passed via `tools/GateAudit.bas`, 2026-07-28 |
 
 ### The reference
 
@@ -114,7 +114,7 @@ was set. That is precisely why every tab claim below is checked with a number.
       (`112,48,160`), `6561846` (`54,32,100`), `7882330` (`90,70,120`) and `15784413`
       (`221,217,240`); seeing one of those means the reskin did not land on that surface.
 
-- [ ] **The Macros pages match, and the two surfaces stay apart.** Go to `Setup Menu`, then
+- [x] **The Macros pages match, and the two surfaces stay apart.** Go to `Setup Menu`, then
       `Macros 1`.
 
       | Sheet | Select this | Run | Expect |
@@ -132,7 +132,7 @@ was set. That is precisely why every tab claim below is checked with a number.
         Macros surfaces steel. The old purple-vs-blue accidentally told you which surface
         you were on, and that distinction was meant to survive.
 
-- [ ] **Colours that mean something still mean it.** All on the Setup sheet.
+- [x] **Colours that mean something still mean it.** All on the Setup sheet.
 
       - **Input cells are still yellow.** Select any yellow input cell →
         `?Selection.Interior.Color` → **`13431551`**. Yellow means "fill this in"; it must

@@ -23,7 +23,7 @@ that remain unverified are marked `ASSUMPTION`.
 | Item | State |
 |---|---|
 | 1. The Setup tab opens on the Action catalog, Chains second | **Passed** |
-| 2. Nothing is clipped and no boundary gained or lost a blank row | Not run |
+| 2. Nothing is clipped and no boundary gained or lost a blank row | Not run — needs a look |
 | 3. An old-order `_Config` still reads correctly | Not run |
 | **Total 1/3** | **Part run** |
 

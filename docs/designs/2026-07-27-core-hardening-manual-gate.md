@@ -20,11 +20,11 @@ here. Excel-behaviour claims that remain unverified are marked `ASSUMPTION`.
 
 | Section | Items | State |
 |---|---|---|
-| 1. Interrupted activate survives (#8) | 1/3 | **1.2 passed**; 1.1 and 1.3 not run |
+| 1. Interrupted activate survives (#8) | 2/3 | **1.1 + 1.2 passed**; 1.3 not run |
 | 2. A removed marker fails closed (#12) | 1/2 | **2.1 passed**; 2.2 not run |
 | 3. `core.*` is refused (#13) | 0/1 | Not run |
 | 4. Part A did not regress | 0/2 | Not run |
-| **Total** | **2/8** | **Both load-bearing items passed** |
+| **Total** | **3/8** | 1.1 via `tools/GateAudit.bas` |
 
 The two that ran are the two that carry the section: **1.2** (recovery from an
 interrupted activate) and **2.1** (a removed marker refuses instead of falling through to
@@ -201,7 +201,7 @@ not -2 — the first draft of this gate had that backwards.)
 
 ## 1. An interrupted activate does not lose the configuration (#8)
 
-- [ ] **Precondition — a normal Finalize leaves no staging sheet behind.**
+- [x] **Precondition — a normal Finalize leaves no staging sheet behind.**
       Alt+F8 → `GateDumpSheets`.
 
       Expected: a line `_Config   visible=2`, the `Setup` tab, the `Macros` page(s), and
