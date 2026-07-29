@@ -98,7 +98,7 @@ Public Sub PkgImportExport_Clear(ctx As Object)
     End If
 
     Core_SpeedOn
-    tlist = ClearTabs(tabNames)
+    tlist = PkgImportExport_ClearTabs(tabNames)
     Core_SpeedOff
 
     Core_Done ctx, "Cleared data (row 2 and below) on:" & vbCrLf & _
@@ -131,7 +131,7 @@ Public Sub PkgImportExport_Import(ctx As Object)
     Core_SpeedOn
     Application.AskToUpdateLinks = False
 
-    ClearTabs tabNames                     ' silent internal clear (no dialog)
+    PkgImportExport_ClearTabs tabNames     ' silent internal clear (no dialog)
 
     For i = LBound(tabNames) To UBound(tabNames)
         Set ws = Nothing
@@ -374,7 +374,7 @@ Public Sub PkgImportExport_Export(ctx As Object)
         Core_Refuse ctx, "No export tabs are configured.", "Export Dashboard"
         Exit Sub
     End If
-    mainTabs = CollectionToArray(expTabs)
+    mainTabs = PkgImportExport_CollectionToArray(expTabs)
     setSh = Core_Cfg(ctx, "k_settings_sheet")
 
     ' every visible main tab must exist
@@ -528,7 +528,7 @@ Public Sub PkgImportExport_SuggestTypes(ctx As Object)
             sug.Add typeMaps(i)                    ' no source -> keep existing map
             missed = missed & vbCrLf & "   - " & tabs(i) & "  (no file matching '" & prefixes(i) & "')"
         Else
-            tm = InferTypeMap(srcPath)
+            tm = PkgImportExport_InferTypeMap(srcPath)
             If tm = "" Then tm = typeMaps(i)       ' inference failed -> keep existing
             sug.Add tm
             found = found + 1
@@ -556,7 +556,7 @@ End Sub
 
 ' Open a source workbook, sample its first sheet, and return a per-column type
 ' map string (e.g. "T,T,N,D"). Returns "" if the file can't be read.
-Private Function InferTypeMap(ByVal srcPath As String) As String
+Private Function PkgImportExport_InferTypeMap(ByVal srcPath As String) As String
     Dim wb As Workbook, ws As Worksheet
     Dim lastCol As Long, lastRow As Long, sampleTo As Long, cCol As Long, codes As String
     On Error GoTo CleanFail
@@ -568,22 +568,22 @@ Private Function InferTypeMap(ByVal srcPath As String) As String
     If sampleTo > 51 Then sampleTo = 51            ' header + up to 50 data rows
     For cCol = 1 To lastCol
         If codes <> "" Then codes = codes & ","
-        codes = codes & InferColumn(ws, cCol, sampleTo, CStr(ws.Cells(1, cCol).Value))
+        codes = codes & PkgImportExport_InferColumn(ws, cCol, sampleTo, CStr(ws.Cells(1, cCol).Value))
     Next cCol
     wb.Close SaveChanges:=False
-    InferTypeMap = codes
+    PkgImportExport_InferTypeMap = codes
     Exit Function
 CleanFail:
     On Error Resume Next
     If Not wb Is Nothing Then wb.Close SaveChanges:=False
     On Error GoTo 0
-    InferTypeMap = ""
+    PkgImportExport_InferTypeMap = ""
 End Function
 
 ' Infer one column's code from a data sample. Leans SAFE on the dangerous case:
 ' an integer column whose header looks like an identifier is called T (text),
 ' because an ID silently turned into a number breaks type-strict lookups.
-Private Function InferColumn(ws As Worksheet, ByVal col As Long, _
+Private Function PkgImportExport_InferColumn(ws As Worksheet, ByVal col As Long, _
                              ByVal lastSampleRow As Long, ByVal hdr As String) As String
     Dim r As Long, v As Variant, d As Double, n As Long
     Dim allDate As Boolean, allNum As Boolean, anyDecimal As Boolean
@@ -616,33 +616,33 @@ Private Function InferColumn(ws As Worksheet, ByVal col As Long, _
             n = n + 1: allDate = False: allNum = False         ' boolean/other -> text
         End If
     Next r
-    If n = 0 Then InferColumn = "T": Exit Function          ' no data -> text (safe)
-    If allDate Then InferColumn = "D": Exit Function
+    If n = 0 Then PkgImportExport_InferColumn = "T": Exit Function   ' no data -> text (safe)
+    If allDate Then PkgImportExport_InferColumn = "D": Exit Function
     If allNum Then
-        If Not anyDecimal And LooksLikeId(hdr) Then
-            InferColumn = "T"                                ' integer identifier -> text
+        If Not anyDecimal And PkgImportExport_LooksLikeId(hdr) Then
+            PkgImportExport_InferColumn = "T"                        ' integer identifier -> text
         Else
-            InferColumn = "N"
+            PkgImportExport_InferColumn = "N"
         End If
         Exit Function
     End If
-    InferColumn = "T"
+    PkgImportExport_InferColumn = "T"
 End Function
 
 ' Header looks like an identifier/code column (so an integer column should stay
 ' text). Pad with spaces so " id " matches the whole word "id" but not "paid" or
 ' "void"; the other tokens are specific enough to use as substrings.
-Private Function LooksLikeId(ByVal hdr As String) As Boolean
+Private Function PkgImportExport_LooksLikeId(ByVal hdr As String) As Boolean
     Dim h As String
     h = " " & LCase(Trim(hdr)) & " "
-    LooksLikeId = (InStr(h, " id ") > 0 Or InStr(h, "store") > 0 Or InStr(h, "code") > 0 _
+    PkgImportExport_LooksLikeId = (InStr(h, " id ") > 0 Or InStr(h, "store") > 0 Or InStr(h, "code") > 0 _
                 Or InStr(h, "#") > 0 Or InStr(h, "zip") > 0 Or InStr(h, "phone") > 0 _
                 Or InStr(h, "acct") > 0 Or InStr(h, "account") > 0)
 End Function
 
 ' Clear row 2 downward on each named tab that exists (no speed management,
 ' no dialog - the caller wraps this). Returns the comma list of tab names.
-Private Function ClearTabs(ByRef tabNames() As String) As String
+Private Function PkgImportExport_ClearTabs(ByRef tabNames() As String) As String
     Dim i As Long, ws As Worksheet, lastRow As Long, lastCol As Long, tlist As String
     For i = LBound(tabNames) To UBound(tabNames)
         tlist = tlist & IIf(tlist = "", "", ", ") & tabNames(i)
@@ -658,16 +658,16 @@ Private Function ClearTabs(ByRef tabNames() As String) As String
             End If
         End If
     Next i
-    ClearTabs = tlist
+    PkgImportExport_ClearTabs = tlist
 End Function
 
 ' Collection of tab names -> 0-based Variant array (LBound/UBound friendly).
-Private Function CollectionToArray(col As Collection) As Variant
+Private Function PkgImportExport_CollectionToArray(col As Collection) As Variant
     Dim arr() As String, i As Long
-    If col.Count = 0 Then CollectionToArray = Array(): Exit Function
+    If col.Count = 0 Then PkgImportExport_CollectionToArray = Array(): Exit Function
     ReDim arr(0 To col.Count - 1)
     For i = 1 To col.Count
         arr(i - 1) = CStr(col(i))
     Next i
-    CollectionToArray = arr
+    PkgImportExport_CollectionToArray = arr
 End Function
