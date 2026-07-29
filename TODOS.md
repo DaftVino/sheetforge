@@ -59,11 +59,20 @@ has run in Excel. Seven PRs are open and stacked; they must merge in order.
 - [x] **Sanitize real store/entity specifics** and publish. Scrubbed all 7
       tracked files to fully-generic demo defaults (design + plan:
       `docs/designs/sanitization-pass.md`, `-plan.md`); genericized the real
-      store number `12345` → `12345`; renamed legacy module `SetupImportExportMacros` →
-      `SetupImportExportMacros`. `main` fast-forwarded and pushed to
-      `origin`. **Caveat (tree-only choice):** the pre-`d29b0d7` *history* still
+      store number to `12345`; renamed the legacy client module to
+      `SetupImportExportMacros`. `main` fast-forwarded and pushed to `origin`.
+      **Caveat (tree-only choice):** the pre-`d29b0d7` *history* still
       contains the old jargon — the remote is private, so this was accepted;
       revisit (squash/filter history) before any public release.
+
+      **2026-07-29, Task 12 step 1 — this note was itself a leak** and has been
+      redacted. It quoted both retired tokens verbatim, so the audit trail
+      recording their removal was the last place they survived at the tip. A
+      sanitization record must name what it removed by description, never by
+      value. The same pass also found `docs/macro_code_library.md` carrying six
+      live references to the retired client module name — it was not one of the
+      "7 tracked files" the original pass scrubbed. **The history caveat above
+      is still open and now blocks going public**; see the Task 12 report.
 
 ## Next — active
 

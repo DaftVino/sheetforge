@@ -122,9 +122,7 @@ Private Const SCHEMA_VER     As String = "v2.0"
 ' is why the Setup band rows have to estimate their height instead), and AutoFit
 ' on the description rows is the entire reason a description cannot clip.
 Private Const PANEL_BASE As String = "Macros "   ' grouped output tabs: "Macros 1", "Macros 2"...
-Private Const HOME_SHEET As String = "Macros Home"  ' index withdrawn in v0.4.0; the name is still
-                                                    ' needed by DeleteHomePanel and stays RESERVED
-                                                    ' (contract 7) against a future restore
+Private Const HOME_SHEET As String = "Macros Home"  ' generated action index; RESERVED by contract 7
 Private Const CARD_COLS   As Long = 3            ' card columns per page -> B, D, F
 Private Const CARD_W      As Double = 30         ' content column width, in characters
 Private Const GUTTER_W    As Double = 3          ' spacer column width, in characters
@@ -182,6 +180,7 @@ Private Const END_KEY   As String = "_core_end"   ' sentinel key row: bounds the
 Private Const CHAINS_KEY As String = "k_core_chains"   ' Compose section: chains block sentinel (col A)
 Private Const LAYOUT_KEY As String = "k_core_layout"   ' Compose section: placement block sentinel (col A)
 Private Const RID_COL    As Long = 10                  ' Compose section: col J, hidden per-row id
+Private Const REMINDER_TEXT As String = "Actions are switched on. Click 'Finalize Setup Tab' and then 'Create Setup Tab' to reveal their option fields."
 
 ' ---- speed wrapper saved state (module-level, depth-counted) ----
 Private mSpeedDepth  As Long
@@ -199,7 +198,7 @@ Private mSaveCalc    As XlCalculation
 ' the very top of every Core_BuildControlPanel call (not just on entry to the
 ' module) so a stale True from a PRIOR successful call can never leak into a
 ' later call that fails before reaching its own success line - and only set
-' True once the whole pipeline (through LandOnFirstPage) has actually finished.
+' True once the whole pipeline (through the generated home page) has actually finished.
 Private mLastBuildOk As Boolean
 
 ' Final-review fix wave, fix 1: the "N button(s) placed / N could NOT be placed"
@@ -353,10 +352,12 @@ Public Sub Core_AddTable(reg As Object, ByVal key As String, _
                          ByVal label As String, ByVal colHeaders As String, _
                          Optional ByVal tier As String = "simple", _
                          Optional ByVal help As String = "", _
-                         Optional ByVal usedBy As String = "")
+                         Optional ByVal usedBy As String = "", _
+                         Optional ByVal colNotes As String = "")
     Dim f As Object
     Set f = NewField(key, label, "table", "", tier, help, usedBy)
     f("headers") = colHeaders
+    f("notes") = colNotes
     reg("fields").Add f
 End Sub
 
@@ -716,7 +717,7 @@ End Function
 '================================================================
 
 ' ---- speed wrapper: disable, do work, guaranteed restore ----
-Public Sub Core_SpeedOn()
+Private Sub Core_SpeedOn()
     If mSpeedDepth = 0 Then
         mSaveScreen = Application.ScreenUpdating
         mSaveEvents = Application.EnableEvents
@@ -731,7 +732,7 @@ Public Sub Core_SpeedOn()
     mSpeedDepth = mSpeedDepth + 1
 End Sub
 
-Public Sub Core_SpeedOff()
+Private Sub Core_SpeedOff()
     If mSpeedDepth > 0 Then mSpeedDepth = mSpeedDepth - 1
     If mSpeedDepth <= 0 Then RestoreSpeed
 End Sub
@@ -2490,6 +2491,17 @@ Private Function BlockIntro(ws As Worksheet, ByVal r As Long, _
     BlockIntro = r
 End Function
 
+' Attach a hover note to a header cell. Clears any existing note first: Setup is
+' deleted and rebuilt on every Core_BuildSetup, but Setup Menu is REUSED, and
+' AddComment raises on a cell that already carries one.
+Private Sub HeaderNote(cell As Range, ByVal txt As String)
+    On Error Resume Next
+    cell.ClearComments
+    On Error GoTo 0
+    cell.AddComment txt
+    cell.Comment.Shape.TextFrame.AutoSize = True
+End Sub
+
 Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     Dim vals As Collection, i As Long
     r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the header
@@ -2507,9 +2519,10 @@ Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f A
 End Function
 
 Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
-    Dim heads() As String, a() As String, b() As String, c() As String
+    Dim heads() As String, notes() As String, a() As String, b() As String, c() As String
     Dim i As Long, j As Long, nHead As Long, hasData As Boolean
     heads = Split(CStr(f("headers")), "|")
+    notes = Split(CStr(f("notes")), "|")
     nHead = UBound(heads)
     If nHead > 2 Then nHead = 2                 ' 3 columns read (C, D, E)
     r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the headers
@@ -2517,6 +2530,9 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
     For j = 0 To nHead
         ws.Cells(r, VAL_COL + j).Value = Trim(heads(j))
         ws.Cells(r, VAL_COL + j).Font.Bold = True
+        If j <= UBound(notes) Then
+            If Len(Trim(notes(j))) > 0 Then HeaderNote ws.Cells(r, VAL_COL + j), Trim(notes(j))
+        End If
     Next j
     r = r + 1
     hasData = TableValues(reg, CStr(f("key")), a, b, c)
@@ -2567,9 +2583,12 @@ Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     RenderComposeSection = r
 End Function
 
-' "Label [id]" per line -> Collection of ids (only the bracketed id is authoritative)
+' "Label [id]" or a bare id per line, and bare ids may be comma-separated.
+' Only the bracketed id is authoritative. A line carrying a bracket is never
+' comma-split because a caption may contain a comma.
 Private Function ParseStepTokens(ByVal cell As String) As Collection
-    Dim out As New Collection, lines() As String, ln As String, i As Long
+    Dim out As New Collection, lines() As String, parts() As String
+    Dim ln As String, i As Long, j As Long
     Dim lo As Long, hi As Long, id As String
     Set ParseStepTokens = out
     cell = Replace(cell, ";", vbLf)
@@ -2580,10 +2599,17 @@ Private Function ParseStepTokens(ByVal cell As String) As Collection
             lo = InStrRev(ln, "["): hi = InStrRev(ln, "]")
             If lo > 0 And hi > lo Then
                 id = Trim(Mid(ln, lo + 1, hi - lo - 1))
+                If Len(id) > 0 Then out.Add id
+            ElseIf lo = 0 And hi = 0 Then
+                parts = Split(ln, ",")
+                For j = LBound(parts) To UBound(parts)
+                    id = Trim(parts(j))
+                    If Len(id) > 0 Then out.Add id
+                Next j
             Else
-                id = ln            ' bare id with no brackets is tolerated
+                id = ln            ' preserve malformed bracket-bearing input
+                If Len(id) > 0 Then out.Add id
             End If
-            If Len(id) > 0 Then out.Add id
         End If
     Next i
 End Function
@@ -2623,6 +2649,27 @@ Private Function ActionTokenFor(ByVal actionId As String) As String
     Next reg
 End Function
 
+' The canonical-cased id for a hand-typed one, so a Steps cell reading
+' "CLEAN.DUPES" is rewritten "clean.dupes" when Setup is rebuilt. This is the
+' SAME normalisation ActionTokenFor performs above and it exists separately only
+' because a Steps cell now holds bare ids rather than "Caption [id]" tokens. The
+' note above records that a prior refactor already lost this normalisation once
+' and it came back as fix round 2; writing StepsToTokens against the caller's raw
+' string re-introduced exactly that defect in a new place. Unresolvable input is
+' returned unchanged - Finalize's own report is what flags an unknown id.
+Private Function CanonicalActionId(ByVal actionId As String) As String
+    Dim reg As Object, a As Object
+    CanonicalActionId = actionId
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            If LCase(CStr(a("id"))) = LCase(actionId) Then
+                CanonicalActionId = CStr(a("id"))
+                Exit Function
+            End If
+        Next a
+    Next reg
+End Function
+
 ' "Caption [id]" for a HIDDEN or UNASSIGNED entry in ComposeReport, matching
 ' the format the OFF/CHAINS ONLY availability lists just above them already
 ' use ("caption [id]", built from the registry) - fix round 1, fix 5: the
@@ -2653,20 +2700,22 @@ End Function
 Private Function StepsToTokens(steps As Collection) As String
     Dim s As String, v As Variant
     For Each v In steps
-        s = s & ActionTokenFor(CStr(v)) & vbLf
+        If Len(s) > 0 Then s = s & ", "
+        s = s & CanonicalActionId(CStr(v))
     Next v
-    StepsToTokens = Left$(s, Len(s) - IIf(Len(s) > 0, 1, 0))
+    StepsToTokens = s
 End Function
 
 Private Sub RenderActionTokens(ws As Worksheet, ByVal startRow As Long)
     Dim reg As Object, a As Object, gr As Long
-    ws.Cells(startRow - 1, 7).Value = "Available actions - copy a token into Steps:"
+    ws.Cells(startRow - 1, 7).Value = "Available actions - copy an id into Steps:"
     ws.Cells(startRow - 1, 7).Font.Bold = True
     gr = startRow
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
-            ws.Cells(gr, 7).Value = CStr(a("caption")) & " [" & CStr(a("id")) & "]"
-            ws.Cells(gr, 7).Font.Color = RGB(120, 120, 120)
+            ws.Cells(gr, 7).Value = CStr(a("id"))
+            ws.Cells(gr, 8).Value = CStr(a("caption"))
+            ws.Range(ws.Cells(gr, 7), ws.Cells(gr, 8)).Font.Color = RGB(120, 120, 120)
             gr = gr + 1
         Next a
     Next reg
@@ -2699,12 +2748,18 @@ End Function
 Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim existing As Collection, ch As Object, i As Long
     r = BlockIntro(ws, r, "Chains  -  one button that runs several actions in order", _
-                   "Button name + Steps (paste tokens from the Actions list, one per line) + Placement (1A, hide, or TabName!B4).")
+                   "Button name + Steps (paste action ids from the Actions list, separated by commas) + Placement (1A, hide, or TabName!B4).")
     ws.Cells(r, KEY_COL).Value = CHAINS_KEY
     ws.Cells(r, VAL_COL).Value = "Button name"
-    ws.Cells(r, VAL_COL + 1).Value = "Steps (one token per line)"
+    ws.Cells(r, VAL_COL + 1).Value = "Steps (action ids, separated by commas)"
     ws.Cells(r, VAL_COL + 2).Value = PLACE_HEADER
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
+    HeaderNote ws.Cells(r, VAL_COL + 1), _
+               "Enter action ids separated by commas, copied from the list to the right. " & _
+               "The older 'Caption [id]' form still works."
+    HeaderNote ws.Cells(r, VAL_COL + 2), _
+               "Placement forms: blank = automatic; 1A = page 1, column A; " & _
+               "hide = leave it off the pages; TabName!B4 = put the button on your own sheet at cell B4."
     r = r + 1
 
     Set existing = ReadChains(CfgSheet())          ' re-seed from activated config
@@ -2712,7 +2767,7 @@ Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
         If i <= existing.Count Then
             Set ch = existing(i)
             ws.Cells(r, VAL_COL).Value = ch("label")
-            ws.Cells(r, VAL_COL + 1).Value = StepsToTokens(ch("steps"))   ' Label [id] per line
+            ws.Cells(r, VAL_COL + 1).Value = StepsToTokens(ch("steps"))   ' bare ids, comma-separated
             ws.Cells(r, VAL_COL + 2).Value = ch("code")
             ws.Cells(r, RID_COL).Value = ch("id")   ' preserve immutable id
         End If
@@ -2722,7 +2777,7 @@ Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
         ws.Cells(r, VAL_COL + 1).WrapText = True
         r = r + 1
     Next i
-    ' Copy-ready action tokens in G/H for authoring Steps.
+    ' Copy-ready action ids and captions in G/H for authoring Steps.
     RenderActionTokens ws, r - MAX_LIST
     RenderChainsBlock = r
 End Function
@@ -2951,7 +3006,8 @@ End Sub
 ' never make the action undiscoverable.
 Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim prior As Object, priorAvail As Object, reg As Object, a As Object, id As String
-    Dim firstDataRow As Long, lastDataRow As Long
+    Dim firstDataRow As Long, lastDataRow As Long, reminderRow As Long
+    Dim availabilityRange As String, f As String
     ' Fix round 3, fix 3: "hide" used to read as manual-layout-only ("leave one
     ' button off A MANUAL LAYOUT") - true only before fix round 3's fix 1, which
     ' made GatherButtons drop a hide-coded button before either filer runs, so
@@ -2965,11 +3021,30 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                    "for example  TabName!B4  places it on cell B4 of the TabName tab, and " & _
                    "does not change where any other button goes. " & _
                    "Type  hide  to leave any one button off, whether or not you use placement codes.")
+    ' Reserve this row now and write its formula AFTER the action rows exist.
+    ' The formula spans the availability column of the whole block, so it needs
+    ' the block's real extent - and predicting that from a registry count would
+    ' drift silently the moment the loop below gained any filter, taking the
+    ' bounded validation range at the end of this procedure with it. Writing the
+    ' formula last costs nothing: Excel does not care what order cells are
+    ' filled in, and lastDataRow stays derived from the loop that produces it.
+    ' KEY_COL intentionally stays EMPTY on this row: blocks are located by
+    ' machine key via FindKeyRow, never by row offset, so a keyless row cannot
+    ' shift any block's parse - and a key here would make it look like a block.
+    reminderRow = r
+    NavLink ws.Cells(reminderRow, VAL_COL + 1), "Setup Menu", ADMIN_SHEET
+    r = r + 1
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
     ws.Cells(r, VAL_COL + 1).Value = AVAIL_HEADER
     ws.Cells(r, VAL_COL + 2).Value = PLACE_HEADER
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
+    HeaderNote ws.Cells(r, VAL_COL + 1), _
+               "Every macro starts Off. Button puts it on a Macros page. " & _
+               "Chains only makes it usable inside a chain but gives it no button of its own."
+    HeaderNote ws.Cells(r, VAL_COL + 2), _
+               "Placement forms: blank = automatic; 1A = page 1, column A; " & _
+               "hide = leave it off the pages; TabName!B4 = put the button on your own sheet at cell B4."
     ' The machine-owned schema marker, in the hidden id column of the key row -
     ' NOT in the visible header. See Task 4 / contract section 5. Force Text so a
     ' General-formatted cell cannot coerce the marker to a number (belt-and-braces:
@@ -2995,6 +3070,29 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
         Next a
     Next reg
     lastDataRow = r - 1
+
+    ' The reminder, written now that the block's real extent is known. It fires
+    ' whenever any action is not Off and is blank otherwise, so it appears the
+    ' moment a dropdown changes - before Finalize, which is the point of using a
+    ' formula rather than static text. The "<>" test excludes blanks: on a fresh
+    ' import every cell reads Off and the line must stay empty.
+    '
+    ' Compares against AvailLabel(AVAIL_OFF) - the "Off" actually written into
+    ' the cell - not the AVAIL_OFF token "off". Excel's COUNTIFS text matching
+    ' is believed case-insensitive, so the token would probably have worked, but
+    ' "probably" is a claim about Excel that nothing here has run to confirm.
+    ' Comparing against the literal the cell contains removes the question.
+    If lastDataRow >= firstDataRow Then
+        availabilityRange = ws.Range(ws.Cells(firstDataRow, VAL_COL + 1), _
+                                     ws.Cells(lastDataRow, VAL_COL + 1)).Address( _
+                                     RowAbsolute:=True, ColumnAbsolute:=True)
+        f = "=IF(COUNTIFS(" & availabilityRange & ",""<>""," & availabilityRange & _
+            ",""<>" & AvailLabel(AVAIL_OFF) & """)>0,""" & REMINDER_TEXT & ""","""")"
+    Else
+        f = "="""""
+    End If
+    ws.Cells(reminderRow, VAL_COL).Formula = f
+
     ' ONE validation call over the exact block of action rows. Bounded to the
     ' rows actually written - never the whole column - so it cannot leak
     ' validation onto the key/marker row above it or onto anything below the
@@ -3799,6 +3897,69 @@ Fail:
     MsgBox "Core_FinalizeSetup error: " & Err.Description, vbExclamation, "Finalize Setup Tab"
 End Sub
 
+' Strip the setup surfaces once the workbook is configured, while preserving the
+' activated config and every generated macro page.
+Public Sub Core_CompleteSetup()
+    Dim ws As Worksheet, target As Worksheet, ans As VbMsgBoxResult
+    Dim nPages As Long
+    Const TITLE As String = "Complete Macro Setup"
+    On Error GoTo Fail
+
+    If Not Core_SheetExists(CONFIG_SHEET) Then
+        MsgBox "Setup has never been finalized, so there is nothing to complete." & vbCrLf & vbCrLf & _
+               "Click 'Finalize Setup Tab' first." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", vbExclamation, TITLE
+        Exit Sub
+    End If
+
+    For Each ws In ThisWorkbook.Worksheets
+        If IsPanelName(ws.name) Then
+            nPages = nPages + 1
+            If target Is Nothing Then Set target = ws
+        End If
+    Next ws
+
+    If nPages = 0 Then
+        MsgBox "There are no macro pages in this workbook yet, so removing the setup tabs " & _
+               "would leave you with nothing at all." & vbCrLf & vbCrLf & _
+               "Switch on the macros you want, click 'Finalize Setup Tab', then run this " & _
+               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", vbExclamation, TITLE
+        Exit Sub
+    End If
+
+    ans = MsgBox("This removes the setup tabs from this workbook:" & vbCrLf & _
+                 "    Setup" & vbCrLf & "    Setup Menu" & vbCrLf & "    Macros Home" & vbCrLf & vbCrLf & _
+                 "Your macro buttons and all your settings are kept." & vbCrLf & vbCrLf & _
+                 "IF YOU HAVE CHANGED ANYTHING ON THE SETUP TAB SINCE YOU LAST CLICKED " & _
+                 "'Finalize Setup Tab', CLICK NO NOW, FINALIZE FIRST, THEN COME BACK. " & _
+                 "Unfinalized changes will be lost." & vbCrLf & vbCrLf & _
+                 "To get the Setup tab back later: press Alt+F8, choose Core_BuildSetup, " & _
+                 "click Run." & vbCrLf & vbCrLf & "Remove the setup tabs now?", _
+                 vbYesNo + vbExclamation + vbDefaultButton2, TITLE)
+    If ans <> vbYes Then Exit Sub
+
+    Core_SpeedOn
+    target.Activate
+    For Each ws In ThisWorkbook.Worksheets
+        If IsPanelName(ws.name) Then
+            ws.Cells(1, 2).Hyperlinks.Delete
+            ws.Cells(1, 2).Clear
+        End If
+    Next ws
+
+    If Core_SheetExists(HOME_SHEET) Then ThisWorkbook.Worksheets(HOME_SHEET).Delete
+    If Core_SheetExists(SETUP_SHEET) Then ThisWorkbook.Worksheets(SETUP_SHEET).Delete
+    If Core_SheetExists(ADMIN_SHEET) Then ThisWorkbook.Worksheets(ADMIN_SHEET).Delete
+    Core_SpeedOff
+    MsgBox "Setup is complete. Your macro buttons are ready to use." & vbCrLf & vbCrLf & _
+           "Your settings are saved and hidden. To change them later: press Alt+F8, " & _
+           "choose Core_BuildSetup, click Run.", vbInformation, TITLE
+    Exit Sub
+Fail:
+    RestoreSpeed
+    MsgBox "Could not finish: " & Err.Description, vbCritical, TITLE
+End Sub
+
 '================================================================
 ' 7. CONTROL PANEL  (builds the Macros pages)
 '================================================================
@@ -3806,13 +3967,21 @@ End Sub
 ' manual code layout when any button does ("hide" alone does not count - see
 ' AnyPlacementCode). Prior "Macros N" panels, and the pre-v0.4.0 single
 ' "Macros" tab, are cleared before either mode draws.
-' The generated index this pipeline used to end with was withdrawn in v0.4.0
-' (see src/attic/HomeIndex.bas.txt); DeleteHomePanel retires any copy a
-' pre-removal build left behind, and LandOnFirstPage takes over its role as the
-' build's landing place.
+' The generated index is built last and is the build's landing place.
 ' silent:=True suppresses the "built N ..." confirmation (used when Finalize
 ' rebuilds the panel itself and shows its own combined message).
-Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
+'
+' PRIVATE deliberately, and it must stay that way. Excel's Alt+F8 dialog is the
+' only list of macro names a non-technical user ever sees, and the setup guide
+' tells them to pick from it - so every Public Sub callable with no arguments is
+' a name that reader has to rule out. An Optional-only parameter list does not
+' reliably keep a Sub out of that dialog, so Public here risked showing a FOURTH
+' name beside Core_BuildSetup, Core_FinalizeSetup and Core_CompleteSetup. Worse
+' than the clutter: this rebuilds the Macros pages from state that Finalize sets
+' up, so running it on its own produces a panel built from a stale registry.
+' Its only caller is Core_FinalizeSetup, inside this module. Nothing external
+' calls it - not a button's OnAction, not tools/GateAudit.bas.
+Private Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object, layout As Object, manual As Boolean
     Dim paged As Collection, anchored As Collection, nPlaced As Long, nSkipped As Long
     Dim placedNote As String
@@ -3836,7 +4005,6 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     DeletePanels                            ' remove any prior "Macros N" pages (spares
                                              ' "Macros Home" by design - see IsPanelName)
     DeleteLegacyPanel                       ' v0.4.0: the single "Macros" tab is retired in BOTH modes
-    DeleteHomePanel                         ' v0.4.0: so is the withdrawn "Macros Home" index
     SweepPlacedButtons                      ' after the deletes: fewer sheets left to walk
     If manual Then
         BuildManualLayout paged, codeMap, layout
@@ -3846,7 +4014,7 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     RenderAllPages layout
     BuildAdminPanel                         ' Create/Finalize controls on their own hideable tab
     nPlaced = PlaceAnchoredButtons(anchored, codeMap, nSkipped)
-    LandOnFirstPage layout                  ' LAST: the build's deliberate landing place
+    BuildHomePage layout, manual            ' LAST: activates the build's deliberate landing place
     mLastBuildOk = True     ' the whole pipeline finished - only set here, never in Fail:
     Core_SpeedOff
     ' Final-review fix wave, fix 1: composed UNCONDITIONALLY, outside "If Not
@@ -3900,7 +4068,7 @@ Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
         Else
             ' paged.Count, NOT buttons.Count: an anchored button is not on a
             ' generated page and must not be counted against one. This is the
-            ' same class of miscount the ledger records for BuildHomePage's
+            ' same class of miscount the ledger records for the home page's
             ' totalButtons - one honest definition, not the nearest handy number.
             MsgBox "Built " & layout.Count & " macro page(s) with " & paged.Count & _
                    " button(s)." & placedNote, vbInformation, "Setup Complete"
@@ -3926,24 +4094,6 @@ Private Sub DeleteLegacyPanel()
     On Error Resume Next
     Application.DisplayAlerts = False
     ThisWorkbook.Worksheets(MACRO_SHEET).Delete
-    Application.DisplayAlerts = True
-    On Error GoTo 0
-End Sub
-
-' Retire the withdrawn "Macros Home" index, mirroring DeleteLegacyPanel's
-' retirement of the pre-v0.4.0 single "Macros" tab. Called UNCONDITIONALLY by
-' Core_BuildControlPanel.
-'
-' Unconditional matters. DeletePanels deliberately spares "Macros Home"
-' (IsPanelName requires a numeric tail), so an index left behind by a
-' PRE-removal build would otherwise be never deleted and never rebuilt: it would
-' survive every rebuild forever, showing a page list, a button catalog and a
-' legend that describe a workbook that has moved on, with links to pages that may
-' no longer exist. A stale index is worse than no index.
-Private Sub DeleteHomePanel()
-    On Error Resume Next
-    Application.DisplayAlerts = False
-    ThisWorkbook.Worksheets(HOME_SHEET).Delete
     Application.DisplayAlerts = True
     On Error GoTo 0
 End Sub
@@ -4064,16 +4214,13 @@ Private Sub BuildAdminPanel()
     ' for real headroom - a slightly tall title row costs nothing visually.
     ws.Rows(2).RowHeight = 23
     With ws.Range("B3")
-        ' Fix wave: this is the ONLY sheet-surface route to Create/Finalize now
-        ' that the single "Macros" tab is retired - and more so since v0.4.0
-        ' withdrew the "Macros Home" index, which used to carry the one link
-        ' here. Hiding stays fine - it's approved behaviour - but the invitation
-        ' must say how to get back.
+        ' Hiding stays fine - it is approved behaviour - but the invitation must
+        ' say how to get back without depending on the home-page link.
         .Value = "First-time and re-configuration controls. Right-click this tab -> Hide when you're " & _
                  "done - to come back, right-click any visible tab -> Unhide, or press Alt+F8."
         .Font.Italic = True
     End With
-    ws.Rows("5:12").RowHeight = 15
+    ws.Rows("5:14").RowHeight = 15
     leftPos = ws.Range("B5").Left
     topPos = ws.Range("B5").Top
     AddBtn ws, "btnCreateSetup", "Create Setup Tab", "Core_BuildSetup", leftPos, topPos, 220, 32
@@ -4087,7 +4234,227 @@ Private Sub BuildAdminPanel()
         .Merge: .Value = "Validates your Setup answers, activates them, and rebuilds the Macros pages."
         .Font.Size = 10: .WrapText = True: .VerticalAlignment = xlCenter
     End With
+    topPos = topPos + 75
+    AddBtn ws, "btnCompleteSetup", "Complete Macro Setup", "Core_CompleteSetup", leftPos, topPos, 220, 32
+    With ws.Range(ws.Cells(13, 3), ws.Cells(14, 3))
+        .Merge: .Value = "Removes Setup, Setup Menu, and Macros Home while keeping macro pages and settings. " & _
+                         "Press Alt+F8, then run Core_BuildSetup to bring Setup back."
+        .Font.Size = 10: .WrapText = True: .VerticalAlignment = xlCenter
+    End With
 End Sub
+
+' The generated index - ALWAYS built, even for a single page, so the workbook has
+' one shape at every scale. Three parts: a page summary, the full action catalog,
+' and the legend. Built last and activated, so any rebuild lands the user here.
+Private Sub BuildHomePage(layout As Object, ByVal isManual As Boolean)
+    Dim ws As Worksheet, r As Long, tabKeys As Variant, ti As Long, tabNum As Long
+    Dim page As Object, totalButtons As Long
+    Set ws = EnsurePanelSheet(HOME_SHEET, True)
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = 40
+    ws.Columns("C").ColumnWidth = 9
+    ws.Columns("D").ColumnWidth = 62
+    ws.Columns("E").ColumnWidth = 16
+
+    With ws.Range("B2")
+        .Value = "Macro Toolkit"
+        .Font.Size = 18
+        .Font.Bold = True
+        .Font.Color = RGB(31, 78, 121)
+    End With
+    ws.Rows(2).RowHeight = 25
+    With ws.Range("B3")
+        .Value = "Pick a page below, or find an action in the catalog. Every page has a  << Home  link back here."
+        .Font.Italic = True
+    End With
+
+    r = 5
+    ws.Cells(r, 2).Value = "PAGE"
+    ws.Cells(r, 3).Value = "BUTTONS"
+    ws.Cells(r, 4).Value = "CATEGORIES ON IT"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 217, 240)
+    End With
+    r = r + 1
+
+    tabKeys = SortedKeys(layout)
+    If UBound(tabKeys) < LBound(tabKeys) Then
+        ws.Cells(r, 2).Value = "No actions are available as buttons yet."
+        ws.Cells(r, 2).Font.Italic = True
+        r = r + 1
+    Else
+        For ti = LBound(tabKeys) To UBound(tabKeys)
+            tabNum = CLng(tabKeys(ti))
+            Set page = layout(tabNum)
+            NavLink ws.Cells(r, 2), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+            ws.Cells(r, 3).Value = PageButtonCount(page)
+            totalButtons = totalButtons + PageButtonCount(page)
+            ws.Cells(r, 4).Value = CStr(page("title"))
+            ws.Cells(r, 4).Font.Color = RGB(90, 90, 90)
+            r = r + 1
+        Next ti
+    End If
+
+    r = r + 1
+    NavLink ws.Cells(r, 2), "Setup Menu  -  first-time setup / re-configure", ADMIN_SHEET
+    r = r + 2
+    r = HomeCatalog(ws, r, layout)
+    r = r + 1
+    r = HomeLegend(ws, r, totalButtons, isManual)
+
+    ws.Visible = xlSheetVisible
+    ws.Activate
+    ws.Range("A1").Select
+End Sub
+
+' Every registered action, with its full description, availability, and generated
+' page when it has one. Chains retain their existing generated-button treatment.
+Private Function HomeCatalog(ws As Worksheet, ByVal r As Long, layout As Object) As Long
+    Dim tabKeys As Variant, ti As Long, tabNum As Long, page As Object
+    Dim cols As Object, colKeys As Variant, ci As Long, colIx As Long
+    Dim items As Collection, ii As Long, it As Variant, firstRow As Long
+    Dim pageById As Object, reg As Object, a As Object, availMap As Object
+    Dim chains As Collection, ch As Object, actionId As String, avail As String
+
+    Set pageById = CreateObject("Scripting.Dictionary")
+    tabKeys = SortedKeys(layout)
+    For ti = LBound(tabKeys) To UBound(tabKeys)
+        tabNum = CLng(tabKeys(ti))
+        Set page = layout(tabNum)
+        Set cols = page("cols")
+        colKeys = SortedKeys(cols)
+        For ci = LBound(colKeys) To UBound(colKeys)
+            colIx = CLng(colKeys(ci))
+            Set items = cols(colIx)
+            For ii = 1 To items.Count
+                it = items(ii)
+                pageById(LCase(CStr(it(0)))) = tabNum
+            Next ii
+        Next ci
+    Next ti
+
+    ws.Cells(r, 2).Value = "ACTION CATALOG"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    ws.Cells(r, 2).Value = "ACTION"
+    ws.Cells(r, 3).Value = "PAGE"
+    ws.Cells(r, 4).Value = "WHAT IT DOES"
+    ws.Cells(r, 5).Value = "AVAILABILITY"
+    With ws.Range(ws.Cells(r, 2), ws.Cells(r, 5))
+        .Font.Bold = True
+        .Font.Size = 10
+        .Interior.Color = RGB(240, 240, 245)
+    End With
+    r = r + 1
+    firstRow = r
+
+    Set availMap = ReadAvailMap(CfgSheet())
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            actionId = CStr(a("id"))
+            ws.Cells(r, 2).Value = CStr(a("caption"))
+            If pageById.Exists(LCase(actionId)) Then
+                tabNum = CLng(pageById(LCase(actionId)))
+                NavLink ws.Cells(r, 3), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+            End If
+            With ws.Cells(r, 4)
+                .Value = CStr(a("help"))
+                .Font.Size = 10
+                .Font.Color = RGB(90, 90, 90)
+                .WrapText = True
+                .VerticalAlignment = xlTop
+            End With
+            avail = AvailLabel(AvailFor(availMap, actionId))
+            If Len(avail) = 0 Then avail = "Off"
+            ws.Cells(r, 5).Value = avail
+            r = r + 1
+        Next a
+    Next reg
+
+    Set chains = ReadChains(CfgSheet())
+    For Each ch In chains
+        actionId = CStr(ch("id"))
+        If Len(actionId) > 0 And pageById.Exists(LCase(actionId)) Then
+            ws.Cells(r, 2).Value = CStr(ch("label"))
+            tabNum = CLng(pageById(LCase(actionId)))
+            NavLink ws.Cells(r, 3), PANEL_BASE & tabNum, PANEL_BASE & tabNum
+            With ws.Cells(r, 4)
+                .Value = "Chain: " & StepsInline(ch("steps"))
+                .Font.Size = 10
+                .Font.Color = RGB(90, 90, 90)
+                .WrapText = True
+                .VerticalAlignment = xlTop
+            End With
+            ws.Cells(r, 5).Value = "Button"
+            r = r + 1
+        End If
+    Next ch
+
+    If r > firstRow Then ws.Rows(firstRow & ":" & (r - 1)).AutoFit
+    HomeCatalog = r
+End Function
+
+' The legend explains the page-code convention and Availability where a daily
+' user will see them. It is mode-aware so it describes this build truthfully.
+Private Function HomeLegend(ws As Worksheet, ByVal r As Long, ByVal totalButtons As Long, _
+                            ByVal isManual As Boolean) As Long
+    ws.Cells(r, 2).Value = "HOW THESE PAGES ARE BUILT"
+    ws.Cells(r, 2).Font.Bold = True
+    r = r + 1
+    If isManual Then
+        r = HomeLine(ws, r, totalButtons & " button(s). Your Page codes choose where each button starts - " & _
+                             "for an action, the code in the action catalog on the Setup tab; for a chain, " & _
+                             "the code in the Chains block. A full page or column can still move a button to " & _
+                             "a continuation one.")
+        r = HomeLine(ws, r, "To go back to automatic packing, clear every Page code - with none set, categories " & _
+                             "are packed onto pages for you again.")
+    Else
+        r = HomeLine(ws, r, totalButtons & " button(s), laid out automatically - categories packed onto pages, up to " & _
+                             CARD_COLS & " per page.")
+        r = HomeLine(ws, r, "To take charge of the layout, fill in 'Page code' - for an action, in the action " & _
+                             "catalog on the Setup tab; for a chain, in the Chains block:")
+    End If
+    r = HomeLine(ws, r, "    1A = page 1, column A.    12AB = page 12, column AB.    hide = leave that button off.")
+    r = HomeLine(ws, r, "As soon as ONE placement code (not counting hide) is filled in, the codes take " & _
+                         "over; a blank-coded button lands in page 1's Unassigned area, or a continuation " & _
+                         "page once the page has no free column slot left. hide always omits a button, in " & _
+                         "either mode.")
+    r = HomeLine(ws, r, "Availability on the Setup tab: 'Button' = shown here. 'Chains only' = no button, but a Chain can run it.")
+    r = HomeLine(ws, r, "'Off' = no button and it will not run at all; Finalize refuses to activate a Chain that uses one.")
+    HomeLegend = r
+End Function
+
+Private Function HomeLine(ws As Worksheet, ByVal r As Long, ByVal txt As String) As Long
+    ws.Cells(r, 2).Value = txt
+    ws.Cells(r, 2).Font.Size = 10
+    ws.Cells(r, 2).Font.Color = RGB(90, 90, 90)
+    HomeLine = r + 1
+End Function
+
+' Frameless textbox label (ported from MacroLayout ML_AddText).
+Private Function AddText(ws As Worksheet, ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal h As Double, _
+                         ByVal txt As String, ByVal sz As Single, ByVal bold As Boolean, ByVal colr As Long) As Shape
+    Dim sh As Shape
+    Set sh = ws.Shapes.AddTextbox(1, l, t, w, h)
+    sh.Fill.Visible = msoFalse
+    sh.Line.Visible = msoFalse
+    With sh.TextFrame2.TextRange
+        .Text = txt
+        .Font.Size = sz
+        .Font.Bold = bold
+        .Font.Fill.ForeColor.RGB = colr
+    End With
+    Set AddText = sh
+End Function
+
+Private Function PageButtonCount(page As Object) As Long
+    Dim cols As Object, k As Variant
+    Set cols = page("cols")
+    For Each k In cols.Keys
+        PageButtonCount = PageButtonCount + cols(k).Count
+    Next k
+End Function
 
 ' Get-or-add a panel sheet, clear its shapes (backward loop) + cells, and format.
 Private Function EnsurePanelSheet(ByVal nm As String, ByVal atFront As Boolean) As Worksheet
@@ -4341,12 +4708,7 @@ End Function
 ' bookkeeping and EnsurePanelSheet's Cells.Clear removes it cleanly on rebuild.
 ' ASCII arrows only - build.ps1 writes UTF-8 with no BOM on the assumption that
 ' the SOURCE is ASCII, so a literal arrow glyph in the .bas is an import hazard.
-' Previous / Next only. The "<< Home" link that used to lead this row was dropped
-' in v0.4.0 with the index it pointed at (src/attic/HomeIndex.bas.txt); Previous
-' and Next shifted left into cells B and D.
-'
-' Worth keeping from the deleted comment, because it will come back the moment
-' anyone re-adds a link to a sheet built later in the pipeline: do NOT guard a
+' Home / Previous / Next. Do NOT guard a
 ' NavLink target with Core_SheetExists. One was added once, it fired at RENDER
 ' time against a sheet built last, and on a virgin workbook's first build it drew
 ' plain bold text instead of a link on every single page - then self-healed on
@@ -4354,8 +4716,9 @@ End Function
 ' does not validate SubAddress, and the target always exists by the time the macro
 ' returns and the user can click anything. Write the link unconditionally.
 Private Sub RenderNavRow(ws As Worksheet, ByVal prevSheet As String, ByVal nextSheet As String)
-    If Len(prevSheet) > 0 Then NavLink ws.Cells(1, 2), "< Previous", prevSheet
-    If Len(nextSheet) > 0 Then NavLink ws.Cells(1, 4), "Next >", nextSheet
+    NavLink ws.Cells(1, 2), "<< Home", HOME_SHEET
+    If Len(prevSheet) > 0 Then NavLink ws.Cells(1, 4), "< Previous", prevSheet
+    If Len(nextSheet) > 0 Then NavLink ws.Cells(1, 6), "Next >", nextSheet
     ws.Rows(1).RowHeight = 18
 End Sub
 
@@ -4810,50 +5173,6 @@ Private Sub LabelAutoPages(layout As Object)
     Next ti
 End Sub
 
-' Activate the lowest-numbered generated page and put the cursor on A1, so a
-' build ends somewhere deliberate. This replaces the ONLY activation the pipeline
-' ever had: BuildHomePage, withdrawn in v0.4.0 (src/attic/HomeIndex.bas.txt).
-'
-' Activate BEFORE selecting. Range.Select on a non-active sheet raises 1004,
-' which is how RenderPageLegacy's bare Range("A1").Select survived for so long -
-' it only ever ran on the fresh-sheet path, and Worksheets.Add activates. See the
-' Task 8 ledger; do not let that habit migrate forward.
-'
-' Does nothing when there are NO generated pages. That is reachable now: every
-' button can be hidden or switched Off (and, from v0.4.0, placed on a user's own
-' sheet).
-'
-' The xlSheetVisible check is INSURANCE, not a supported-workflow guard. A
-' numbered page cannot normally be hidden at all: DeletePanels removes every
-' "Macros N" at the top of every build and EnsurePanelSheet recreates it via
-' Worksheets.Add, which always yields a visible sheet. The check is here
-' because DeletePanels deletes under On Error Resume Next - a delete that
-' failed silently could leave a hidden page behind, and Activate raises 1004
-' on one, on this pipeline's LAST statement, which would flip mLastBuildOk to
-' False after everything else had actually succeeded.
-' (Hiding IS a supported habit for Setup Menu, which BuildAdminPanel reuses
-' rather than recreates, and was for the withdrawn index - but not for a
-' generated page, which is rebuilt from scratch every time.)
-'
-' The Core_SheetExists check here is NOT the banned nav-link guard (see
-' RenderNavRow). That one fired at RENDER time against a sheet built later in the
-' pipeline, and made every link dead text on a first build. This one fires at the
-' END of the pipeline against a sheet RenderAllPages has already created - and it
-' is here only so a stale layout entry cannot raise on the build's last statement
-' and flip mLastBuildOk to False after everything actually succeeded.
-Private Sub LandOnFirstPage(layout As Object)
-    Dim tabKeys As Variant, ws As Worksheet, nm As String
-    If layout.Count = 0 Then Exit Sub
-    tabKeys = SortedKeys(layout)
-    If UBound(tabKeys) < LBound(tabKeys) Then Exit Sub
-    nm = PANEL_BASE & CLng(tabKeys(LBound(tabKeys)))
-    If Not Core_SheetExists(nm) Then Exit Sub
-    Set ws = ThisWorkbook.Worksheets(nm)
-    If ws.Visible <> xlSheetVisible Then Exit Sub
-    ws.Activate                     ' Range.Select needs its sheet active
-    ws.Range("A1").Select
-End Sub
-
 ' Remove every "Macros N" grouped page (numeric tail; the legacy "Macros" is left).
 Private Sub DeletePanels()
     Dim i As Long, nm As String
@@ -4939,7 +5258,7 @@ End Function
 ' re-tighten that to cover only the Range resolution: this procedure has no
 ' error handler of its own, so an unguarded raise inside AddBtn propagates to
 ' Core_BuildControlPanel's "On Error GoTo Fail" and aborts the ENTIRE rebuild -
-' mLastBuildOk stays False, LandOnFirstPage never runs, and the user is told the
+' mLastBuildOk stays False, the home page never builds, and the user is told the
 ' whole build failed because one anchor pointed at a protected tab.
 '
 ' Task 9's Finalize checks reduce how often this fires, but cannot remove it:
@@ -4980,17 +5299,13 @@ End Function
 ' "Macros Home" starts with PANEL_BASE ("Macros ") but has a non-numeric tail, so
 ' it reads False here and DeletePanels never touches it.
 '
-' That WAS load-bearing: it is what let a rebuild reuse rather than recreate the
-' index sheet, so EnsurePanelSheet found it already there and cleared and
-' rewrote it in place. The index was withdrawn in v0.4.0
-' (src/attic/HomeIndex.bas.txt) and DeleteHomePanel now removes any copy a
-' pre-removal build left behind, so nothing depends on the carve-out any more.
+' This is load-bearing: it lets a rebuild reuse rather than recreate the
+' index sheet, so EnsurePanelSheet finds it already there, clears it, and
+' rewrites it in place.
 '
-' The numeric-tail rule is kept UNCHANGED all the same, for two reasons that
-' outlive the index: the name stays RESERVED (contract section 7) against a
-' future restore, and "delete exactly the pages this engine generates, and
-' nothing else a user happened to name 'Macros Something'" is the correct rule
-' on its own merits.
+' The generated home index depends on this carve-out, and "delete exactly the
+' pages this engine generates, and nothing else a user happened to name 'Macros
+' Something'" is the correct rule on its own merits.
 Private Function IsPanelName(ByVal nm As String) As Boolean
     Dim tail As String
     If LCase(Left(nm, Len(PANEL_BASE))) <> LCase(PANEL_BASE) Then Exit Function

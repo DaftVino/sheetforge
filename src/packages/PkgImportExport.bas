@@ -50,7 +50,8 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     Core_AddSection reg, "IMPORT FILES"
     Core_AddTable reg, "k_import", "Import files (one row per input tab)", "Input tab (in this workbook)|Source file (name starts with...)|Column types", _
         help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, codes, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them.", _
-        usedBy:="importexport.clear, importexport.import, importexport.suggestTypes"
+        usedBy:="importexport.clear, importexport.import, importexport.suggestTypes", _
+        colNotes:="||T keeps text exactly as it is, including IDs and leading zeros; N is a number; D is a date; DT is date and time; B is yes/no; G lets Excel decide. Enter one code per column, left to right, separated by commas. Any other code is treated as G (auto-detect) with no warning, so a typo can cause an ID column to lose leading zeros."
     Core_AddDefault reg, "k_import", "IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_Data2|Source File B|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_Data3|Source File C|T,T,T,T,T,T,T,N,N,N,N"
@@ -77,10 +78,10 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     Core_AddDefault reg, "k_master_cols", "Mgr (Loc) Name"
 
     ' ---- ACTIONS (become buttons) ----
-    Core_AddAction reg, "importexport.clear", "1.  Clear Input Tabs", "PkgImportExport_Clear", "Deletes data (row 2 down) on the input tabs. Keeps headers + formatting."
-    Core_AddAction reg, "importexport.import", "2.  Import Source Data", "PkgImportExport_Import", "Clears the input tabs, then imports the matching source files from this folder (auto-handles (1)/(2) name suffixes)."
-    Core_AddAction reg, "importexport.updateMaster", "3.  Update Ref_Master", "PkgImportExport_UpdateMaster", "Refreshes the Ref_Master tab from the master-list file in this folder."
-    Core_AddAction reg, "importexport.export", "4.  Export Dashboard (.xlsx)", "PkgImportExport_Export", "Saves a values-only copy of the main tabs (formatting + filters + conditional formatting kept)."
+    Core_AddAction reg, "importexport.clear", "Clear Input Tabs", "PkgImportExport_Clear", "Deletes data (row 2 down) on the input tabs. Keeps headers + formatting."
+    Core_AddAction reg, "importexport.import", "Import Source Data", "PkgImportExport_Import", "Clears the input tabs, then imports the matching source files from this folder (auto-handles (1)/(2) name suffixes)."
+    Core_AddAction reg, "importexport.updateMaster", "Update Ref_Master", "PkgImportExport_UpdateMaster", "Refreshes the Ref_Master tab from the master-list file in this folder."
+    Core_AddAction reg, "importexport.export", "Export Dashboard (.xlsx)", "PkgImportExport_Export", "Saves a values-only copy of the main tabs (formatting + filters + conditional formatting kept)."
     Core_AddAction reg, "importexport.suggestTypes", "Suggest Import Types", "PkgImportExport_SuggestTypes", "SETUP HELPER: after you fill the input tabs + source prefixes on the Setup tab, this opens each source file and fills a SUGGESTED type map for review. Always double-check ID/code columns stay T."
 End Sub
 

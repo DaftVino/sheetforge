@@ -6,6 +6,52 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-29
+
+### Added
+
+- **`Macros Home` is an index of the whole toolkit, not a mirror of the buttons already
+  built.** It lists all 51 actions, what each one does, and the `Macros <n>` page where its
+  button lives. An earlier version was built and then withdrawn before release because it
+  listed only actions that had become buttons. Every action starts `Off`, so a fresh import
+  rendered an empty index at exactly the moment a new user most needed to see what SheetForge
+  could do.
+
+  **The shipped index keeps all 51 actions visible.** An action that is not enabled is marked
+  `Off` and has no page link; enabled actions point to the page that holds their button.
+
+- **The last eight `Later` actions are built, taking the toolkit from 43 actions to 51.** Split
+  One Column Into Many, Change Case, Highlight Comments/Formulas and Blanks, Apply One Style To
+  All Charts, Save Each Group As Its Own File, Email A Sheet As An Attachment, Sort Worksheets
+  Alphabetically, and Add A Back To Contents Link To Every Sheet complete the catalog's planned
+  work.
+
+- **Setup now asks you to Finalize as soon as a choice changes.** A reminder above the action
+  catalog gives the two clicks needed to apply the change. It is driven by a formula rather
+  than static text, so it appears as soon as an action is switched on, before any macro has run.
+
+- **Four Setup headers now explain themselves on hover.** Notes on Availability, Placement,
+  Steps, and Column types put the meaning of those columns beside the choices, without making
+  you keep the guide open next to the workbook.
+
+### Changed
+
+- **Chain steps are now written as a comma-separated list of ids, such as `clean.dupes,
+  clean.trim`.** The parser never splits on a comma when a line contains a bracket, so a legacy
+  `Caption [id]` line is still read as one token and cannot be cut in two by a comma inside its
+  caption. Existing workbooks continue to run, and the next Finalize rewrites them into the new
+  form.
+
+- **`Complete Macro Setup` keeps `_Config`.** It removes `Setup`, `Setup Menu`, and
+  `Macros Home` from a finished workbook, but leaves the hidden configuration sheet in place.
+  Every button reads `_Config` to find out what it should do; deleting it leaves buttons that
+  look normal and silently do nothing, which is the worst kind of failure because the workbook
+  shows no sign that anything is wrong. Keeping it also lets `Core_BuildSetup` restore the Setup
+  tab with your answers intact.
+
+- **Contract v2.10.0.** Adds the eight action ids, reserves the `Macros Home` sheet name, and
+  defines the comma-separated chain-step format.
+
 ## [0.17.0] - 2026-07-28
 
 ### Added
