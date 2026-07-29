@@ -180,7 +180,7 @@ Private Const END_KEY   As String = "_core_end"   ' sentinel key row: bounds the
 Private Const CHAINS_KEY As String = "k_core_chains"   ' Compose section: chains block sentinel (col A)
 Private Const LAYOUT_KEY As String = "k_core_layout"   ' Compose section: placement block sentinel (col A)
 Private Const RID_COL    As Long = 10                  ' Compose section: col J, hidden per-row id
-Private Const REMINDER_TEXT As String = "Actions are switched on. Click 'Finalize Setup Tab' and then 'Create Setup Tab' to reveal their option fields."
+Private Const REMINDER_TEXT As String = "Actions are switched on. Click 'Finalize Setup Tab', then 'Create Setup Tab' to show their option fields. Fill those in, then click 'Finalize Setup Tab' again to save them."
 
 ' ---- speed wrapper saved state (module-level, depth-counted) ----
 Private mSpeedDepth  As Long
@@ -2279,6 +2279,58 @@ Fail:
     MsgBox "Core_BuildSetup error: " & Err.Description, vbExclamation, "Create Setup Tab"
 End Sub
 
+' Return the action ids, in declaration order, for fields that will actually render
+' under this section. Re-applying RenderTier's tier and FieldInUse tests prevents a
+' header from naming an action whose fields are in another tier or the off band;
+' trusting the section's declaration would let the scan drift from the lazy header.
+Private Function SectionActionIds(reg As Object, ByVal sectionIndex As Long, _
+                                  ByVal tier As String, availMap As Object, _
+                                  ByVal wantInUse As Boolean) As Collection
+    ' Explicit New, not "Dim result As New Collection" - the same call this file
+    ' already argues for at BuildRegistry: an auto-instantiating local silently
+    ' re-creates itself on the next reference after being set to Nothing.
+    Dim result As Collection, seen As Object, f As Object
+    Dim ids() As String, i As Long, j As Long, actionId As String
+
+    Set result = New Collection
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
+    For i = sectionIndex + 1 To reg("fields").Count
+        Set f = reg("fields")(i)
+        If f("kind") = "section" Then Exit For
+        If CStr(f("tier")) = tier Then
+            If FieldInUse(f, availMap) = wantInUse Then
+                If f.Exists("usedBy") Then
+                    If Len(Trim(CStr(f("usedBy")))) > 0 Then
+                        ids = Split(CStr(f("usedBy")), ",")
+                        For j = LBound(ids) To UBound(ids)
+                            actionId = Trim(ids(j))
+                            If Len(actionId) > 0 Then
+                                If Not seen.Exists(actionId) Then
+                                    seen.Add actionId, True
+                                    result.Add actionId
+                                End If
+                            End If
+                        Next j
+                    End If
+                End If
+            End If
+        End If
+    Next i
+    Set SectionActionIds = result
+End Function
+
+' Turn an ordered id list into the complete caption prefix. An empty list returns
+' an empty string so deployment-wide sections keep their original title unchanged.
+Private Function SectionActionPrefix(actionIds As Collection) As String
+    Dim actionId As Variant, prefix As String
+    For Each actionId In actionIds
+        If Len(prefix) > 0 Then prefix = prefix & ", "
+        prefix = prefix & ActionCaptionFor(CStr(actionId))
+    Next actionId
+    If Len(prefix) > 0 Then SectionActionPrefix = prefix & "  -  "
+End Function
+
 ' Render every field of the given tier whose in-use state matches wantInUse. When
 ' showSections is True, a section header is emitted just before its first matching
 ' field (so a section whose fields are all in the other tier is not drawn). When
@@ -2289,24 +2341,30 @@ Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
                             ByVal bannerText As String, availMap As Object, _
                             ByVal wantInUse As Boolean) As Long
     Dim f As Object, pending As String, havePending As Boolean
-    For Each f In reg("fields")
+    Dim i As Long, pendingIndex As Long, actionIds As Collection
+    For i = 1 To reg("fields").Count
+        Set f = reg("fields")(i)
         If f("kind") = "section" Then
             ' Skip a section header that just repeats the package banner (a
             ' description identical to the header above it reads as a mistake).
             If UCase(Trim(CStr(f("label")))) <> bannerText Then
                 pending = CStr(f("label"))
+                pendingIndex = i
                 havePending = True
             End If
         ElseIf CStr(f("tier")) = tier Then
             If FieldInUse(f, availMap) = wantInUse Then
                 If showSections And havePending Then
-                    r = SectionHeader(ws, r, pending)
+                    Set actionIds = SectionActionIds(reg, pendingIndex, tier, _
+                                                     availMap, wantInUse)
+                    r = SectionHeader(ws, r, _
+                                      SectionActionPrefix(actionIds) & pending)
                     havePending = False
                 End If
                 r = RenderField(ws, r, reg, f)
             End If
         End If
-    Next f
+    Next i
     RenderTier = r
 End Function
 
@@ -2759,7 +2817,7 @@ Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
                "The older 'Caption [id]' form still works."
     HeaderNote ws.Cells(r, VAL_COL + 2), _
                "Placement forms: blank = automatic; 1A = page 1, column A; " & _
-               "hide = leave it off the pages; TabName!B4 = put the button on your own sheet at cell B4."
+               "hide = leave it off the pages; TabName!B4 = put the button at cell B4 on your own tab named TabName."
     r = r + 1
 
     Set existing = ReadChains(CfgSheet())          ' re-seed from activated config
@@ -3018,7 +3076,7 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                    "Placement: leave every code blank for the automatic layout; fill in even one " & _
                    "placement code and codes take over - number = page, letters = column (e.g. 1A). " & _
                    "Or put a button on one of your OWN tabs with  Sheet!Cell  - " & _
-                   "for example  TabName!B4  places it on cell B4 of the TabName tab, and " & _
+                   "for example  TabName!B4  places it on cell B4 of your own tab named TabName, and " & _
                    "does not change where any other button goes. " & _
                    "Type  hide  to leave any one button off, whether or not you use placement codes.")
     ' Reserve this row now and write its formula AFTER the action rows exist.
@@ -3044,7 +3102,7 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                "Chains only makes it usable inside a chain but gives it no button of its own."
     HeaderNote ws.Cells(r, VAL_COL + 2), _
                "Placement forms: blank = automatic; 1A = page 1, column A; " & _
-               "hide = leave it off the pages; TabName!B4 = put the button on your own sheet at cell B4."
+               "hide = leave it off the pages; TabName!B4 = put the button at cell B4 on your own tab named TabName."
     ' The machine-owned schema marker, in the hidden id column of the key row -
     ' NOT in the visible header. See Task 4 / contract section 5. Force Text so a
     ' General-formatted cell cannot coerce the marker to a number (belt-and-braces:
@@ -3077,6 +3135,12 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     ' formula rather than static text. The "<>" test excludes blanks: on a fresh
     ' import every cell reads Off and the line must stay empty.
     '
+    ' D1 gives the reminder empty E1:H1 to overflow across. Column D on the
+    ' reminder row holds the Setup Menu nav link, so column C has no empty
+    ' neighbour there; widening C would distort every block without removing
+    ' that overflow wall. AutoFit starts at firstContentRow (row 6), leaving a
+    ' row-1 write at its default height and preventing the clipping this move fixes.
+    '
     ' Compares against AvailLabel(AVAIL_OFF) - the "Off" actually written into
     ' the cell - not the AVAIL_OFF token "off". Excel's COUNTIFS text matching
     ' is believed case-insensitive, so the token would probably have worked, but
@@ -3091,7 +3155,9 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     Else
         f = "="""""
     End If
-    ws.Cells(reminderRow, VAL_COL).Formula = f
+    ws.Cells(1, 4).Formula = f
+    ws.Cells(1, 4).Font.Bold = True
+    ws.Cells(1, 4).Font.Color = RGB(150, 0, 0)
 
     ' ONE validation call over the exact block of action rows. Bounded to the
     ' rows actually written - never the whole column - so it cannot leak

@@ -32,7 +32,7 @@ Public Sub PkgImport_Manifest(reg As Object)
         "import.combine_worksheets,import.combine_workbooks"
     Core_AddField reg, "k_import_folder", "Folder to read workbooks from", "text", "", _
         "simple", _
-        "Leave blank to use the folder this workbook is saved in - that is the usual answer. Otherwise a full path, e.g. C:\Close\January.", _
+        "Leave blank to use the folder this workbook is saved in - that is the usual answer. Otherwise a full path, e.g. C:\Reports\January.", _
         "import.combine_workbooks"
 
     Core_AddSection reg, "DELIMITED FILES"
