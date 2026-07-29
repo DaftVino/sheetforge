@@ -70,6 +70,17 @@ a chain halt.
   nowhere else in this codebase. The phase-1 plan's Task 3 states the `If/ElseIf` fallback.
   The Node syntax checker passed it, but that checker is a parser and explicitly not a
   compiler.
+- **An already-open source workbook survives `importexport.import` and
+  `importexport.updateMaster` with its unsaved edits intact.** Open one of the configured
+  source files, type something into it, do NOT save, then run the action. Expected: the action
+  completes, the source is **still open**, the typed text is **still there**, and the
+  completion message says a source was already open and that what was read was its on-screen
+  state. *Failure looks like:* the source closes, or the typed text is gone. *Why:*
+  `Workbooks.Open` on an already-open path returns the user's copy, and `Close
+  SaveChanges:=False` under suppressed alerts discards it without a prompt. This was the W1
+  Critical for the combine; the same defect was in these two shipped actions and was found
+  only by reviewing this pass's diff. **This is the highest-value item in this log** — it is
+  the only one where a failure destroys the user's work rather than reporting a wrong number.
 - **`importexport.*` refusals now stop a chain too.** Clear `k_export_tabs` and run a chain
   containing `importexport.export`. Expected: the chain stops, and says so. *Failure looks
   like:* the chain continues past it, or reports it as ok. *Why:* those five actions
