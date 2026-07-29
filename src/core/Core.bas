@@ -3970,7 +3970,18 @@ End Sub
 ' The generated index is built last and is the build's landing place.
 ' silent:=True suppresses the "built N ..." confirmation (used when Finalize
 ' rebuilds the panel itself and shows its own combined message).
-Public Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
+'
+' PRIVATE deliberately, and it must stay that way. Excel's Alt+F8 dialog is the
+' only list of macro names a non-technical user ever sees, and the setup guide
+' tells them to pick from it - so every Public Sub callable with no arguments is
+' a name that reader has to rule out. An Optional-only parameter list does not
+' reliably keep a Sub out of that dialog, so Public here risked showing a FOURTH
+' name beside Core_BuildSetup, Core_FinalizeSetup and Core_CompleteSetup. Worse
+' than the clutter: this rebuilds the Macros pages from state that Finalize sets
+' up, so running it on its own produces a panel built from a stale registry.
+' Its only caller is Core_FinalizeSetup, inside this module. Nothing external
+' calls it - not a button's OnAction, not tools/GateAudit.bas.
+Private Sub Core_BuildControlPanel(Optional ByVal silent As Boolean = False)
     Dim buttons As Collection, codeMap As Object, layout As Object, manual As Boolean
     Dim paged As Collection, anchored As Collection, nPlaced As Long, nSkipped As Long
     Dim placedNote As String
