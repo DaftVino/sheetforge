@@ -1408,6 +1408,7 @@ Private Function CoreCandidates() As Collection
     c.Add "ImportExport"            ' probes PkgImportExport_Manifest
     c.Add "Import"                  ' probes PkgImport_Manifest
     c.Add "Clean"                   ' probes PkgClean_Manifest
+    c.Add "Validate"                ' probes PkgValidate_Manifest
     Set CoreCandidates = c
 End Function
 

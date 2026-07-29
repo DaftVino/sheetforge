@@ -6,6 +6,52 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-28
+
+### Added
+
+- **Five actions that check your data and tell you what is wrong with it, without changing
+  any of it.** This is the highest-value group in the catalog for a multi-entity close, and
+  it consumes the previous wave's output directly: combine, then clean, then reconcile is one
+  continuous chain.
+
+  **Reconcile Two Datasets** is the flagship. Pick range A, pick range B, name the key column
+  in each, and it reports every key that is in one and not the other, and every column that
+  differs on a key present in both. It matches on the key, never on position.
+
+  **It refuses rather than guesses in three places, and each one is a wrong number it
+  declines to produce.** A key that appears more than once on either side is reported as a
+  duplicate with both counts, and its rows are never paired up - pairing same-key rows by
+  position is how a reconciliation invents a difference that does not exist. A row whose key
+  is entirely blank is reported on its own, and two blank keys are never treated as matching
+  each other. And a column header that appears twice in either range stops the whole run
+  before anything is compared, naming the header - silently comparing the first one and
+  dropping the rest would produce a report that looks complete and is not.
+
+- **Scan for Data Issues** sweeps a range against rules you configure - blank, number, date,
+  or a numeric range - and writes what failed to an exceptions sheet.
+
+- **Three actions that mark problems in place**: duplicates, values outside a bound, and
+  blanks in columns you have marked mandatory.
+
+  **They colour cells, and colouring is the whole safety story, so it is worth being precise
+  about.** A cell that already has a fill of its own is left alone and counted separately -
+  never overwritten. So every cell these actions touch is guaranteed to have had no fill
+  beforehand, which makes "clear the fill on those cells" a complete undo that disturbs
+  nothing else. Afterwards the marked cells are left selected, so the undo is one click and
+  applies to exactly what changed rather than to the whole range you picked.
+
+  **Each shows you the count and waits for a yes** before colouring anything.
+
+- **Neither of the two new rule tables ships with example rows**, deliberately. A demo row
+  would mean a deployment's first run colours real cells against a bound nobody set, before
+  anyone has opened Setup. The worked examples live in the field help text instead.
+
+### Changed
+
+- **Contract v2.5.0.** Adds the `validate` package - four fields and five actions. Additive:
+  no existing stored value changes meaning, and `SCHEMA_VER` stays `"v2.0"`.
+
 ## [0.12.0] - 2026-07-28
 
 ### Changed
