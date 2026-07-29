@@ -352,10 +352,12 @@ Public Sub Core_AddTable(reg As Object, ByVal key As String, _
                          ByVal label As String, ByVal colHeaders As String, _
                          Optional ByVal tier As String = "simple", _
                          Optional ByVal help As String = "", _
-                         Optional ByVal usedBy As String = "")
+                         Optional ByVal usedBy As String = "", _
+                         Optional ByVal colNotes As String = "")
     Dim f As Object
     Set f = NewField(key, label, "table", "", tier, help, usedBy)
     f("headers") = colHeaders
+    f("notes") = colNotes
     reg("fields").Add f
 End Sub
 
@@ -2489,6 +2491,17 @@ Private Function BlockIntro(ws As Worksheet, ByVal r As Long, _
     BlockIntro = r
 End Function
 
+' Attach a hover note to a header cell. Clears any existing note first: Setup is
+' deleted and rebuilt on every Core_BuildSetup, but Setup Menu is REUSED, and
+' AddComment raises on a cell that already carries one.
+Private Sub HeaderNote(cell As Range, ByVal txt As String)
+    On Error Resume Next
+    cell.ClearComments
+    On Error GoTo 0
+    cell.AddComment txt
+    cell.Comment.Shape.TextFrame.AutoSize = True
+End Sub
+
 Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
     Dim vals As Collection, i As Long
     r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the header
@@ -2506,9 +2519,10 @@ Private Function RenderList(ws As Worksheet, ByVal r As Long, reg As Object, f A
 End Function
 
 Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f As Object) As Long
-    Dim heads() As String, a() As String, b() As String, c() As String
+    Dim heads() As String, notes() As String, a() As String, b() As String, c() As String
     Dim i As Long, j As Long, nHead As Long, hasData As Boolean
     heads = Split(CStr(f("headers")), "|")
+    notes = Split(CStr(f("notes")), "|")
     nHead = UBound(heads)
     If nHead > 2 Then nHead = 2                 ' 3 columns read (C, D, E)
     r = BlockIntro(ws, r, CStr(f("label")), CStr(f("help")))   ' label + help above the headers
@@ -2516,6 +2530,9 @@ Private Function RenderTable(ws As Worksheet, ByVal r As Long, reg As Object, f 
     For j = 0 To nHead
         ws.Cells(r, VAL_COL + j).Value = Trim(heads(j))
         ws.Cells(r, VAL_COL + j).Font.Bold = True
+        If j <= UBound(notes) Then
+            If Len(Trim(notes(j))) > 0 Then HeaderNote ws.Cells(r, VAL_COL + j), Trim(notes(j))
+        End If
     Next j
     r = r + 1
     hasData = TableValues(reg, CStr(f("key")), a, b, c)
@@ -2737,6 +2754,12 @@ Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
     ws.Cells(r, VAL_COL + 1).Value = "Steps (action ids, separated by commas)"
     ws.Cells(r, VAL_COL + 2).Value = PLACE_HEADER
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
+    HeaderNote ws.Cells(r, VAL_COL + 1), _
+               "Enter action ids separated by commas, copied from the list to the right. " & _
+               "The older 'Caption [id]' form still works."
+    HeaderNote ws.Cells(r, VAL_COL + 2), _
+               "Placement forms: blank = automatic; 1A = page 1, column A; " & _
+               "hide = leave it off the pages; TabName!B4 = put the button on your own sheet at cell B4."
     r = r + 1
 
     Set existing = ReadChains(CfgSheet())          ' re-seed from activated config
@@ -3016,6 +3039,12 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     ws.Cells(r, VAL_COL + 1).Value = AVAIL_HEADER
     ws.Cells(r, VAL_COL + 2).Value = PLACE_HEADER
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
+    HeaderNote ws.Cells(r, VAL_COL + 1), _
+               "Every macro starts Off. Button puts it on a Macros page. " & _
+               "Chains only makes it usable inside a chain but gives it no button of its own."
+    HeaderNote ws.Cells(r, VAL_COL + 2), _
+               "Placement forms: blank = automatic; 1A = page 1, column A; " & _
+               "hide = leave it off the pages; TabName!B4 = put the button on your own sheet at cell B4."
     ' The machine-owned schema marker, in the hidden id column of the key row -
     ' NOT in the visible header. See Task 4 / contract section 5. Force Text so a
     ' General-formatted cell cannot coerce the marker to a number (belt-and-braces:

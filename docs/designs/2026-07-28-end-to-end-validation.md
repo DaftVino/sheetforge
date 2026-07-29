@@ -505,6 +505,39 @@ These are the items where a failure costs you something you cannot get back.
   *Why:* the reminder inserts a row above the action catalog. It carries no machine key
   precisely so nothing can mistake it for a block — this item is what proves that held.
 
+### New in this phase — the header notes
+
+- [ ] **4.34 — All four headers carry a readable note.** Hover each of these on the Setup tab:
+  **Availability** and **Placement** in the Action Catalog, **Steps** and **Placement** in the
+  Chains block, and **Column types** on the import table.
+  *Expected:* a note appears on each, and the text is **not clipped** — you can read the last
+  sentence.
+  *Failure:* a missing note, or one cut off mid-sentence.
+
+- [ ] **4.35 — The `Column types` note says what an unrecognised code does.**
+  *Expected:* it lists `T`, `N`, `D`, `DT`, `B`, `G` **and** says that anything else is
+  treated as auto-detect.
+  *Why:* that behaviour is completely invisible today. A typo in this column silently becomes
+  `G`, and an ID column loses its leading zeros with nothing anywhere saying why.
+
+- [ ] **4.36 — Running `Core_BuildSetup` twice leaves ONE note per header, and does not
+  error.** Run it, then run it again without doing anything else, then hover the headers.
+  *Expected:* one note each, no error dialog.
+  *Failure:* a run-time error on the second build, or a doubled/stale note.
+  ***This is the item that proves the note helper clears before it adds.*** `AddComment`
+  raises on a cell that already carries a comment, and a single build cannot expose it —
+  only the second one can.
+
+- [ ] **4.37 — Finalize still reports 51 actions after the notes exist.**
+  *Failure:* a different count, which would mean a note disturbed the block the tamper check
+  reads.
+  *Why:* `MarkerVerdict` reads the `Availability` header string back off the sheet. The note
+  attaches to that cell; the header text itself must be untouched.
+
+  **Assumption, flagged per rule 7:** that a note anchors correctly on a header cell whose row
+  is later `AutoFit`, given the row directly above every header is merged B:E. Nothing in this
+  codebase has attached a note to anything before.
+
 ---
 
 ## 5. Appearance — carried over from track 1, still unrun
