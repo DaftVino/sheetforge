@@ -33,17 +33,30 @@ Sequencing: `2026-07-28-track2-completion-plan-of-record.md`.
   `If/ElseIf` chain, and everything below is invalid until it compiles.
 
 - [ ] **1.3 — `Core_BuildSetup` (Alt+F8) builds the Setup tab, and `Macros 1` exists
-  afterwards.** *Expected:* a Setup tab listing **43 actions**, and at least one generated
+  afterwards.** *Expected:* a Setup tab listing **51 actions**, and at least one generated
   `Macros <n>` page carrying buttons.
-  *Failure:* fewer than 43 actions, or no `Macros 1`.
+  *Failure:* fewer than 51 actions, or no `Macros 1`.
   **Redo this until `Macros 1` exists.** The partial W1 gate left this inconclusive, and
   several items below need a built button page.
 
 - [ ] **1.4 — Every package is actually alive.** Count the actions on the Setup tab.
-  *Expected:* **43**. *Failure:* a multiple-of-a-package short — 5 missing is `PkgValidate`,
-  8 is `PkgFormat`+`PkgExport`, and so on.
+  *Expected:* **51**.
+  *Failure:* short by a whole package's worth. Use this table to identify which — but note
+  that three counts are ambiguous, so a short count narrows the suspects rather than naming
+  one:
+
+  | Missing | Package(s) it could be |
+  |---|---|
+  | 2 | `PkgEnrich` |
+  | 3 | `PkgImport` |
+  | 4 | `PkgBackup` **or** `PkgSummarize` |
+  | 5 | `PkgExport`, `PkgImportExport` **or** `PkgValidate` |
+  | 7 | `PkgFormat` **or** `PkgWorkbook` |
+  | 9 | `PkgClean` |
+
   *Why:* a package can build, pass every gate, and never run, if it was not registered in
-  Core's candidate list. This count is the only thing that catches it.
+  `CoreCandidates()`. This count is the only thing that catches it. To settle an ambiguous
+  count, look at which action captions are missing rather than counting again.
 
 - [ ] **1.5 — `GateAudit_Run` reports 0 FAIL.**
   `tools/GateAudit.bas` is **not** part of the bundle and is **not** produced by the build —
@@ -115,6 +128,62 @@ These are the items where a failure costs you something you cannot get back.
   *Expected:* the second run refuses rather than clearing; the reserved name is refused by
   name.
   *Failure:* a sheet cleared, or a sheet created that the next Finalize silently deletes.
+
+- [ ] **2.8 — `Add A Back To Contents Link To Every Sheet` never overwrites.**
+  First run `Build Table of Contents` so a `Contents` sheet exists. Then put a value in `A1`
+  of one sheet and a formula in `A1` of another, and run this action.
+  *Expected:* every other sheet gets a working link in `A1`; those two are **skipped**, and
+  both are named in the report **with what was found in the cell**.
+  *Failure:* either cell overwritten, either sheet silently skipped without being named, or
+  any row inserted anywhere.
+  *Why:* this is the only action in the toolkit that writes into sheets you own. Inserting a
+  row instead of skipping would move every absolute reference on the sheet, which is not a
+  gentler version of overwriting.
+
+- [ ] **2.9 — `Add A Back To Contents Link To Every Sheet` refuses with no Contents sheet.**
+  Delete the `Contents` sheet, then run the action.
+  *Expected:* it refuses, naming the missing sheet and telling you to run
+  `Build Table of Contents` first. **No sheet is modified.**
+  *Failure:* it creates the contents sheet itself, or writes links pointing at nothing.
+
+- [ ] **2.10 — `Email A Sheet As An Attachment` writes the file first and never sends.**
+  Fill in the recipient and subject on Setup, Finalize, then run it and pick a sheet.
+  *Expected:* the `.xlsx` exists on disk **before** any Outlook window appears; an Outlook
+  draft opens with that file attached; **nothing is sent**. Close the draft without sending.
+  *Failure:* a sent message, an empty draft, or a draft with no attachment.
+  *Why:* a macro that sends unattended is one wrong range away from mailing the wrong numbers
+  to a client.
+
+- [ ] **2.11 — `Email A Sheet As An Attachment` keeps the file when Outlook is unavailable.**
+  Only runnable where Outlook is absent or blocked by policy. **Skip and say so if Outlook
+  works here** — do not fake it.
+  *Expected:* a refusal naming the **full path** of the file it already wrote, and that file
+  is still on disk.
+  *Failure:* the file deleted, the path missing from the message, or a raw VBA error.
+
+- [ ] **2.12 — `Save Each Group As Its Own File` refuses the whole batch on a collision.**
+  Make two rows whose grouping values differ only by a character illegal in a filename — for
+  example `A/B` and `A:B` — and run it.
+  *Expected:* a refusal naming both values. **Zero files written.**
+  *Failure:* any file written, or one group silently overwriting another.
+  *Why:* the safe-name reduction is many-to-one, so two different values can produce one
+  filename. Writing until something breaks would leave a folder that looks complete.
+
+- [ ] **2.13 — `Split One Column Into Many` refuses rather than overwriting.**
+  Put data in the column immediately right of a column that needs splitting into two, then
+  run it with the destination set to `SOURCE`.
+  *Expected:* a refusal naming the first occupied cell. **Nothing changed.**
+  *Failure:* any cell overwritten.
+
+- [ ] **2.14 — `Highlight Comments, Formulas and Blanks` is genuinely reversible.**
+  Give a cell your own fill colour first. Run the action, then run it again and accept the
+  removal.
+  *Expected:* after the second run your original fill is **back**, and any unrelated
+  conditional formatting on the sheet is untouched.
+  *Failure:* your fill lost, a residual audit colour, or an unrelated rule deleted.
+  *Why:* this is the claim that makes the action safe to run at all. It uses tagged
+  conditional-format rules rather than direct fills precisely so removal can tell its own
+  marking from yours — if that fails, running it costs you formatting you cannot recover.
 
 ---
 
@@ -194,6 +263,24 @@ These are the items where a failure costs you something you cannot get back.
   or any `Macros <n>` page.**
   *Failure:* `Setup.pdf` in the output folder.
 
+- [ ] **3.13 — `Split One Column Into Many` keeps leading zeros.**
+  Put `00123,North` in a cell, set the delimiter to `COMMA` and the destination to `SOURCE`,
+  and run it.
+  *Expected:* two cells reading **`00123`** and `North` — the zeros still there, the cell
+  still text.
+  *Failure:* `123`. That is the whole reason every output field is forced to text, and it is
+  invisible until someone reconciles an account code that no longer matches.
+
+- [ ] **3.14 — `Change Case` does not touch formulas or numbers.**
+  Select a range containing text, a number, and a formula returning text. Run it, choose
+  `Proper`.
+  *Expected:* only the constant text changes. The formula **is still a formula**, the number
+  is still a number, and the report states how many formula cells were skipped.
+  *Failure:* a formula replaced by its result, a number turned into text, or a silent skip
+  count.
+  *Why:* flattening a formula here would be indistinguishable from correct output until the
+  next recalculation that should have changed it and didn't.
+
 ---
 
 ## 4. Does it behave? — the rest
@@ -252,6 +339,92 @@ These are the items where a failure costs you something you cannot get back.
   doubled or the reference is malformed.
 - [ ] **4.15 — `Unhide All Rows & Columns` refuses on an active chart sheet** rather than
   raising a type mismatch, and says what an active AutoFilter means for the result.
+
+### New in this phase — Macros Home
+
+- [ ] **4.16 — `Macros Home` exists after Finalize and lists all 51 actions.**
+  *Expected:* a `Macros Home` tab whose Action Catalog has **51 rows**, plus the chains.
+  *Failure:* the tab missing, or fewer than 51 rows.
+
+- [ ] **4.17 — An action set to `Off` still appears on `Macros Home`, marked `Off`, with no
+  page link.** Set one action to `Off` on Setup, Finalize, then read its row.
+  *Expected:* the row is **present**, its Availability reads `Off`, and its PAGE cell is
+  empty.
+  *Failure:* the row missing entirely.
+  ***This is the item that proves the contract §6 rewrite actually shipped.*** The withdrawn
+  version listed only actions that became buttons. Since every action arrives `Off`, that
+  version renders an empty page on a fresh import — which is exactly when someone needs to
+  read what the toolkit does.
+
+- [ ] **4.18 — Every `Macros <n>` page has a working `<< Home` link in B1, on the FIRST
+  build.** Import into a clean workbook, Finalize once, and click `<< Home` on each page.
+  *Expected:* it is a **link** and it opens `Macros Home`.
+  *Failure:* plain bold text instead of a link, on any page.
+  ***The words "first build" are the whole item.*** A guard was once added here that made
+  every Home link dead text on a first build and correct on the second. Finalizing twice
+  before checking would hide exactly the defect this is looking for.
+
+- [ ] **4.19 — Finalize lands you on `Macros Home`.** *Expected:* after Finalize the active
+  tab is `Macros Home`, not `Macros 1` and not Setup.
+
+- [ ] **4.20 — With every action `Off`, Finalize still produces `Macros Home`.**
+  Set all 51 to `Off` and Finalize.
+  *Expected:* `Macros Home` is built and lists all 51 as `Off`. No error.
+  *Failure:* an error, or a workbook with nowhere to land.
+  *Why:* there are no button pages in this state, so before this phase there was no page to
+  land on at all.
+
+### New in this phase — chains
+
+- [ ] **4.21 — A chain authored as `clean.dupes, clean.trim` finalizes and runs.**
+  Type exactly that into a chain's Steps cell, give it a name, Finalize, click its button.
+  *Expected:* Finalize reports no problems; the button runs both actions in order.
+  *Failure:* `(no steps!)` or `[UNKNOWN]` in the Finalize report.
+
+- [ ] **4.22 — A chain authored in the OLD format still finalizes.**
+  Type `Remove Duplicates [clean.dupes]` on one line and `Trim Spaces [clean.trim]` on the
+  next, into a chain's Steps cell. Finalize.
+  *Expected:* accepted, and after Finalize the cell has been **rewritten** as
+  `clean.dupes, clean.trim`.
+  *Failure:* `[UNKNOWN]` against either step.
+  *Why:* any workbook already carrying chains stores them in the old form. If this fails, the
+  upgrade breaks every deployed chain at the first Finalize.
+
+- [ ] **4.23 — A hand-typed id in the wrong case is rewritten canonical.**
+  Type `CLEAN.DUPES` into a Steps cell and Finalize.
+  *Expected:* the cell now reads `clean.dupes`.
+  *Failure:* the shouting casing persists.
+  *Why:* this normalisation was lost by a refactor once before and restored deliberately.
+
+- [ ] **4.24 — The copy list beside Chains shows bare ids.** *Expected:* column G lists
+  `clean.dupes` and the like, with the caption beside it in H, under a header saying to copy
+  an **id**. *Failure:* the old `Caption [id]` token form.
+
+### New in this phase — the remaining actions
+
+- [ ] **4.25 — `Sort Worksheets Alphabetically` leaves the toolkit's tabs where they are.**
+  Scramble several user tabs, hide one of them, and run it.
+  *Expected:* user tabs in A-Z order, the hidden one **still hidden** and in its right place;
+  `Setup`, `Setup Menu`, `Macros Home` and every `Macros <n>` unmoved.
+  *Failure:* any engine tab moved, or a hidden sheet made visible.
+
+- [ ] **4.26 — `Sort Worksheets Alphabetically` is correct in a workbook containing a chart
+  sheet.** Add a chart sheet (not an embedded chart), scramble the user tabs, run it.
+  *Expected:* the user worksheets end in A-Z order.
+  *Failure:* tabs landing in wrong positions.
+  *Why:* Excel numbers worksheets and chart sheets in one sequence but this action enumerates
+  worksheets only. Mixing the two index spaces was a real defect in the first draft, and a
+  workbook with no chart sheet cannot detect it.
+
+- [ ] **4.27 — `Apply One Style To All Charts` styles report charts and skips engine ones.**
+  *Expected:* every chart on your own sheets takes the configured style; the count is
+  reported. *Failure:* an eligible chart unchanged, or a run-time error where the workbook has
+  no charts at all.
+
+- [ ] **4.28 — The first four buttons carry no leading numbers.**
+  *Expected:* `Clear Input Tabs`, `Import Source Data`, `Update Ref_Master`,
+  `Export Dashboard (.xlsx)` — no `1.`, `2.`, `3.`, `4.`.
+  *Failure:* any surviving number.
 
 ---
 
