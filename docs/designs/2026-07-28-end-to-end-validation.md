@@ -505,34 +505,56 @@ These are the items where a failure costs you something you cannot get back.
 
 ### New in this phase — the Finalize reminder
 
-- [ ] **4.29 — On a fresh import with everything `Off`, the reminder line is BLANK.**
-  Import into a clean workbook, run `Core_BuildSetup`, and look at the row directly above the
-  `Action` / `Availability` / `Placement` headers.
-  *Expected:* **empty**. A `Setup Menu` link sits beside it; that is always there.
-  *Failure:* the reminder text showing when nothing is switched on.
+**The reminder lives in `D1`**, at the top of the Setup tab beside the `Toolkit Setup` title —
+not on the row above the action catalog, which is where it was before v0.18.0. It was moved
+there because column D of that old row holds the `Setup Menu` link, leaving column C no empty
+neighbour to overflow into, so the text was clipped at 34 characters no matter what.
+
+- [ ] **4.29 — On a fresh import with everything `Off`, `D1` is BLANK.**
+  Import into a clean workbook, run `Core_BuildSetup`, and click cell **`D1`**.
+  *Expected:* the cell looks **empty**, and the formula bar shows a formula starting `=IF(`.
+  *Failure:* the reminder text showing when nothing is switched on — or an empty formula bar,
+  which means no formula was written at all.
   *Why:* this is the item that proves the formula excludes blanks and matches `Off`
   correctly. If it fires here it fires forever, from first import, and means nothing.
-  **Run 4.29 and 4.30 as a pair, in that order.** On its own 4.29 would pass on a build that
-  never wrote the formula at all — a blank cell is also what "no formula" looks like. 4.30 is
-  what proves the cell is a live formula; 4.29 is what proves it is the *right* one.
+  **Checking the formula bar is what makes this item worth running.** A blank cell alone is
+  also exactly what "no formula was ever written" looks like, so without that check the item
+  passes on a broken build. 4.30 is the other half of the proof.
 
-- [ ] **4.30 — Setting one action to `Button` makes the reminder appear immediately, before
-  Finalize.** Change a single Availability dropdown and do not click anything else.
-  *Expected:* the line appears **as soon as the dropdown changes**, telling you to click
-  `Finalize Setup Tab` and then `Create Setup Tab`.
+- [ ] **4.30 — Setting one action to `Button` makes the reminder appear in `D1` immediately,
+  before Finalize.** Change a single Availability dropdown and do not click anything else.
+  *Expected:* the text appears in `D1` **as soon as the dropdown changes**.
   *Failure:* nothing appears until after Finalize — which would mean it is static text, not a
   formula, and the whole point of it is gone.
 
-- [ ] **4.31 — Setting that action back to `Off` makes the line disappear again.**
+- [ ] **4.31 — Setting that action back to `Off` empties `D1` again.**
   *Failure:* the text persisting once shown.
 
-- [ ] **4.32 — The `Setup Menu` link beside the reminder opens the Setup Menu tab.**
+- [ ] **4.32 — The `Setup Menu` link on the row above the action catalog opens the Setup Menu
+  tab.** That link stayed where it was when the reminder moved to `D1`; this item is what
+  proves the move did not take it along.
 
 - [ ] **4.33 — Finalize still works with the reminder row present.**
   *Expected:* Finalize reports the same **51 actions** and completes normally.
   *Failure:* a wrong action count, or Finalize reporting it cannot find a block.
-  *Why:* the reminder inserts a row above the action catalog. It carries no machine key
-  precisely so nothing can mistake it for a block — this item is what proves that held.
+  *Why:* the row above the action catalog is still reserved and still carries no machine key,
+  precisely so nothing can mistake it for a block — this item is what proves that held even
+  though the reminder text no longer sits on it.
+
+- [ ] **4.33a — The reminder is fully readable, and tells you to Finalize TWICE.**
+  Switch one action to `Button` and read `D1` without widening any column or clicking into the
+  cell.
+  *Expected:* the whole sentence is visible, spilling right across E, F, G and H, in **bold
+  dark red**. It names three clicks in order: `Finalize Setup Tab`, then `Create Setup Tab`,
+  then `Finalize Setup Tab` **again**.
+  *Failure:* text cut off at the edge of column D; or a version that stops after
+  `Create Setup Tab` and never mentions finalizing a second time.
+  *Why:* both halves of this are the defect being fixed. The old text taught two of the loop's
+  four steps and went quiet exactly where the user has new fields in front of them and no idea
+  that answering them is not enough. And the old cell had a nav link to its right, so it could
+  not overflow — this one is legible only because `E1:H1` are empty. **A wrapped `D1` is a
+  failure even if you can read it**: wrapping means someone set `WrapText`, which reintroduces
+  clipping the moment the text grows.
 
 ### New in this phase — the header notes
 
@@ -567,6 +589,48 @@ These are the items where a failure costs you something you cannot get back.
   **Assumption, flagged per rule 7:** that a note anchors correctly on a header cell whose row
   is later `AutoFit`, given the row directly above every header is merged B:E. Nothing in this
   codebase has attached a note to anything before.
+
+### New in this phase — option bands name their macro
+
+- [ ] **4.38 — An option band says which macro its fields belong to.**
+  Set **Split One Column Into Many** to `Button`, Finalize, then Create Setup Tab. Scroll to the
+  `Clean & Standardize` band and read the header above the two split fields.
+  *Expected:* it reads **`Split One Column Into Many  -  SPLIT COLUMN`** — the macro's caption
+  first, then the old band title, separated by a dash.
+  *Failure:* a bare `SPLIT COLUMN`, or a header naming a macro you did not switch on.
+  *Why:* you just picked from 51 captions, and a band named after a topic gives you nothing to
+  match that choice against.
+
+- [ ] **4.39 — A band shared by several macros names every one of them.**
+  Set **all four** Protect & Back Up actions to `Button` (Backup Now, Snapshot Before a Risky
+  Step, Save Month-End Version, Archive a Generated Output), Finalize, Create Setup Tab.
+  *Expected:* the `BACKUP & SNAPSHOT` header lists **all four captions** before the title. The
+  row is taller than one line and **every caption is readable** — the header is a merged,
+  wrapped B:E row that AutoFit grows.
+  *Failure:* a truncated list, an "and 3 more", or a caption cut off at the row's edge.
+  *Why:* one field there is used by all four actions. A header that silently drops one tells
+  you a setting reaches fewer macros than it does, which is the opposite of the point.
+
+- [ ] **4.40 — Turning a macro off removes it from the header, without removing the band.**
+  From 4.39's state, set **Archive a Generated Output** back to `Off`, Finalize, Create Setup
+  Tab.
+  *Expected:* `BACKUP & SNAPSHOT` now names the **three** remaining captions. The `ARCHIVE`
+  band, whose only field belongs to the action you just switched off, has moved down into the
+  collapsed `SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON` band.
+  ***This is the item that proves the header is computed from what is actually on screen.***
+  The prefix is built by re-running the same in-use test the field rows are filtered by. If it
+  were built from what the package *declares* instead, this header would keep naming all four
+  forever — and it would be wrong in the one direction a user cannot detect, because the macro
+  it names is one they deliberately turned off.
+
+- [ ] **4.41 — A band with no macro of its own gets no prefix.**
+  Find a band whose fields are deployment-wide rather than belonging to one action — `GENERAL`
+  is the case.
+  *Expected:* its header is unchanged: **no caption, and no leading dash or separator**.
+  *Failure:* a header that starts with a dash before its title, or one naming an unrelated
+  macro.
+  *Why:* those fields have an empty `usedBy`, which means "applies to the whole deployment".
+  An empty prefix must render as nothing at all, not as an empty slot.
 
 ---
 
