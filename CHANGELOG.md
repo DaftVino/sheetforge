@@ -6,6 +6,43 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-28
+
+### Added
+
+- **Eight actions that make a finished thing presentable and then get it out of Excel.**
+  Five formatting: rules-driven highlighting, header styling with autofit, a report title
+  block, a house table style, and print layout for board packs. Three exporting: freeze
+  formulas to values, PDF a range or sheet or workbook, and explode a workbook into one file
+  per tab.
+
+- **Convert Formulas to Values is now its own button.** It was buried inside Export Dashboard,
+  where you could only get it by exporting the whole thing. It handles dynamic-array spills
+  and legacy CSE arrays, not just ordinary formulas.
+
+  **The export and the new action now run the same code**, rather than a second copy of the
+  same thirty lines drifting apart from the original. It reports how many formulas it actually
+  converted, and says so when some could not be - the version inside the export swallowed
+  those silently.
+
+- **Exporting refuses rather than overwrites.** Neither PDF action will write over a file that
+  already exists; it stops and names the file. **Save each sheet as its own file checks the
+  whole batch before writing anything**, including whether two of your sheet names would
+  produce the same file name after illegal characters are replaced - two sheets called `A"B`
+  and `A<B` both become `A-B`, and the second would have silently overwritten the first.
+
+  It also skips the toolkit's own tabs, so you do not get `Setup.pdf` and `_Config.pdf`.
+
+### Changed
+
+- **Contract v2.6.0.** Adds the `format` and `export` packages. Additive: `SCHEMA_VER` stays
+  `"v2.0"`.
+
+- **Add a Report Title inserts rows, and the contract now says so.** The `format` domain
+  promises to change no value, and this action writes a title string and pushes everything
+  down - which can change what `ROW()` and `INDIRECT()` return. That was previously claimed to
+  be no change at all. It is a change, it is stated, and the action asks before doing it.
+
 ## [0.13.0] - 2026-07-28
 
 ### Added

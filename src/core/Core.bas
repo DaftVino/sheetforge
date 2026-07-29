@@ -1361,6 +1361,163 @@ Public Function Core_FolderExists(ByVal folderPath As String) As Boolean
     On Error GoTo 0
 End Function
 
+'---- export engine: freeze formulas (incl. spills) to values ----
+' Flatten dynamic-array SPILLS and legacy CSE ARRAYS in rng to static values,
+' then freeze every ordinary formula left. Two passes, in this order: a
+' spill's anchor cell is itself one of the "formula" cells the second pass
+' would try to freeze while it is still spilling, so flattening the spill
+' first turns it into an ordinary value block the second pass can walk past
+' safely.
+'
+' Extracted from importexport.export (2026-07-28 W3 plan) - NOT moved
+' unchanged. Three deliberate differences from that shipped loop, called
+' out explicitly because this is a shipped action used for a finance
+' deliverable:
+'
+'   1. This function returns the number of formula cells it ACTUALLY
+'      converted (counted area by area, in pass 2), and reports any area
+'      whose conversion raised an error via the `failedCount` out-param
+'      instead of silently swallowing it. The original loop had no caller
+'      that needed a count; export.freeze_values does (Task 10), so this
+'      is new surface, not a behavior-preserving copy of what already ran.
+'
+'   2. Pass 2 searches the exact `rng` the caller passed in, UNLESS
+'      `reevalUsedRange` is True, in which case it re-reads
+'      rng.Worksheet.UsedRange fresh before pass 2. The original always
+'      called ws.UsedRange fresh before EACH of its two passes
+'      (PkgImportExport.bas, pre-refactor :373 and :392) - two separate
+'      property reads - so if pass 1 changed the sheet's used bounds, pass
+'      2 saw the new bounds. A caller that hands this function a whole
+'      sheet's used range (importexport.export's own refactor below, and
+'      export.per_sheet's xlsx path, Task 12) passes
+'      reevalUsedRange:=True to keep that exact original behavior.
+'      export.freeze_values (Task 10) hands this function a user-PICKED,
+'      already-confirmed range and must NOT have pass 2 silently widen
+'      that to the sheet's current UsedRange - it leaves reevalUsedRange
+'      at its default, False.
+'
+'   3. The error handling around the one risky statement (`ar.Value =
+'      ar.Value`) is `On Error Resume Next` / `On Error GoTo 0`, scoped to
+'      THIS function - it is not the calling Sub's `On Error GoTo Fail`.
+'      This is safe and behaviorally equivalent for every caller: VBA
+'      error handling is scoped per procedure, so a callee's own `On
+'      Error` statements never alter or disable a caller's error handler.
+'      (This is a different situation from the bug fixed in
+'      PkgExport_FreezeValues and PkgFormat_PrintLayout below, where a Sub
+'      disabled its OWN `Fail:` routing - this function never had a
+'      `Fail:` label to disable.)
+'
+' Everything else - the two-pass order, the spill/array flatten logic
+' itself - is copied verbatim.
+'
+' PRECONDITION: Application.Calculation must be xlCalculationAutomatic when
+' this runs - it reads live formula results via .Value. This was written and
+' tested that way inside importexport.export; Core_SpeedOn sets Manual, so a
+' caller inside that wrapper must restore Automatic first, exactly as
+' importexport.export always has. This function does not manage Calculation
+' itself, so two callers running back to back never fight over restoring it.
+'
+' reevalUsedRange: when True, pass 2 searches the CURRENT
+' rng.Worksheet.UsedRange instead of the exact `rng` passed in - see
+' difference #2 above. Only the whole-sheet callers pass True.
+'
+' failedCount: ByRef out-parameter. On return, the number of formula cells
+' whose conversion to a static value raised an error and were left as live
+' formulas. A caller that reports a completion count MUST check this and
+' say so when it is nonzero - see export.freeze_values (Task 10).
+Public Function Core_FreezeValues(rng As Range, _
+                                  Optional ByVal reevalUsedRange As Boolean = False, _
+                                  Optional ByRef failedCount As Long = 0) As Long
+    Dim fRange As Range, ar As Range, cel As Range, sp As Range, sv As Variant
+    Dim target As Range, converted As Long, failed As Long
+    If rng Is Nothing Then Exit Function
+    Set target = rng
+
+    On Error Resume Next
+    Set fRange = target.SpecialCells(xlCellTypeFormulas)
+    On Error GoTo 0
+    If Not fRange Is Nothing Then
+        For Each cel In fRange.Cells
+            If cel.HasSpill Then
+                Set sp = cel.SpillingToRange
+                sv = sp.Value
+                cel.ClearContents
+                sp.Value = sv
+            ElseIf cel.HasArray Then
+                Set sp = cel.CurrentArray
+                sv = sp.Value
+                sp.ClearContents
+                sp.Value = sv
+            End If
+        Next cel
+    End If
+
+    If reevalUsedRange Then
+        On Error Resume Next
+        Set target = rng.Worksheet.UsedRange
+        On Error GoTo 0
+        If target Is Nothing Then Set target = rng
+    End If
+
+    Set fRange = Nothing
+    On Error Resume Next
+    Set fRange = target.SpecialCells(xlCellTypeFormulas)
+    On Error GoTo 0
+    If Not fRange Is Nothing Then
+        For Each ar In fRange.Areas
+            On Error Resume Next
+            Err.Clear
+            ar.Value = ar.Value
+            If Err.Number = 0 Then
+                converted = converted + ar.Cells.Count
+            Else
+                failed = failed + ar.Cells.Count
+                Err.Clear
+            End If
+            On Error GoTo 0
+        Next ar
+    End If
+
+    failedCount = failed
+    Core_FreezeValues = converted
+End Function
+
+' Any string reduced to something Windows will accept as a FILE NAME - not a
+' sheet name. Core_SafeSheetName's forbidden-character list is narrower than
+' the filesystem's: Windows additionally forbids  " < > |  on top of Excel's
+' own  : \ / ? * [ ]  - so a sheet name that is perfectly legal in Excel (one
+' containing a quote, say) can still be an illegal file name. That is why
+' this does not simply call Core_SafeSheetName and stop.
+'
+' Added in the W3 plan (2026-07-28) alongside export.pdf and
+' export.per_sheet, and flagged there for W5: backup.timestamped_copy will
+' need the identical logic. Promote-on-second-use already happened here, by
+' writing it once in Core rather than in export.pdf's own package.
+'
+' Does NOT make the name unique - a caller writing to disk still checks for an
+' existing file itself (Core_DestUsable's sheet precedent: refuse rather than
+' resolve a collision by guessing).
+'
+' maxLen caps the result; 0 means no cap. It is a parameter rather than a fixed
+' number because the right cap depends on what the caller is building. A whole
+' path is bounded by MAX_PATH, but a caller assembling
+' "<folder><date> <label> <timestamp>.xlsx" needs to bound its own middle
+' segment, and only it knows how much room the rest takes. W5's
+' backup.snapshot passes 40 for exactly this reason.
+Public Function Core_SafeFileName(ByVal raw As String, _
+                                  Optional ByVal maxLen As Long = 0) As String
+    Dim nm As String, bad As String, i As Long
+    nm = Trim(raw)
+    bad = Core_BadSheetChars() & Chr(34) & "<>|"
+    For i = 1 To Len(bad)
+        nm = Replace(nm, Mid$(bad, i, 1), "-")
+    Next i
+    If maxLen > 0 Then
+        If Len(nm) > maxLen Then nm = Left$(nm, maxLen)
+    End If
+    Core_SafeFileName = Trim(nm)
+End Function
+
 ' Coerce a text value from a source export to a target type.
 '   T=text  N=number(strips $ , %)  D/DT=date  B=boolean  G=general(auto)
 Public Function Core_Coerce(ByVal v As Variant, ByVal code As String) As Variant
@@ -1409,6 +1566,8 @@ Private Function CoreCandidates() As Collection
     c.Add "Import"                  ' probes PkgImport_Manifest
     c.Add "Clean"                   ' probes PkgClean_Manifest
     c.Add "Validate"                ' probes PkgValidate_Manifest
+    c.Add "Format"                  ' probes PkgFormat_Manifest
+    c.Add "Export"                  ' probes PkgExport_Manifest
     Set CoreCandidates = c
 End Function
 
