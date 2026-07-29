@@ -27,12 +27,12 @@ Public Sub PkgExport_Manifest(reg As Object)
         "simple", _
         "Leave blank to use the folder this workbook is saved in - that is the usual " & _
         "answer. Otherwise a full path, e.g. C:\Close\January.", _
-        "export.pdf,export.per_sheet"
+        "export.pdf,export.per_sheet,export.split_by_value,export.email"
     Core_AddField reg, "k_export_date_offset", "Date shift for exported file names (days)", "int", "-1", _
         "advanced", _
         "How many days to shift the date put in front of an exported file's name. -1 = " & _
         "yesterday, 0 = today, 1 = tomorrow.", _
-        "export.pdf,export.per_sheet"
+        "export.pdf,export.per_sheet,export.split_by_value,export.email"
 
     Core_AddSection reg, "PDF EXPORT"
     Core_AddField reg, "k_export_pdf_base", "Base name for the exported PDF", "text", "Report", _
@@ -47,6 +47,17 @@ Public Sub PkgExport_Manifest(reg As Object)
         "after the sheet.", _
         "export.per_sheet"
 
+    Core_AddSection reg, "EMAIL"
+    Core_AddField reg, "k_export_email_to", "Email recipient", "text", "", _
+        "simple", _
+        "The address pre-filled in the Outlook draft. The action displays the draft and " & _
+        "never sends it.", _
+        "export.email"
+    Core_AddField reg, "k_export_email_subject", "Email subject", "text", "Sheet export", _
+        "simple", _
+        "The subject pre-filled in the Outlook draft.", _
+        "export.email"
+
     Core_AddAction reg, "export.freeze_values", "Freeze Formulas to Values", "PkgExport_FreezeValues", _
         "Pick a range; converts every formula in it (including dynamic-array spills) into a " & _
         "static value. Shows how many formulas it found and asks before doing it - this " & _
@@ -60,6 +71,13 @@ Public Sub PkgExport_Manifest(reg As Object)
         "front - naming every collision, whether with an existing file or another sheet in " & _
         "the same batch - rather than writing until something breaks. Once writing starts, " & _
         "a failure partway through leaves the files already written; it is not rolled back."
+    Core_AddAction reg, "export.split_by_value", "Save Each Group As Its Own File", "PkgExport_SplitByValue", _
+        "Split by a column value into separate files. " & _
+        "In a chain, this one stops and waits for your answer before it does anything."
+    Core_AddAction reg, "export.email", "Email A Sheet As An Attachment", "PkgExport_Email", _
+        "Write one sheet to an .xlsx file, attach it to an Outlook draft with the recipient " & _
+        "and subject from Setup, and display the draft without sending it. " & _
+        "In a chain, this one stops and waits for your answer before it does anything."
 End Sub
 
 '================================================================
@@ -390,6 +408,393 @@ Fail:
 End Sub
 
 '================================================================
+' ACTION - Split a picked range into one values-only file per group
+'================================================================
+Public Sub PkgExport_SplitByValue(ctx As Object)
+    Dim rng As Range, targetRange As Range
+    Dim outWb As Workbook, outWs As Worksheet, openWb As Workbook
+    Dim groups As Object, groupLabels As Object, seenPaths As Object
+    Dim groupOrder As Collection, groupRows As Collection, paths As Collection
+    Dim splitValue As Variant, sourceValues As Variant, outputValues As Variant
+    Dim hasHeader As Boolean, keys As String
+    Dim splitCol As Long, firstDataRow As Long, headerRows As Long
+    Dim rowIndex As Long, colIndex As Long, outputIndex As Long
+    Dim i As Long, j As Long, n As Long
+    Dim folderPath As String, dateStr As String, groupKey As String
+    Dim groupLabel As String, fileName As String, outPath As String
+    Dim duplicateMsg As String, existing As String, listMsg As String
+    Dim openBooks As String, openErr As String
+    Dim errNum As Long, errDesc As String
+    Const TITLE As String = "Save Each Group As Its Own File"
+    On Error GoTo Fail
+
+    folderPath = Core_ResolveFolder(Core_Cfg(ctx, "k_export_folder"))
+    If Len(folderPath) = 0 Then
+        Core_Refuse ctx, "This workbook has never been saved, so it has no folder to " & _
+               "export into." & vbCrLf & vbCrLf & "Save it first, or set 'Folder to write " & _
+               "exported files to' on the Setup tab." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+    If Not Core_FolderExists(folderPath) Then
+        Core_Refuse ctx, "This folder was not found: " & folderPath & vbCrLf & vbCrLf & _
+               "Check 'Folder to write exported files to' on the Setup tab, Finalize, and " & _
+               "run this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    Set rng = Core_AskRange(TITLE)
+    If rng Is Nothing Then Exit Sub
+    Set rng = Core_NarrowToUsed(rng)
+    If rng Is Nothing Then
+        Core_Refuse ctx, "The range you picked is entirely outside the used area of the " & _
+               "sheet, so there is nothing in it to export." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+    If Core_IsEngineSheet(rng.Parent.Name) Then
+        Core_Refuse ctx, "'" & rng.Parent.Name & "' belongs to the macro toolkit itself, " & _
+               "not to source data that can be split into exported files." & vbCrLf & _
+               vbCrLf & "Pick a range on a non-toolkit sheet and run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If Not Core_AskHasHeader(rng, hasHeader, TITLE) Then Exit Sub
+    firstDataRow = 1
+    If hasHeader Then
+        firstDataRow = 2
+        headerRows = 1
+    End If
+    If rng.Rows.Count < firstDataRow Then
+        Core_Refuse ctx, "The picked range contains a header but no data rows to split." & _
+               vbCrLf & vbCrLf & "Pick a range that includes at least one data row and " & _
+               "run this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If Not Core_AskCols(rng, keys, _
+        "Choose exactly one column whose values should define the output groups.", _
+        TITLE) Then Exit Sub
+    splitCol = Core_ResolveColumn(rng, keys)
+    If splitCol = 0 Then
+        Core_Refuse ctx, "'" & keys & "' does not identify exactly one column inside the " & _
+               "picked range." & vbCrLf & vbCrLf & "Run this again and choose one valid " & _
+               "column name, letter, or position." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If rng.Cells.CountLarge = 1 Then
+        ReDim sourceValues(1 To 1, 1 To 1)
+        sourceValues(1, 1) = rng.Value2
+    Else
+        sourceValues = rng.Value2
+    End If
+
+    Set groups = CreateObject("Scripting.Dictionary")
+    groups.CompareMode = vbBinaryCompare
+    Set groupLabels = CreateObject("Scripting.Dictionary")
+    groupLabels.CompareMode = vbBinaryCompare
+    Set groupOrder = New Collection
+
+    For rowIndex = firstDataRow To rng.Rows.Count
+        splitValue = sourceValues(rowIndex, splitCol)
+        If IsError(splitValue) Then
+            Core_Refuse ctx, "The split column contains an error value at " & _
+                   rng.Cells(rowIndex, splitCol).Address(False, False) & "." & _
+                   vbCrLf & vbCrLf & "Fix that cell or choose another split column, then " & _
+                   "run this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+            Exit Sub
+        End If
+
+        If Core_IsBlank(splitValue) Then
+            groupKey = "Blank:"
+            groupLabel = "(blank)"
+        Else
+            groupKey = TypeName(splitValue) & ":" & CStr(splitValue)
+            groupLabel = CStr(splitValue)
+        End If
+
+        If Not groups.Exists(groupKey) Then
+            Set groupRows = New Collection
+            groups.Add groupKey, groupRows
+            groupLabels.Add groupKey, groupLabel
+            groupOrder.Add groupKey
+        End If
+        Set groupRows = groups.Item(groupKey)
+        groupRows.Add rowIndex
+    Next rowIndex
+
+    dateStr = Format(Date + Core_CfgLong(ctx, "k_export_date_offset"), "yyyy-mm-dd")
+    Set paths = New Collection
+    Set seenPaths = CreateObject("Scripting.Dictionary")
+    seenPaths.CompareMode = vbTextCompare
+
+    For i = 1 To groupOrder.Count
+        groupKey = CStr(groupOrder(i))
+        groupLabel = CStr(groupLabels.Item(groupKey))
+        fileName = Core_SafeFileName(dateStr & " " & groupLabel, 120) & ".xlsx"
+        outPath = folderPath & fileName
+        paths.Add outPath
+
+        If seenPaths.Exists(fileName) Then
+            duplicateMsg = duplicateMsg & vbCrLf & "   '" & groupLabel & "' and '" & _
+                CStr(seenPaths.Item(fileName)) & "' both produce: " & fileName
+        Else
+            seenPaths.Add fileName, groupLabel
+        End If
+
+        If Len(Dir(outPath)) > 0 Then existing = existing & vbCrLf & "   " & outPath
+
+        Set openWb = Nothing
+        openErr = vbNullString
+        Set openWb = PkgExport_ProbeOpen(outPath, openErr)
+        If Len(openErr) > 0 Then
+            openBooks = openBooks & vbCrLf & "   " & openErr
+        ElseIf Not openWb Is Nothing Then
+            openBooks = openBooks & vbCrLf & "   " & openWb.FullName
+        End If
+    Next i
+
+    If Len(duplicateMsg) > 0 Then
+        Core_Refuse ctx, "These distinct groups produce the same safe file name, so this " & _
+               "batch would overwrite its own output:" & duplicateMsg & vbCrLf & vbCrLf & _
+               "Change or shorten one of each pair of group values, then run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If Len(openBooks) > 0 Then
+        Core_Refuse ctx, "These intended output names are already open in Excel:" & _
+               openBooks & vbCrLf & vbCrLf & "Close the named workbook(s), then run this " & _
+               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If Len(existing) > 0 Then
+        Core_Refuse ctx, "These file(s) already exist and this action will not overwrite " & _
+               "them:" & existing & vbCrLf & vbCrLf & "Rename or delete them, or change " & _
+               "the folder or date offset on Setup, then run this again." & vbCrLf & _
+               vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    For i = 1 To paths.Count
+        listMsg = listMsg & vbCrLf & "   " & Core_FileName(CStr(paths(i)))
+    Next i
+    If MsgBox("This writes " & paths.Count & " values-only .xlsx file(s) to:" & vbCrLf & _
+              "   " & folderPath & vbCrLf & vbCrLf & listMsg & vbCrLf & vbCrLf & _
+              "The source range will not be changed. Continue?", _
+              vbExclamation + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
+
+    Core_SpeedOn
+    For i = 1 To groupOrder.Count
+        groupKey = CStr(groupOrder(i))
+        Set groupRows = groups.Item(groupKey)
+        ReDim outputValues(1 To groupRows.Count + headerRows, 1 To rng.Columns.Count)
+
+        If hasHeader Then
+            For colIndex = 1 To rng.Columns.Count
+                outputValues(1, colIndex) = sourceValues(1, colIndex)
+            Next colIndex
+        End If
+        For j = 1 To groupRows.Count
+            outputIndex = j + headerRows
+            For colIndex = 1 To rng.Columns.Count
+                outputValues(outputIndex, colIndex) = _
+                    sourceValues(CLng(groupRows(j)), colIndex)
+            Next colIndex
+        Next j
+
+        Set outWb = Workbooks.Add(xlWBATWorksheet)
+        Set outWs = outWb.Worksheets(1)
+        outWs.Name = "Data"
+        Set targetRange = outWs.Cells(1, 1).Resize(groupRows.Count + headerRows, _
+                                                     rng.Columns.Count)
+        targetRange.Value2 = outputValues
+
+        For colIndex = 1 To rng.Columns.Count
+            outWs.Columns(colIndex).ColumnWidth = rng.Columns(colIndex).ColumnWidth
+        Next colIndex
+
+        Application.CutCopyMode = False
+        outWb.SaveAs Filename:=CStr(paths(i)), FileFormat:=51
+        n = n + 1
+        outWb.Close SaveChanges:=False
+        Set outWb = Nothing
+    Next i
+    Core_SpeedOff
+
+    Core_Done ctx, "Wrote " & n & " group file(s) to:" & vbCrLf & _
+           "   " & folderPath & vbCrLf & vbCrLf & _
+           "The source range was not changed.", TITLE
+    Exit Sub
+Fail:
+    If n > 0 Then
+        Err.Description = Err.Description & vbCrLf & vbCrLf & n & " group file(s) were " & _
+            "already written to " & folderPath & " before this failed. They were not " & _
+            "removed; check the folder before re-running."
+    End If
+    errNum = Err.Number
+    errDesc = Err.Description
+    If Not outWb Is Nothing Then PkgExport_CloseNoSave outWb
+    Err.Number = errNum
+    Err.Description = errDesc
+    Core_Fail ctx, "export.split_by_value", Err
+End Sub
+
+'================================================================
+' ACTION - Write one values-only sheet and display it on an Outlook draft
+'================================================================
+Public Sub PkgExport_Email(ctx As Object)
+    Dim recipient As String, subjectText As String
+    Dim folderPath As String, outPath As String, dateStr As String
+    Dim sheetName As Variant, pickedSheet As Object, ws As Worksheet
+    Dim outlookApp As Object, mailItem As Object
+    Dim openWb As Workbook, openErr As String
+    Dim attachmentWritten As Boolean
+    Const TITLE As String = "Email A Sheet As An Attachment"
+    On Error GoTo Fail
+
+    recipient = Trim(Core_Cfg(ctx, "k_export_email_to"))
+    If Len(recipient) = 0 Then
+        Core_Refuse ctx, "No email recipient is configured." & vbCrLf & vbCrLf & _
+               "Fill in 'Email recipient' on the Setup tab, Finalize, and run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    subjectText = Trim(Core_Cfg(ctx, "k_export_email_subject"))
+    If Len(subjectText) = 0 Then
+        Core_Refuse ctx, "No email subject is configured." & vbCrLf & vbCrLf & _
+               "Fill in 'Email subject' on the Setup tab, Finalize, and run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    folderPath = Core_ResolveFolder(Core_Cfg(ctx, "k_export_folder"))
+    If Len(folderPath) = 0 Then
+        Core_Refuse ctx, "This workbook has never been saved, so it has no folder to " & _
+               "export into." & vbCrLf & vbCrLf & "Save it first, or set 'Folder to write " & _
+               "exported files to' on the Setup tab." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+    If Not Core_FolderExists(folderPath) Then
+        Core_Refuse ctx, "This folder was not found: " & folderPath & vbCrLf & vbCrLf & _
+               "Check 'Folder to write exported files to' on the Setup tab, Finalize, and " & _
+               "run this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    sheetName = Application.InputBox( _
+        Prompt:="Sheet to export and attach:", _
+        title:=TITLE, Default:=ActiveSheet.Name, Type:=2)
+    If VarType(sheetName) = vbBoolean Then Exit Sub
+
+    If Not Core_SheetExists(CStr(sheetName)) Then
+        Core_Refuse ctx, "There is no sheet named '" & CStr(sheetName) & "'." & _
+               vbCrLf & vbCrLf & "Choose an existing worksheet and run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    Set pickedSheet = ThisWorkbook.Sheets(CStr(sheetName))
+    If Not TypeOf pickedSheet Is Worksheet Then
+        Core_Refuse ctx, "'" & CStr(sheetName) & "' is not a worksheet and cannot be " & _
+               "exported as an .xlsx attachment." & vbCrLf & vbCrLf & _
+               "Choose a worksheet and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+    Set ws = pickedSheet
+
+    If Core_IsEngineSheet(ws.Name) Then
+        Core_Refuse ctx, "'" & ws.Name & "' belongs to the macro toolkit itself, not to " & _
+               "a report that can be emailed." & vbCrLf & vbCrLf & _
+               "Choose a non-toolkit worksheet and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    dateStr = Format(Date + Core_CfgLong(ctx, "k_export_date_offset"), "yyyy-mm-dd")
+    outPath = folderPath & Core_SafeFileName(dateStr & " " & ws.Name, 120) & ".xlsx"
+
+    Set openWb = PkgExport_ProbeOpen(outPath, openErr)
+    If Len(openErr) > 0 Then
+        Core_Refuse ctx, "Excel already has a workbook open under the intended attachment " & _
+               "name:" & vbCrLf & vbCrLf & "   " & openErr & vbCrLf & vbCrLf & _
+               "Close that workbook, then run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+    If Not openWb Is Nothing Then
+        Core_Refuse ctx, "The intended attachment workbook is already open in Excel:" & _
+               vbCrLf & vbCrLf & "   " & openWb.FullName & vbCrLf & vbCrLf & _
+               "Close it, then run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If Len(Dir(outPath)) > 0 Then
+        Core_Refuse ctx, "A file already exists at:" & vbCrLf & vbCrLf & _
+               "   " & outPath & vbCrLf & vbCrLf & _
+               "This action will not overwrite it. Rename or delete that file, or change " & _
+               "the folder or date offset on Setup, then run this again." & vbCrLf & _
+               vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If MsgBox("This first writes the attachment file to:" & vbCrLf & vbCrLf & _
+              "   " & outPath & vbCrLf & vbCrLf & _
+              "It then opens an Outlook draft addressed to " & recipient & "." & _
+              vbCrLf & vbCrLf & "The draft will be displayed and will not be sent. Continue?", _
+              vbExclamation + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
+
+    Core_SpeedOn
+    PkgExport_OneSheetWorkbook ws.Name, outPath
+    attachmentWritten = True
+    Core_SpeedOff
+
+    Set outlookApp = Nothing
+    On Error Resume Next
+    Set outlookApp = CreateObject("Outlook.Application")
+    On Error GoTo Fail
+
+    If outlookApp Is Nothing Then
+        Err.Clear
+        Core_Refuse ctx, "The attachment file was written to:" & vbCrLf & vbCrLf & _
+               "   " & outPath & vbCrLf & vbCrLf & _
+               "Outlook could not be reached. It may not be installed, or access may be " & _
+               "blocked by policy. Attach this file by hand instead." & vbCrLf & vbCrLf & _
+               "The file above was kept so you can attach it yourself. Nothing was emailed.", _
+               TITLE
+        Exit Sub
+    End If
+
+    Set mailItem = outlookApp.CreateItem(0)
+    With mailItem
+        .To = recipient
+        .Subject = subjectText
+        .Attachments.Add outPath
+        .Display
+    End With
+
+    Core_Done ctx, "Wrote the attachment to:" & vbCrLf & vbCrLf & _
+           outPath & vbCrLf & vbCrLf & _
+           "An Outlook draft has been displayed. It has not been sent.", TITLE
+    Exit Sub
+Fail:
+    If attachmentWritten Then
+        Err.Description = Err.Description & vbCrLf & vbCrLf & _
+            "The attachment file was already written and was not deleted. Its full path is:" & _
+            vbCrLf & outPath
+    End If
+    Core_Fail ctx, "export.email", Err
+End Sub
+
+'================================================================
 ' Write ONE sheet out as its own .xlsx. Copies the WHOLE workbook first
 ' and freezes every formula in the copy (Core_FreezeValues) before
 ' deleting every sheet but the target - exactly the technique
@@ -439,3 +844,19 @@ CleanFail:
     On Error GoTo 0
     Err.Raise errNum, "PkgExport_OneSheetWorkbook", errDesc
 End Sub
+
+Private Sub PkgExport_CloseNoSave(ByVal wb As Workbook)
+    On Error Resume Next
+    wb.Close SaveChanges:=False
+End Sub
+
+Private Function PkgExport_ProbeOpen(ByVal outPath As String, _
+                                     ByRef collision As String) As Workbook
+    collision = vbNullString
+    On Error GoTo NameCollision
+    Set PkgExport_ProbeOpen = Core_AlreadyOpen(outPath)
+    Exit Function
+NameCollision:
+    collision = Err.Description
+    Err.Clear
+End Function
