@@ -2567,9 +2567,12 @@ Private Function RenderComposeSection(ws As Worksheet, ByVal r As Long) As Long
     RenderComposeSection = r
 End Function
 
-' "Label [id]" per line -> Collection of ids (only the bracketed id is authoritative)
+' "Label [id]" or a bare id per line, and bare ids may be comma-separated.
+' Only the bracketed id is authoritative. A line carrying a bracket is never
+' comma-split because a caption may contain a comma.
 Private Function ParseStepTokens(ByVal cell As String) As Collection
-    Dim out As New Collection, lines() As String, ln As String, i As Long
+    Dim out As New Collection, lines() As String, parts() As String
+    Dim ln As String, i As Long, j As Long
     Dim lo As Long, hi As Long, id As String
     Set ParseStepTokens = out
     cell = Replace(cell, ";", vbLf)
@@ -2580,10 +2583,17 @@ Private Function ParseStepTokens(ByVal cell As String) As Collection
             lo = InStrRev(ln, "["): hi = InStrRev(ln, "]")
             If lo > 0 And hi > lo Then
                 id = Trim(Mid(ln, lo + 1, hi - lo - 1))
+                If Len(id) > 0 Then out.Add id
+            ElseIf lo = 0 And hi = 0 Then
+                parts = Split(ln, ",")
+                For j = LBound(parts) To UBound(parts)
+                    id = Trim(parts(j))
+                    If Len(id) > 0 Then out.Add id
+                Next j
             Else
-                id = ln            ' bare id with no brackets is tolerated
+                id = ln            ' preserve malformed bracket-bearing input
+                If Len(id) > 0 Then out.Add id
             End If
-            If Len(id) > 0 Then out.Add id
         End If
     Next i
 End Function
@@ -2623,6 +2633,27 @@ Private Function ActionTokenFor(ByVal actionId As String) As String
     Next reg
 End Function
 
+' The canonical-cased id for a hand-typed one, so a Steps cell reading
+' "CLEAN.DUPES" is rewritten "clean.dupes" when Setup is rebuilt. This is the
+' SAME normalisation ActionTokenFor performs above and it exists separately only
+' because a Steps cell now holds bare ids rather than "Caption [id]" tokens. The
+' note above records that a prior refactor already lost this normalisation once
+' and it came back as fix round 2; writing StepsToTokens against the caller's raw
+' string re-introduced exactly that defect in a new place. Unresolvable input is
+' returned unchanged - Finalize's own report is what flags an unknown id.
+Private Function CanonicalActionId(ByVal actionId As String) As String
+    Dim reg As Object, a As Object
+    CanonicalActionId = actionId
+    For Each reg In BuildRegistry()
+        For Each a In reg("actions")
+            If LCase(CStr(a("id"))) = LCase(actionId) Then
+                CanonicalActionId = CStr(a("id"))
+                Exit Function
+            End If
+        Next a
+    Next reg
+End Function
+
 ' "Caption [id]" for a HIDDEN or UNASSIGNED entry in ComposeReport, matching
 ' the format the OFF/CHAINS ONLY availability lists just above them already
 ' use ("caption [id]", built from the registry) - fix round 1, fix 5: the
@@ -2653,20 +2684,22 @@ End Function
 Private Function StepsToTokens(steps As Collection) As String
     Dim s As String, v As Variant
     For Each v In steps
-        s = s & ActionTokenFor(CStr(v)) & vbLf
+        If Len(s) > 0 Then s = s & ", "
+        s = s & CanonicalActionId(CStr(v))
     Next v
-    StepsToTokens = Left$(s, Len(s) - IIf(Len(s) > 0, 1, 0))
+    StepsToTokens = s
 End Function
 
 Private Sub RenderActionTokens(ws As Worksheet, ByVal startRow As Long)
     Dim reg As Object, a As Object, gr As Long
-    ws.Cells(startRow - 1, 7).Value = "Available actions - copy a token into Steps:"
+    ws.Cells(startRow - 1, 7).Value = "Available actions - copy an id into Steps:"
     ws.Cells(startRow - 1, 7).Font.Bold = True
     gr = startRow
     For Each reg In BuildRegistry()
         For Each a In reg("actions")
-            ws.Cells(gr, 7).Value = CStr(a("caption")) & " [" & CStr(a("id")) & "]"
-            ws.Cells(gr, 7).Font.Color = RGB(120, 120, 120)
+            ws.Cells(gr, 7).Value = CStr(a("id"))
+            ws.Cells(gr, 8).Value = CStr(a("caption"))
+            ws.Range(ws.Cells(gr, 7), ws.Cells(gr, 8)).Font.Color = RGB(120, 120, 120)
             gr = gr + 1
         Next a
     Next reg
@@ -2699,10 +2732,10 @@ End Function
 Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim existing As Collection, ch As Object, i As Long
     r = BlockIntro(ws, r, "Chains  -  one button that runs several actions in order", _
-                   "Button name + Steps (paste tokens from the Actions list, one per line) + Placement (1A, hide, or MIC!B4).")
+                   "Button name + Steps (paste action ids from the Actions list, separated by commas) + Placement (1A, hide, or MIC!B4).")
     ws.Cells(r, KEY_COL).Value = CHAINS_KEY
     ws.Cells(r, VAL_COL).Value = "Button name"
-    ws.Cells(r, VAL_COL + 1).Value = "Steps (one token per line)"
+    ws.Cells(r, VAL_COL + 1).Value = "Steps (action ids, separated by commas)"
     ws.Cells(r, VAL_COL + 2).Value = PLACE_HEADER
     ws.Range(ws.Cells(r, VAL_COL), ws.Cells(r, VAL_COL + 2)).Font.Bold = True
     r = r + 1
@@ -2712,7 +2745,7 @@ Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
         If i <= existing.Count Then
             Set ch = existing(i)
             ws.Cells(r, VAL_COL).Value = ch("label")
-            ws.Cells(r, VAL_COL + 1).Value = StepsToTokens(ch("steps"))   ' Label [id] per line
+            ws.Cells(r, VAL_COL + 1).Value = StepsToTokens(ch("steps"))   ' bare ids, comma-separated
             ws.Cells(r, VAL_COL + 2).Value = ch("code")
             ws.Cells(r, RID_COL).Value = ch("id")   ' preserve immutable id
         End If
@@ -2722,7 +2755,7 @@ Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
         ws.Cells(r, VAL_COL + 1).WrapText = True
         r = r + 1
     Next i
-    ' Copy-ready action tokens in G/H for authoring Steps.
+    ' Copy-ready action ids and captions in G/H for authoring Steps.
     RenderActionTokens ws, r - MAX_LIST
     RenderChainsBlock = r
 End Function
