@@ -186,8 +186,8 @@ abstraction appendix"):
 |---|---|---|---|---|
 | `k_validate_recon_dest` | text | simple | `Reconcile Exceptions` | Name of the **new** sheet `validate.reconcile` writes its exceptions report to. Created only when the run finds at least one exception; a perfect match creates no sheet. `usedBy` `validate.reconcile`. |
 | `k_validate_scan_dest` | text | simple | `Scan Exceptions` | Name of the **new** sheet `validate.scan` writes its exceptions report to. Created only when a configured rule finds at least one failing cell. `usedBy` `validate.scan`. |
-| `k_validate_scan_rules` | table | simple | **none** | Data-quality rules for `validate.scan`. Three columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks — a one-to-three-letter entry is always read as a letter), **Rule** (`blank`, `number`, `date`, or `range`), **Bound** (read only for `range`, as `min,max`; either side may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name, not silently skipped. `usedBy` `validate.scan`. |
-| `k_validate_outliers` | table | simple | **none** | Numeric bounds for `validate.highlight_outliers`. Three columns: **Column** (letter or header name, same resolution rule as above), **Min**, **Max** (either may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name. `usedBy` `validate.highlight_outliers`. |
+| `k_validate_scan_rules` | table | simple | **none** | Data-quality rules for `validate.scan`. Three columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks — a one-to-three-letter entry is always read as a letter), **Rule** (`blank`, `number`, `date`, or `range`), **Bound** (read only for `range`, as `min,max`; either side may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name, not silently skipped. A Rule value other than `blank`/`number`/`date`/`range`, a non-blank Bound component that does not parse as a number, or a `range` rule whose Bound is wholly blank, MUST cause `validate.scan` to refuse before scanning anything, naming the offending row - never silently treated as unbounded or as a rule that never fails. `usedBy` `validate.scan`. |
+| `k_validate_outliers` | table | simple | **none** | Numeric bounds for `validate.highlight_outliers`. Three columns: **Column** (letter or header name, same resolution rule as above), **Min**, **Max** (either may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name. A non-blank Min or Max that does not parse as a number MUST cause `validate.highlight_outliers` to refuse before checking anything, naming the offending row - never silently treated as unbounded on that side. `usedBy` `validate.highlight_outliers`. |
 
 `k_validate_scan_rules` header: `Column (letter or header name)|Rule (blank, number, date, range)|Bound (range rule only: min,max)`.
 `k_validate_outliers` header: `Column (letter or header name)|Min (blank = no floor)|Max (blank = no ceiling)`.
@@ -209,10 +209,10 @@ the moment the action runs, never stored on Setup.
 
 | id | caption | semantics |
 |---|---|---|
-| `validate.reconcile` | Reconcile Two Datasets | Prompt for two ranges (Dataset A, Dataset B); row 1 of each is always its header, not asked. Prompt for the key column(s) of each, numbered from the LEFT of that range. Build a key index per side (composite key -> the row(s) carrying it); a key present on only one side is reported `In A only` / `In B only`. A key whose count is greater than one on EITHER side MUST be reported as `Duplicate key`, with both sides' counts, and its rows MUST NOT be compared column-by-column — an implementation MUST NOT pair same-key rows across sides by position or any other guess. A key matched exactly once on each side is compared across every header common to both ranges (excluding each side's own key column(s)); a numeric comparison MUST tolerate formatting differences (e.g. `100` vs `100.00`); a differing column is reported as `Differs`, one row per differing column. Written to a new sheet named `k_validate_recon_dest`, only when at least one exception exists. Neither input range is changed. |
-| `validate.scan` | Scan for Data Issues | Prompt for a range and whether its first row is a header. Apply every `k_validate_scan_rules` row to its resolved column; a cell failing its rule is written to a new sheet named `k_validate_scan_dest`, only when at least one exception exists. A rule row whose Column resolves to nothing in the picked range MUST be reported by name. The picked range is not changed. |
-| `validate.highlight_duplicates` | Highlight Duplicates | Prompt for a range, whether its first row is a header, and the key column(s), numbered from the LEFT of that range. Colour every key-column cell belonging to a row whose key is shared with at least one other row in the range. A cell that already carries a fill colour of its own MUST be left alone and counted separately, never overwritten. Before colouring anything, show a count of exactly what will be marked and require an explicit confirmation; declining or cancelling MUST change nothing. No value, formula, or existing formatting is changed. |
-| `validate.highlight_outliers` | Highlight Outliers | Prompt for a range and whether its first row is a header. For every `k_validate_outliers` row, colour every numeric, non-blank cell in its resolved column that falls outside `Min`/`Max`. Same already-filled-cell carve-out, same confirm-before-colouring gate, same "nothing else changes" guarantee as `validate.highlight_duplicates`. A configured column that resolves to nothing in the picked range MUST be reported by name. |
+| `validate.reconcile` | Reconcile Two Datasets | Prompt for two ranges (Dataset A, Dataset B); row 1 of each is always its header, not asked. Prompt for the key column(s) of each, numbered from the LEFT of that range. A row whose key column(s) are ALL blank MUST be reported as its own status, `Empty key`, one row at a time, and MUST NEVER be entered into the match index - an empty key on each side MUST NOT be treated as a match. Build a key index per side from every remaining row (composite key -> the row(s) carrying it); a key present on only one side is reported `In A only` / `In B only`. A key whose count is greater than one on EITHER side MUST be reported as `Duplicate key`, with both sides' counts (zero for a side that lacks the key entirely), and its rows MUST NOT be compared column-by-column — an implementation MUST NOT pair same-key rows across sides by position or any other guess, and duplication MUST be evaluated on each side independently of whether the other side has the key at all. A non-key header name that occurs more than once in either range's header row MUST cause the action to refuse before comparing anything, naming the repeated header(s) and which side repeats them - an implementation MUST NOT silently compare only the first occurrence and drop the rest. A key matched exactly once on each side is compared across every header common to both ranges (excluding each side's own key column(s)); a numeric comparison MUST tolerate formatting differences (e.g. `100` vs `100.00`); a differing column is reported as `Differs`, one row per differing column. When there is at least one exception, the action MUST show the exception count and require an explicit confirmation before writing it to a new sheet named `k_validate_recon_dest`; declining or cancelling MUST change nothing. Neither input range is changed. |
+| `validate.scan` | Scan for Data Issues | Prompt for a range and whether its first row is a header. Before any cell is read, every `k_validate_scan_rules` row MUST be validated: an unrecognised Rule value, a non-blank Bound component that does not parse as a number, or a `range` rule whose Bound is wholly blank, MUST cause the action to refuse, naming the offending row(s), rather than silently treating the row as unbounded or as never failing. Apply every remaining `k_validate_scan_rules` row to its resolved column; a cell failing its rule is written to a new sheet named `k_validate_scan_dest`, only when at least one exception exists and only after the action shows the exception count and the user explicitly confirms; declining or cancelling MUST change nothing. A rule row whose Column resolves to nothing in the picked range MUST be reported by name. The picked range is not changed. |
+| `validate.highlight_duplicates` | Highlight Duplicates | Prompt for a range, whether its first row is a header, and the key column(s), numbered from the LEFT of that range. Colour every key-column cell belonging to a row whose key is shared with at least one other row in the range. A cell that already carries a fill colour of its own MUST be left alone and counted separately, never overwritten. Candidate cells MUST be deduplicated by address before the preview count is computed, so a repeated column selection cannot inflate the count. Before colouring anything, show a count of exactly what will be marked and require an explicit confirmation; declining or cancelling MUST change nothing. No value, formula, or existing formatting is changed. The undo instruction given afterward MUST refer only to the cells actually coloured, never to the whole picked range. |
+| `validate.highlight_outliers` | Highlight Outliers | Prompt for a range and whether its first row is a header. Before any cell is read, every `k_validate_outliers` row MUST be validated: a non-blank Min or Max that does not parse as a number MUST cause the action to refuse, naming the offending row(s), rather than silently treating that side as unbounded. For every remaining `k_validate_outliers` row, colour every numeric, non-blank cell in its resolved column that falls outside `Min`/`Max`. Same already-filled-cell carve-out, same deduplicated preview count, same confirm-before-colouring gate, same "nothing else changes" guarantee, and same scoped undo instruction as `validate.highlight_duplicates`. A configured column that resolves to nothing in the picked range MUST be reported by name. |
 | `validate.missing_fields` | Flag Missing Required Fields | Prompt for a range, whether its first row is a header, and which column(s), numbered from the LEFT of that range, are mandatory. Colour every blank cell in those columns. Same already-filled-cell carve-out, same confirm-before-colouring gate, same "nothing else changes" guarantee as the other two highlight actions. |
 
 **Colouring is reporting, not repair.** §7 classes `validate` as "checking data against a rule
@@ -271,10 +271,16 @@ exactly) and every helper the five action tasks depend on.
 
 **Interfaces:**
 - Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_AddTable`,
-  `Core_AddAction`, `Core_IsAlpha`, `Core_IsBlank` (all Core, existing/phase 2).
-- Produces: `PkgValidate_Manifest`; the private helpers `PkgValidate_Grid`,
-  `PkgValidate_ConfirmColor`, `PkgValidate_MarkCell`,
-  `PkgValidate_ClassifyMark`, `PkgValidate_ColorDuplicate`, `PkgValidate_ColorOutlier`,
+  `Core_IsAlpha`, `Core_IsBlank` (all Core, existing/phase 2). **Not** `Core_AddAction` here -
+  see the note at the end of Step 1: `build/build.ps1` fails any `Core_AddAction` whose named
+  entry point has no dispatchable handler anywhere in `src/`, and it checks every `Pkg*.bas`
+  file on disk regardless of `CoreCandidates` registration, so a manifest landed with all five
+  actions before any handler exists cannot build. Each of Tasks 3-7 creates one handler; Task 8
+  registers all five actions in this same manifest once every handler exists.
+- Produces: `PkgValidate_Manifest` (fields and tables only, for now); the private helpers
+  `PkgValidate_Grid`, `PkgValidate_ConfirmColor`, `PkgValidate_ConfirmReport`,
+  `PkgValidate_MarkCell`, `PkgValidate_ClassifyMark`, `PkgValidate_MarkCells`,
+  `PkgValidate_DedupeCells`, `PkgValidate_ColorDuplicate`, `PkgValidate_ColorOutlier`,
   `PkgValidate_ColorMissing`. Tasks 3-7 depend on all of them.
 
 - [ ] **Step 1: Module header and manifest**
@@ -336,21 +342,16 @@ Public Sub PkgValidate_Manifest(reg As Object)
         "One row per column to check. Left cell: a column letter or header name, same rule as above. A value below Min or above Max is flagged; leave either side blank to leave that side unchecked. Nothing happens until you fill this in.", _
         "validate.highlight_outliers"
 
-    Core_AddAction reg, "validate.reconcile", "Reconcile Two Datasets", "PkgValidate_Reconcile", _
-        "Pick two ranges and the key column(s) in each; reports rows found only in one side, rows sharing a key that is not unique on either side, and rows whose other columns differ - to a new sheet. Nothing in either range is changed.", _
-        "Validate / Reconcile"
-    Core_AddAction reg, "validate.scan", "Scan for Data Issues", "PkgValidate_Scan", _
-        "Pick a range; checks it against the Data rules table on Setup and writes every row that fails a rule to a new sheet. Nothing in the picked range is changed.", _
-        "Validate / Reconcile"
-    Core_AddAction reg, "validate.highlight_duplicates", "Highlight Duplicates", "PkgValidate_HighlightDuplicates", _
-        "Pick a range and the column(s) that form a key; colour-flags the key cell(s) of every row sharing a key with another row. Nothing is deleted or moved.", _
-        "Validate / Reconcile"
-    Core_AddAction reg, "validate.highlight_outliers", "Highlight Outliers", "PkgValidate_HighlightOutliers", _
-        "Pick a range; colour-flags any cell in a configured column that falls outside its bound from the Outlier bounds table on Setup. Nothing is deleted or moved.", _
-        "Validate / Reconcile"
-    Core_AddAction reg, "validate.missing_fields", "Flag Missing Required Fields", "PkgValidate_MissingFields", _
-        "Pick a range and the column(s) that are mandatory; colour-flags every blank cell in those columns. Nothing is deleted or moved.", _
-        "Validate / Reconcile"
+    ' Actions are registered by the task that creates their handler
+    ' (Tasks 3-7), not landed here in advance. build/build.ps1 fails any
+    ' Core_AddAction whose named entry point has no dispatchable Public
+    ' handler anywhere in src/, and it runs that check against every
+    ' Pkg*.bas file ON DISK regardless of whether CoreCandidates
+    ' probes it yet - so a manifest that pre-registers all five actions
+    ' before any of their handlers exists cannot pass a build, even
+    ' before Task 8 wires this package into CoreCandidates. Task 8 adds
+    ' all five Core_AddAction calls here, immediately before End Sub,
+    ' once every handler below has been created.
 End Sub
 ```
 
@@ -375,8 +376,8 @@ End Sub
 ' exceptions sheet) still touches real Range objects, because
 ' formatting cannot be set from an array.
 Private Function PkgValidate_Grid(rng As Range) As Variant
+    Dim g(1 To 1, 1 To 1) As Variant
     If rng.Cells.Count = 1 Then
-        Dim g(1 To 1, 1 To 1) As Variant
         g(1, 1) = rng.Value2
         PkgValidate_Grid = g
     Else
@@ -470,10 +471,73 @@ Private Function PkgValidate_ConfirmColor(ByVal what As String, ByVal willMark A
     End If
     msg = msg & "No value, formula or existing formatting is changed - only cells with no fill " & _
           "colour today receive one." & vbCrLf & vbCrLf & _
-          "This cannot be undone with Ctrl+Z. To remove it afterwards: select the cells and use " & _
-          "Home > Fill Color > No Fill - every cell this colours is guaranteed to have had no " & _
-          "fill before, so that always reverses it cleanly." & vbCrLf & vbCrLf & "Continue?"
+          "This cannot be undone with Ctrl+Z. Afterwards, the exact cells this run colours will " & _
+          "be selected for you - Home > Fill Color > No Fill on that selection reverses only " & _
+          "what this run did." & vbCrLf & vbCrLf & "Continue?"
     PkgValidate_ConfirmColor = (MsgBox(msg, vbExclamation + vbYesNo + vbDefaultButton2, title) = vbYes)
+End Function
+
+' Shared confirm-before-writing dialog for the two report-sheet actions
+' (reconcile, scan). Both already skip creating a sheet at all when
+' there is nothing to report (Decision 7); this confirms the write
+' itself once there IS something to report - Core_DestUsable only
+' checks that the destination name is free of a collision, it is not a
+' preview-and-confirm step, so writing a new sheet full of exceptions
+' still needs its own explicit "yes, do this" the same way a colour
+' does. vbYesNo, not vbYesNoCancel, for the same title-bar-X reasoning
+' as PkgValidate_ConfirmColor. Defaults to No.
+Private Function PkgValidate_ConfirmReport(ByVal what As String, ByVal title As String) As Boolean
+    Dim msg As String
+    msg = "This will create a new sheet and " & what & "." & vbCrLf & vbCrLf & _
+          "No existing sheet, value, or formula is changed." & vbCrLf & vbCrLf & "Continue?"
+    PkgValidate_ConfirmReport = (MsgBox(msg, vbExclamation + vbYesNo + vbDefaultButton2, title) = vbYes)
+End Function
+
+' Removes duplicate cells (by address) from a candidate Collection - a
+' user can pick the same column twice via Core_AskCols, or configure
+' the same column in two rule/bound rows, and without this a single
+' cell would be counted, confirmed, and marked more than once, making
+' the preview count larger than the number of cells actually affected.
+Private Function PkgValidate_DedupeCells(cells As Collection) As Collection
+    Dim seen As Object, c As Range, out As Collection
+    Set seen = CreateObject("Scripting.Dictionary")
+    Set out = New Collection
+    For Each c In cells
+        If Not seen.Exists(c.Address(True, True, xlA1, True)) Then
+            seen.Add c.Address(True, True, xlA1, True), True
+            out.Add c
+        End If
+    Next c
+    Set PkgValidate_DedupeCells = out
+End Function
+
+' Colours every cell in a (already deduplicated) candidate Collection,
+' applying PkgValidate_MarkCell's never-overwrite rule to each one, and
+' returns a Range that is the Union of exactly the cells that were
+' ACTUALLY coloured this run (Nothing if none were). Every one of the
+' three highlight actions selects that Range afterward and tells the
+' user to clear ITS fill, not the whole picked range - a cell this run
+' skipped, because it already carried a fill of its own, was never part
+' of what got coloured, so it must never be part of what "undo"
+' touches either. Selecting the whole picked range instead (an earlier
+' draft of this plan did) would strip fills this action deliberately
+' left alone, which is not a safe undo.
+Private Function PkgValidate_MarkCells(cells As Collection, ByVal clr As Long, _
+                                       ByRef marked As Long, ByRef skipped As Long) As Range
+    Dim c As Range, before As Long, out As Range
+    marked = 0: skipped = 0
+    For Each c In cells
+        before = marked
+        PkgValidate_MarkCell c, clr, marked, skipped
+        If marked > before Then
+            If out Is Nothing Then
+                Set out = c
+            Else
+                Set out = Application.Union(out, c)
+            End If
+        End If
+    Next c
+    Set PkgValidate_MarkCells = out
 End Function
 ```
 
@@ -486,11 +550,15 @@ grep -nE 'Core_Add(Field|List|Table) reg, "k_' src/packages/*.bas | sed -E 's/.*
 grep -nE '^\s*Private\s+(Sub|Function)\s+' src/packages/PkgValidate.bas | grep -vE 'Private\s+(Sub|Function)\s+PkgValidate_'
 ```
 
-Expected: exit 0 on both build steps (the module has no actions yet, so `CoreCandidates`
-still does not probe it — Task 8 wires that up, and it is fine for `PkgValidate.bas` to sit
-unregistered for now, deliberately, so this task's build proves only that it compiles). The
-`uniq -d` line prints **nothing** — that is the proof no `k_*` key collides with an existing
-one. The prefix grep prints **nothing** — every private declared so far starts `PkgValidate_`.
+Expected: exit 0 on both build steps, `Core + 4 package(s)` — `PkgValidate.bas` now exists on
+disk, and `build/build.ps1` counts every `Pkg*.bas` file on disk toward that number regardless
+of `CoreCandidates` registration, so the count is already 4 (ImportExport, Import, Clean,
+Validate) from this task onward, not 3 and not yet 5. The module has no actions yet, so
+`CoreCandidates` still does not probe it — Task 8 wires that up, and it is fine for
+`PkgValidate.bas` to sit unregistered for now, deliberately, so this task's build proves only
+that it compiles. The `uniq -d` line prints **nothing** — that is the proof no `k_*` key
+collides with an existing one. The prefix grep prints **nothing** — every private declared so
+far starts `PkgValidate_`.
 
 - [ ] **Step 5: Commit**
 
@@ -512,8 +580,9 @@ gets silently wrong.
 **Interfaces:**
 - Consumes: `Core_Cfg`, `Core_DestUsable`, `Core_AskRange`, `Core_NarrowToUsed`, `Core_AskCols`,
   `Core_ParseCols`, `Core_RangeRef`, `Core_NewSheet`, `Core_SpeedOn`/`Off`, `Core_Refuse`,
-  `Core_Done`, `Core_Fail`, `PkgValidate_Grid` (Task 2).
-- Produces: `PkgValidate_Reconcile` (the action), and its private engine.
+  `Core_Done`, `Core_Fail`, `PkgValidate_Grid`, `PkgValidate_ConfirmReport` (Task 2).
+- Produces: `PkgValidate_Reconcile` (the action, registered by Task 8 once it exists), and its
+  private engine.
 
 - [ ] **Step 1: The action entry point**
 
@@ -526,6 +595,8 @@ Public Sub PkgValidate_Reconcile(ctx As Object)
     Dim rngA As Range, rngB As Range
     Dim keysA As String, keysB As String
     Dim colsA As Variant, colsB As Variant
+    Dim outRows As Collection, refuseMsg As String
+    Dim ws As Worksheet
     Const TITLE As String = "Reconcile Two Datasets"
     On Error GoTo Fail
 
@@ -576,19 +647,25 @@ Public Sub PkgValidate_Reconcile(ctx As Object)
     colsA = Core_ParseCols(keysA)
     colsB = Core_ParseCols(keysB)
 
-    Dim outRows As Collection
     Core_SpeedOn
-    PkgValidate_ReconcileEngine rngA, rngB, colsA, colsB, outRows
+    PkgValidate_ReconcileEngine rngA, rngB, colsA, colsB, outRows, refuseMsg
     Core_SpeedOff
 
-    If outRows.Count = 0 Then
-        Core_Done ctx, "Every row matched: no rows found on only one side, no duplicate keys, " & _
-               "and no differing columns." & vbCrLf & vbCrLf & "No report sheet was created - " & _
-               "there was nothing to report.", TITLE
+    If Len(refuseMsg) > 0 Then
+        Core_Refuse ctx, refuseMsg, TITLE
         Exit Sub
     End If
 
-    Dim ws As Worksheet
+    If outRows.Count = 0 Then
+        Core_Done ctx, "Every row matched: no rows found on only one side, no duplicate keys, " & _
+               "no empty keys, and no differing columns." & vbCrLf & vbCrLf & "No report sheet " & _
+               "was created - there was nothing to report.", TITLE
+        Exit Sub
+    End If
+
+    If Not PkgValidate_ConfirmReport("write " & outRows.Count & " exception row(s) to '" & _
+            destName & "'", TITLE) Then Exit Sub
+
     Set ws = Core_NewSheet(destName)
     PkgValidate_WriteReconcileReport ws, outRows
 
@@ -598,6 +675,8 @@ Public Sub PkgValidate_Reconcile(ctx As Object)
            "   In B only      - key exists in Dataset B, not in Dataset A" & vbCrLf & _
            "   Duplicate key  - the key is not unique on one or both sides, so those rows " & _
            "were NOT compared row-to-row" & vbCrLf & _
+           "   Empty key      - the key column(s) were blank for this row, so it could not be " & _
+           "matched to anything" & vbCrLf & _
            "   Differs        - the key matched exactly once on each side, but a column " & _
            "disagrees", TITLE
     Exit Sub
@@ -615,7 +694,11 @@ End Sub
 ' rows(B)), the shape that looks fine on a forty-row demo and then
 ' visibly freezes on a real month-end extract with thousands of rows on
 ' each side. Building both indexes once and then walking them is
-' O(rows(A) + rows(B)).
+' O(rows(A) + rows(B)) - plus one comparison per common header for
+' every matched pair, so the full cost is O(rows(A) + rows(B) +
+' matched-pairs x common-headers), not strictly O(rows(A) + rows(B));
+' it is still linear in the inputs plus the width of what actually gets
+' compared, never the product of the two sides' row counts.
 '
 ' CompareMode = vbTextCompare is set on each Dictionary BEFORE the
 ' first .Add - Scripting.Dictionary raises if it is changed afterward -
@@ -636,54 +719,146 @@ End Sub
 ' its occurrences as In A/B only, even if it is ALSO duplicated on its
 ' own side - that duplication does not matter to "does the other side
 ' have this at all".)
+' refuseMsg is set (and outRows left empty) when the two ranges cannot
+' be reconciled at all - currently only a duplicate NON-KEY header on
+' either side (see PkgValidate_DuplicateHeaders). The caller checks
+' refuseMsg BEFORE looking at outRows.
 Private Sub PkgValidate_ReconcileEngine(rngA As Range, rngB As Range, colsA As Variant, colsB As Variant, _
-                                        ByRef outRows As Collection)
+                                        ByRef outRows As Collection, ByRef refuseMsg As String)
     Dim valsA As Variant, valsB As Variant
+    Dim dictA As Object, dictB As Object
+    Dim r As Long, k As Variant, cA As Collection, cB As Collection
+    Dim commonHdrs As Collection
+    Dim dupA As String, dupB As String
+    Dim bExists As Boolean, bCount As Long
+    Dim tmpColl As Collection
+
+    Set outRows = New Collection
+    refuseMsg = ""
     valsA = PkgValidate_Grid(rngA)
     valsB = PkgValidate_Grid(rngB)
 
-    Dim dictA As Object, dictB As Object
-    Dim r As Long, k As Variant, cA As Collection, cB As Collection
-    Set outRows = New Collection
+    ' Duplicate non-key headers make "every header common to both
+    ' ranges" ambiguous - comparing only the first occurrence and
+    ' dropping the rest (what a naive header-to-column map does) can
+    ' let a differing second "Amount" column vanish from the report
+    ' with no trace. Refuse before anything else runs.
+    dupA = PkgValidate_DuplicateHeaders(valsA, colsA)
+    dupB = PkgValidate_DuplicateHeaders(valsB, colsB)
+    If Len(dupA) > 0 Or Len(dupB) > 0 Then
+        refuseMsg = "Dataset A and Dataset B must each have unique column headers outside the " & _
+            "key column(s), so every column can be matched by name without ambiguity." & vbCrLf & vbCrLf
+        If Len(dupA) > 0 Then refuseMsg = refuseMsg & "Dataset A repeats: " & dupA & vbCrLf
+        If Len(dupB) > 0 Then refuseMsg = refuseMsg & "Dataset B repeats: " & dupB & vbCrLf
+        refuseMsg = refuseMsg & vbCrLf & "Nothing has been changed."
+        Exit Sub
+    End If
+
     Set dictA = CreateObject("Scripting.Dictionary")
     Set dictB = CreateObject("Scripting.Dictionary")
     dictA.CompareMode = vbTextCompare
     dictB.CompareMode = vbTextCompare
 
+    ' A row whose key column(s) are ALL blank is not a real key and
+    ' MUST NEVER enter the match index - indexing it would let one
+    ' blank-key row on each side pair as a false "match". Reported as
+    ' its own status, one row at a time, instead.
     For r = 2 To UBound(valsA, 1)
-        k = PkgValidate_KeyOfArr(valsA, r, colsA)
-        If Not dictA.Exists(k) Then dictA.Add k, New Collection
-        dictA(k).Add r
+        If PkgValidate_KeyIsBlank(valsA, r, colsA) Then
+            outRows.Add Array("Empty key", "", "", "row " & r & " in A", "")
+        Else
+            k = PkgValidate_KeyOfArr(valsA, r, colsA)
+            If Not dictA.Exists(k) Then
+                Set tmpColl = New Collection
+                dictA.Add k, tmpColl
+            End If
+            dictA(k).Add r
+        End If
     Next r
     For r = 2 To UBound(valsB, 1)
-        k = PkgValidate_KeyOfArr(valsB, r, colsB)
-        If Not dictB.Exists(k) Then dictB.Add k, New Collection
-        dictB(k).Add r
+        If PkgValidate_KeyIsBlank(valsB, r, colsB) Then
+            outRows.Add Array("Empty key", "", "", "", "row " & r & " in B")
+        Else
+            k = PkgValidate_KeyOfArr(valsB, r, colsB)
+            If Not dictB.Exists(k) Then
+                Set tmpColl = New Collection
+                dictB.Add k, tmpColl
+            End If
+            dictB(k).Add r
+        End If
     Next r
 
-    Dim commonHdrs As Collection
     Set commonHdrs = PkgValidate_CommonHeadersArr(valsA, valsB, colsA, colsB)
 
+    ' Duplication is judged on EACH side independently of whether the
+    ' other side has the key at all - a key duplicated only in A must
+    ' still report "Duplicate key" even when B has zero rows for it.
+    ' Checking "cA.Count > 1 Or bCount > 1" BEFORE the not-in-B branch
+    ' is what makes that true; testing existence first (the earlier
+    ' shape) let a same-side duplicate slip through as a run of
+    ' "In A only" rows whenever the other side had no match, losing the
+    ' duplicate warning exactly where the source is most malformed.
     For Each k In dictA.Keys
         Set cA = dictA(k)
-        If Not dictB.Exists(k) Then
+        bExists = dictB.Exists(k)
+        bCount = 0
+        If bExists Then bCount = dictB(k).Count
+        If cA.Count > 1 Or bCount > 1 Then
+            outRows.Add Array("Duplicate key", k, "", cA.Count & " row(s) in A", bCount & " row(s) in B")
+        ElseIf Not bExists Then
             PkgValidate_AddInAOnly outRows, valsA, cA, k
         Else
             Set cB = dictB(k)
-            If cA.Count > 1 Or cB.Count > 1 Then
-                outRows.Add Array("Duplicate key", k, "", cA.Count & " row(s) in A", cB.Count & " row(s) in B")
-            Else
-                PkgValidate_CompareRow outRows, valsA, CLng(cA(1)), valsB, CLng(cB(1)), commonHdrs, k
-            End If
+            PkgValidate_CompareRow outRows, valsA, CLng(cA(1)), valsB, CLng(cB(1)), commonHdrs, k
         End If
     Next k
     For Each k In dictB.Keys
         If Not dictA.Exists(k) Then
             Set cB = dictB(k)
-            PkgValidate_AddInBOnly outRows, valsB, cB, k
+            If cB.Count > 1 Then
+                outRows.Add Array("Duplicate key", k, "", "0 row(s) in A", cB.Count & " row(s) in B")
+            Else
+                PkgValidate_AddInBOnly outRows, valsB, cB, k
+            End If
         End If
     Next k
 End Sub
+
+' True when every key column of row r is blank - see the "Empty key"
+' handling above.
+Private Function PkgValidate_KeyIsBlank(vals As Variant, ByVal r As Long, keyCols As Variant) As Boolean
+    Dim i As Long
+    PkgValidate_KeyIsBlank = True
+    For i = LBound(keyCols) To UBound(keyCols)
+        If Not Core_IsBlank(vals(r, keyCols(i))) Then
+            PkgValidate_KeyIsBlank = False
+            Exit Function
+        End If
+    Next i
+End Function
+
+' Non-key header names that occur more than once in vals' header row
+' (row 1), comma-joined for the refusal message, or "" if none repeat.
+Private Function PkgValidate_DuplicateHeaders(vals As Variant, keyCols As Variant) As String
+    Dim map As Object, c As Long, hdr As String, out As String
+    Set map = CreateObject("Scripting.Dictionary")
+    map.CompareMode = vbTextCompare
+    For c = 1 To UBound(vals, 2)
+        If Not PkgValidate_InArray(c, keyCols) Then
+            hdr = Trim$(CStr(vals(1, c)))
+            If Len(hdr) > 0 Then
+                If map.Exists(hdr) Then
+                    If InStr(1, out, hdr, vbTextCompare) = 0 Then
+                        out = out & IIf(Len(out) > 0, ", ", "") & hdr
+                    End If
+                Else
+                    map.Add hdr, c
+                End If
+            End If
+        End If
+    Next c
+    PkgValidate_DuplicateHeaders = out
+End Function
 
 ' Builds a composite key from one or more columns of ONE row, numbered
 ' from the left of the range exactly like Core_AskCols/Core_ParseCols
@@ -845,7 +1020,8 @@ git commit -m "feat(validate): validate.reconcile - dictionary-indexed reconcili
 **Interfaces:** Consumes `Core_Cfg`, `Core_DestUsable`, `Core_CfgTable`, `Core_AskRange`,
 `Core_NarrowToUsed`, `Core_AskHasHeader`, `Core_RangeRef`, `Core_NewSheet`, `Core_IsBlank`,
 `Core_SpeedOn`/`Off`, `Core_Refuse`, `Core_Done`, `Core_Fail`, `Core_ResolveColumn`,
-`PkgValidate_Grid` (Task 2). Produces `PkgValidate_Scan` and its engine.
+`PkgValidate_Grid`, `PkgValidate_ConfirmReport` (Task 2). Produces `PkgValidate_Scan` (registered
+by Task 8) and its engine.
 
 - [ ] **Step 1: The action and its engine**
 
@@ -856,7 +1032,8 @@ git commit -m "feat(validate): validate.reconcile - dictionary-indexed reconcili
 Public Sub PkgValidate_Scan(ctx As Object)
     Dim destName As String, rng As Range, hasHeader As Boolean
     Dim cols() As String, rules() As String, bounds() As String
-    Dim outRows As Collection, missed As String
+    Dim outRows As Collection, missed As String, badRules As String
+    Dim ws As Worksheet
     Const TITLE As String = "Scan for Data Issues"
     On Error GoTo Fail
 
@@ -867,6 +1044,19 @@ Public Sub PkgValidate_Scan(ctx As Object)
         Core_Refuse ctx, "No data rules are set up yet." & vbCrLf & vbCrLf & _
                "Fill in the 'Data rules' table on the Setup tab, Finalize, and run this " & _
                "again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    ' Configuration errors must refuse, not fail open - an unrecognised
+    ' Rule, or a Bound component that is neither blank nor a number,
+    ' silently became "unbounded" (or "never fails", for an unknown
+    ' rule name) in an earlier draft of this engine. Validate the whole
+    ' table before reading a single cell.
+    badRules = PkgValidate_ValidateScanRules(cols, rules, bounds)
+    If Len(badRules) > 0 Then
+        Core_Refuse ctx, "The Data rules table on Setup has problem(s):" & badRules & vbCrLf & vbCrLf & _
+               "Fix the table on the Setup tab, Finalize, and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
         Exit Sub
     End If
 
@@ -893,7 +1083,9 @@ Public Sub PkgValidate_Scan(ctx As Object)
         Exit Sub
     End If
 
-    Dim ws As Worksheet
+    If Not PkgValidate_ConfirmReport("write " & outRows.Count & " exception(s) to '" & destName & _
+            "'", TITLE) Then Exit Sub
+
     Set ws = Core_NewSheet(destName)
     PkgValidate_WriteScanReport ws, outRows
 
@@ -904,6 +1096,49 @@ Public Sub PkgValidate_Scan(ctx As Object)
 Fail:
     Core_Fail ctx, "validate.scan", Err
 End Sub
+
+' Validates the whole k_validate_scan_rules table BEFORE any cell is
+' read, so a misconfigured Setup table refuses cleanly, naming the
+' offending row(s), instead of the engine silently treating an
+' unrecognised rule name as "never fails" or non-numeric bound text as
+' "no bound on that side".
+Private Function PkgValidate_ValidateScanRules(cols() As String, rules() As String, bounds() As String) As String
+    Dim i As Long, ruleName As String, msg As String, parts() As String
+    For i = LBound(cols) To UBound(cols)
+        ruleName = LCase$(Trim$(rules(i)))
+        Select Case ruleName
+            Case "blank", "number", "date"
+                ' no Bound expected; nothing further to validate
+            Case "range"
+                If Len(Trim$(bounds(i))) = 0 Then
+                    msg = msg & vbCrLf & "   Row for '" & cols(i) & "': rule 'range' needs a " & _
+                        "Bound (min,max) - it is blank."
+                Else
+                    parts = Split(bounds(i), ",")
+                    If UBound(parts) >= 0 Then
+                        If Len(Trim$(parts(0))) > 0 Then
+                            If Not IsNumeric(Trim$(parts(0))) Then
+                                msg = msg & vbCrLf & "   Row for '" & cols(i) & "': Bound minimum '" & _
+                                    Trim$(parts(0)) & "' is not a number."
+                            End If
+                        End If
+                    End If
+                    If UBound(parts) >= 1 Then
+                        If Len(Trim$(parts(1))) > 0 Then
+                            If Not IsNumeric(Trim$(parts(1))) Then
+                                msg = msg & vbCrLf & "   Row for '" & cols(i) & "': Bound maximum '" & _
+                                    Trim$(parts(1)) & "' is not a number."
+                            End If
+                        End If
+                    End If
+                End If
+            Case Else
+                msg = msg & vbCrLf & "   Row for '" & cols(i) & "': rule '" & rules(i) & "' is not " & _
+                    "recognised - must be blank, number, date, or range."
+        End Select
+    Next i
+    PkgValidate_ValidateScanRules = msg
+End Function
 
 ' One pass per configured rule row, not one pass per cell per rule -
 ' the column is resolved ONCE (Core_ResolveColumn) and its values
@@ -985,8 +1220,19 @@ Private Function PkgValidate_RuleFails(ByVal ruleName As String, ByVal v As Vari
                     If Len(PkgValidate_RuleFails) = 0 And hasHi Then
                         If CDbl(v) > hi Then PkgValidate_RuleFails = CStr(v) & " is above the maximum " & hi
                     End If
+                Else
+                    ' A non-numeric value under a range rule is itself
+                    ' the exception - it must not pass silently just
+                    ' because there is no number to compare against the
+                    ' bound.
+                    PkgValidate_RuleFails = "Not a number, so its range cannot be checked"
                 End If
             End If
+        Case Else
+            ' Defence in depth only - PkgValidate_ValidateScanRules
+            ' refuses an unrecognised rule name before this function is
+            ' ever reached, so this branch should be unreachable.
+            PkgValidate_RuleFails = "Unrecognised rule '" & ruleName & "'"
     End Select
 End Function
 
@@ -1027,8 +1273,9 @@ git commit -m "feat(validate): validate.scan - configured blank/number/date/rang
 **Interfaces:** Consumes `Core_AskRange`, `Core_NarrowToUsed`, `Core_AskHasHeader`,
 `Core_AskCols`, `Core_ParseCols`, `Core_RangeRef`, `Core_SpeedOn`/`Off`, `Core_Refuse`,
 `Core_Done`, `Core_Fail`, `PkgValidate_Grid`, `PkgValidate_KeyOfArr` (Task 3),
-`PkgValidate_ClassifyMark`, `PkgValidate_ConfirmColor`, `PkgValidate_MarkCell`,
-`PkgValidate_ColorDuplicate` (Task 2). Produces `PkgValidate_HighlightDuplicates`.
+`PkgValidate_ClassifyMark`, `PkgValidate_ConfirmColor`, `PkgValidate_MarkCells`,
+`PkgValidate_DedupeCells`, `PkgValidate_ColorDuplicate` (Task 2). Produces
+`PkgValidate_HighlightDuplicates` (registered by Task 8).
 
 - [ ] **Step 1: The action and its engine**
 
@@ -1038,6 +1285,9 @@ git commit -m "feat(validate): validate.scan - configured blank/number/date/rang
 '================================================================
 Public Sub PkgValidate_HighlightDuplicates(ctx As Object)
     Dim rng As Range, hasHeader As Boolean, keys As String, cols As Variant
+    Dim dupCells As Collection, dupRows As Long
+    Dim willMark As Long, willSkip As Long
+    Dim marked As Long, skipped As Long, markedRng As Range, undoMsg As String
     Const TITLE As String = "Highlight Duplicates"
     On Error GoTo Fail
 
@@ -1056,10 +1306,10 @@ Public Sub PkgValidate_HighlightDuplicates(ctx As Object)
             "duplicates?", TITLE) Then Exit Sub
     cols = Core_ParseCols(keys)
 
-    Dim dupCells As Collection, dupRows As Long
     Core_SpeedOn
     Set dupCells = PkgValidate_FindDuplicateCells(rng, hasHeader, cols, dupRows)
     Core_SpeedOff
+    Set dupCells = PkgValidate_DedupeCells(dupCells)
 
     If dupCells.Count = 0 Then
         Core_Done ctx, "No duplicate keys found inside " & Core_RangeRef(rng) & "." & _
@@ -1067,24 +1317,30 @@ Public Sub PkgValidate_HighlightDuplicates(ctx As Object)
         Exit Sub
     End If
 
-    Dim willMark As Long, willSkip As Long
     PkgValidate_ClassifyMark dupCells, willMark, willSkip
     If Not PkgValidate_ConfirmColor("marking the key cell(s) of " & dupRows & " row(s) that " & _
             "share a key with another row", willMark, willSkip, Core_RangeRef(rng), TITLE) Then Exit Sub
 
-    Dim marked As Long, skipped As Long, c As Range
     Core_SpeedOn
-    marked = 0: skipped = 0
-    For Each c In dupCells
-        PkgValidate_MarkCell c, PkgValidate_ColorDuplicate(), marked, skipped
-    Next c
+    Set markedRng = PkgValidate_MarkCells(dupCells, PkgValidate_ColorDuplicate(), marked, skipped)
     Core_SpeedOff
+
+    ' The undo instruction names ONLY the cells this run coloured, never
+    ' the whole picked range - a cell rng contains that already had its
+    ' own fill was deliberately skipped, and "select rng, No Fill" would
+    ' strip that pre-existing fill too. Selecting markedRng for the user
+    ' means Home > Fill Color > No Fill on the current selection is
+    ' always, and only, an undo of what this run did.
+    If Not markedRng Is Nothing Then
+        markedRng.Select
+        undoMsg = "To remove the flags: the " & marked & " marked cell(s) are now selected - " & _
+            "use Home > Fill Color > No Fill."
+    End If
 
     Core_Done ctx, "Colour-flagged " & marked & " key cell(s) across " & dupRows & " row(s) " & _
            "sharing a duplicate key." & IIf(skipped > 0, vbCrLf & vbCrLf & skipped & " cell(s) " & _
            "already had a fill colour of their own and were left alone.", "") & vbCrLf & vbCrLf & _
-           "To remove the flags: select " & Core_RangeRef(rng) & " and use Home > Fill Color > " & _
-           "No Fill.", TITLE
+           undoMsg, TITLE
     Exit Sub
 Fail:
     Core_Fail ctx, "validate.highlight_duplicates", Err
@@ -1096,18 +1352,24 @@ End Sub
 ' of a single confirmed action as small as the finding it reports - the
 ' row is a duplicate BECAUSE of what is in these cells, and a wider
 ' flag would touch formatting on columns that had nothing to do with
-' it.
+' it. The caller deduplicates the result (Core_AskCols permits a
+' repeated column number, which would otherwise add the same cell to
+' the candidate list twice and inflate the preview count).
 Private Function PkgValidate_FindDuplicateCells(rng As Range, ByVal hasHeader As Boolean, cols As Variant, _
                                                 ByRef dupRowCount As Long) As Collection
     Dim vals As Variant, dict As Object, r As Long, firstRow As Long, k As Variant, i As Long, j As Long
-    Dim out As New Collection
+    Dim out As Collection, tmpColl As Collection
+    Set out = New Collection
     vals = PkgValidate_Grid(rng)
     Set dict = CreateObject("Scripting.Dictionary")
     dict.CompareMode = vbTextCompare
     firstRow = IIf(hasHeader, 2, 1)
     For r = firstRow To UBound(vals, 1)
         k = PkgValidate_KeyOfArr(vals, r, cols)
-        If Not dict.Exists(k) Then dict.Add k, New Collection
+        If Not dict.Exists(k) Then
+            Set tmpColl = New Collection
+            dict.Add k, tmpColl
+        End If
         dict(k).Add r
     Next r
     dupRowCount = 0
@@ -1146,8 +1408,9 @@ helpers; the VBA below is complete.
 **Interfaces:** Consumes `Core_CfgTable`, `Core_AskRange`, `Core_NarrowToUsed`,
 `Core_AskHasHeader`, `Core_RangeRef`, `Core_IsBlank`, `Core_SpeedOn`/`Off`, `Core_Refuse`,
 `Core_Done`, `Core_Fail`, `Core_ResolveColumn`, `PkgValidate_Grid`,
-`PkgValidate_ClassifyMark`, `PkgValidate_ConfirmColor`, `PkgValidate_MarkCell`,
-`PkgValidate_ColorOutlier` (Task 2). Produces `PkgValidate_HighlightOutliers`.
+`PkgValidate_ClassifyMark`, `PkgValidate_ConfirmColor`, `PkgValidate_MarkCells`,
+`PkgValidate_DedupeCells`, `PkgValidate_ColorOutlier` (Task 2). Produces
+`PkgValidate_HighlightOutliers` (registered by Task 8).
 
 - [ ] **Step 1: The action and its engine**
 
@@ -1157,7 +1420,10 @@ helpers; the VBA below is complete.
 '================================================================
 Public Sub PkgValidate_HighlightOutliers(ctx As Object)
     Dim rng As Range, hasHeader As Boolean
-    Dim cols() As String, mins() As String, maxs() As String, missed As String
+    Dim cols() As String, mins() As String, maxs() As String, missed As String, badBounds As String
+    Dim outCells As Collection
+    Dim willMark As Long, willSkip As Long
+    Dim marked As Long, skipped As Long, markedRng As Range, undoMsg As String
     Const TITLE As String = "Highlight Outliers"
     On Error GoTo Fail
 
@@ -1165,6 +1431,17 @@ Public Sub PkgValidate_HighlightOutliers(ctx As Object)
         Core_Refuse ctx, "No outlier bounds are set up yet." & vbCrLf & vbCrLf & _
                "Fill in the 'Outlier bounds' table on the Setup tab, Finalize, and run this " & _
                "again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    ' Same "refuse, don't fail open" rule as validate.scan - a Min or
+    ' Max that is neither blank nor a number must not silently become
+    ' "no bound on that side".
+    badBounds = PkgValidate_ValidateOutlierBounds(cols, mins, maxs)
+    If Len(badBounds) > 0 Then
+        Core_Refuse ctx, "The Outlier bounds table on Setup has problem(s):" & badBounds & vbCrLf & vbCrLf & _
+               "Fix the table on the Setup tab, Finalize, and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
         Exit Sub
     End If
 
@@ -1179,10 +1456,10 @@ Public Sub PkgValidate_HighlightOutliers(ctx As Object)
     End If
     If Not Core_AskHasHeader(rng, hasHeader, TITLE) Then Exit Sub
 
-    Dim outCells As Collection
     Core_SpeedOn
     Set outCells = PkgValidate_FindOutlierCells(rng, hasHeader, cols, mins, maxs, missed)
     Core_SpeedOff
+    Set outCells = PkgValidate_DedupeCells(outCells)
 
     If outCells.Count = 0 Then
         Core_Done ctx, "No values outside their configured bound(s) were found inside " & _
@@ -1192,23 +1469,26 @@ Public Sub PkgValidate_HighlightOutliers(ctx As Object)
         Exit Sub
     End If
 
-    Dim willMark As Long, willSkip As Long
     PkgValidate_ClassifyMark outCells, willMark, willSkip
     If Not PkgValidate_ConfirmColor("that fall outside their configured bound", willMark, _
             willSkip, Core_RangeRef(rng), TITLE) Then Exit Sub
 
-    Dim marked As Long, skipped As Long, c As Range
     Core_SpeedOn
-    marked = 0: skipped = 0
-    For Each c In outCells
-        PkgValidate_MarkCell c, PkgValidate_ColorOutlier(), marked, skipped
-    Next c
+    Set markedRng = PkgValidate_MarkCells(outCells, PkgValidate_ColorOutlier(), marked, skipped)
     Core_SpeedOff
+
+    ' See the identical comment in PkgValidate_HighlightDuplicates -
+    ' the undo instruction must name only the cells this run coloured,
+    ' never the whole picked range.
+    If Not markedRng Is Nothing Then
+        markedRng.Select
+        undoMsg = "To remove the flags: the " & marked & " marked cell(s) are now selected - " & _
+            "use Home > Fill Color > No Fill."
+    End If
 
     Core_Done ctx, "Colour-flagged " & marked & " value(s) outside their configured bound." & _
            IIf(skipped > 0, vbCrLf & vbCrLf & skipped & " cell(s) already had a fill colour " & _
-           "of their own and were left alone.", "") & vbCrLf & vbCrLf & "To remove the flags: " & _
-           "select " & Core_RangeRef(rng) & " and use Home > Fill Color > No Fill." & _
+           "of their own and were left alone.", "") & vbCrLf & vbCrLf & undoMsg & _
            IIf(Len(missed) > 0, vbCrLf & vbCrLf & "These configured column(s) matched nothing " & _
                "in your selection and were skipped:" & missed, ""), TITLE
     Exit Sub
@@ -1216,11 +1496,40 @@ Fail:
     Core_Fail ctx, "validate.highlight_outliers", Err
 End Sub
 
+' Validates every k_validate_outliers row BEFORE any cell is read - a
+' non-blank Min or Max that is not a number must refuse, naming the
+' row, instead of silently being treated as an open-ended side.
+Private Function PkgValidate_ValidateOutlierBounds(cols() As String, mins() As String, maxs() As String) As String
+    Dim i As Long, msg As String
+    For i = LBound(cols) To UBound(cols)
+        If Len(Trim$(mins(i))) > 0 Then
+            If Not IsNumeric(Trim$(mins(i))) Then
+                msg = msg & vbCrLf & "   Row for '" & cols(i) & "': Min '" & Trim$(mins(i)) & _
+                    "' is not a number."
+            End If
+        End If
+        If Len(Trim$(maxs(i))) > 0 Then
+            If Not IsNumeric(Trim$(maxs(i))) Then
+                msg = msg & vbCrLf & "   Row for '" & cols(i) & "': Max '" & Trim$(maxs(i)) & _
+                    "' is not a number."
+            End If
+        End If
+        If Len(Trim$(mins(i))) = 0 And Len(Trim$(maxs(i))) = 0 Then
+            msg = msg & vbCrLf & "   Row for '" & cols(i) & "': both Min and Max are blank, so " & _
+                "this row would never flag anything."
+        End If
+    Next i
+    PkgValidate_ValidateOutlierBounds = msg
+End Function
+
 ' An outlier check only applies to actual numbers - a blank or
 ' non-numeric cell is SKIPPED here, never flagged. Flagging blanks is
 ' validate.missing_fields' job; conflating the two would mean a single
 ' cell could be flagged twice, for two different reasons, by two
-' different actions, with no way to tell which one fired.
+' different actions, with no way to tell which one fired. The caller
+' deduplicates the result (a Min/Max row can name a column another row
+' also names, or Core_AskCols-style repeats elsewhere in this package,
+' which would otherwise add the same cell twice).
 Private Function PkgValidate_FindOutlierCells(rng As Range, ByVal hasHeader As Boolean, cols() As String, _
                                               mins() As String, maxs() As String, ByRef missed As String) As Collection
     Dim out As New Collection
@@ -1234,13 +1543,21 @@ Private Function PkgValidate_FindOutlierCells(rng As Range, ByVal hasHeader As B
         Else
             Set tgt = rng.Columns(idx)
             vals = PkgValidate_Grid(tgt)
-            hasLo = IsNumeric(Trim$(mins(i)))
+            ' Non-blank implies numeric here - PkgValidate_ValidateOutlierBounds
+            ' already refused the run otherwise, so Len(...) > 0 is a
+            ' safe stand-in for the IsNumeric check an earlier draft
+            ' used (and CDbl below cannot raise).
+            hasLo = (Len(Trim$(mins(i))) > 0)
             If hasLo Then lo = CDbl(Trim$(mins(i)))
-            hasHi = IsNumeric(Trim$(maxs(i)))
+            hasHi = (Len(Trim$(maxs(i))) > 0)
             If hasHi Then hi = CDbl(Trim$(maxs(i)))
             For r = firstRow To UBound(vals, 1)
                 v = vals(r, 1)
                 If IsNumeric(v) And Not Core_IsBlank(v) Then
+                    ' v is confirmed numeric by the guard above, so CDbl(v)
+                    ' cannot raise regardless of hasLo/hasHi's values - this
+                    ' single If adds the cell at most once even when both
+                    ' sides are configured.
                     If (hasLo And CDbl(v) < lo) Or (hasHi And CDbl(v) > hi) Then out.Add tgt.Cells(r, 1)
                 End If
             Next r
@@ -1270,8 +1587,9 @@ exactly as `clean.dupes` and Task 5 do, and Task 2's colour helpers.
 **Interfaces:** Consumes `Core_AskRange`, `Core_NarrowToUsed`, `Core_AskHasHeader`,
 `Core_AskCols`, `Core_ParseCols`, `Core_RangeRef`, `Core_IsBlank`, `Core_SpeedOn`/`Off`,
 `Core_Refuse`, `Core_Done`, `Core_Fail`, `PkgValidate_Grid`, `PkgValidate_ClassifyMark`,
-`PkgValidate_ConfirmColor`, `PkgValidate_MarkCell`, `PkgValidate_ColorMissing` (Task 2).
-Produces `PkgValidate_MissingFields`.
+`PkgValidate_ConfirmColor`, `PkgValidate_MarkCells`, `PkgValidate_DedupeCells`,
+`PkgValidate_ColorMissing` (Task 2). Produces `PkgValidate_MissingFields` (registered by
+Task 8).
 
 - [ ] **Step 1: The action and its engine**
 
@@ -1281,6 +1599,9 @@ Produces `PkgValidate_MissingFields`.
 '================================================================
 Public Sub PkgValidate_MissingFields(ctx As Object)
     Dim rng As Range, hasHeader As Boolean, keys As String, cols As Variant
+    Dim blankCells As Collection
+    Dim willMark As Long, willSkip As Long
+    Dim marked As Long, skipped As Long, markedRng As Range, undoMsg As String
     Const TITLE As String = "Flag Missing Required Fields"
     On Error GoTo Fail
 
@@ -1298,10 +1619,10 @@ Public Sub PkgValidate_MissingFields(ctx As Object)
             "Which column(s) are mandatory - a blank cell in any of them gets flagged?", TITLE) Then Exit Sub
     cols = Core_ParseCols(keys)
 
-    Dim blankCells As Collection
     Core_SpeedOn
     Set blankCells = PkgValidate_FindBlankCells(rng, hasHeader, cols)
     Core_SpeedOff
+    Set blankCells = PkgValidate_DedupeCells(blankCells)
 
     If blankCells.Count = 0 Then
         Core_Done ctx, "No blank cells found in the mandatory column(s) inside " & _
@@ -1309,28 +1630,33 @@ Public Sub PkgValidate_MissingFields(ctx As Object)
         Exit Sub
     End If
 
-    Dim willMark As Long, willSkip As Long
     PkgValidate_ClassifyMark blankCells, willMark, willSkip
     If Not PkgValidate_ConfirmColor("that are blank in a mandatory column", willMark, willSkip, _
             Core_RangeRef(rng), TITLE) Then Exit Sub
 
-    Dim marked As Long, skipped As Long, c As Range
     Core_SpeedOn
-    marked = 0: skipped = 0
-    For Each c In blankCells
-        PkgValidate_MarkCell c, PkgValidate_ColorMissing(), marked, skipped
-    Next c
+    Set markedRng = PkgValidate_MarkCells(blankCells, PkgValidate_ColorMissing(), marked, skipped)
     Core_SpeedOff
+
+    ' See the identical comment in PkgValidate_HighlightDuplicates -
+    ' the undo instruction must name only the cells this run coloured,
+    ' never the whole picked range.
+    If Not markedRng Is Nothing Then
+        markedRng.Select
+        undoMsg = "To remove the flags: the " & marked & " marked cell(s) are now selected - " & _
+            "use Home > Fill Color > No Fill."
+    End If
 
     Core_Done ctx, "Colour-flagged " & marked & " blank mandatory cell(s)." & _
            IIf(skipped > 0, vbCrLf & vbCrLf & skipped & " cell(s) already had a fill colour " & _
-           "of their own and were left alone.", "") & vbCrLf & vbCrLf & "To remove the flags: " & _
-           "select " & Core_RangeRef(rng) & " and use Home > Fill Color > No Fill.", TITLE
+           "of their own and were left alone.", "") & vbCrLf & vbCrLf & undoMsg, TITLE
     Exit Sub
 Fail:
     Core_Fail ctx, "validate.missing_fields", Err
 End Sub
 
+' Caller deduplicates the result - a repeated column number from
+' Core_AskCols would otherwise add the same blank cell twice.
 Private Function PkgValidate_FindBlankCells(rng As Range, ByVal hasHeader As Boolean, cols As Variant) As Collection
     Dim out As New Collection
     Dim vals As Variant, r As Long, firstRow As Long, i As Long
@@ -1355,18 +1681,61 @@ git commit -m "feat(validate): validate.missing_fields - blank-cell colour flags
 
 ---
 
-### Task 8: Register `PkgValidate` with Core — the two-place step
+### Task 8: Register the five actions, then register `PkgValidate` with Core
 
-**Owner: Opus, written directly.** Small, but per plan-of-record §3.4: "the single easiest way
-to ship a silently dead wave" is skipping this. `PkgValidate.bas` has built and bundled since
-Task 2 and has done nothing, because `Core_Run` never probes an unregistered package name.
+**Owner: Opus, written directly.** Two separate two-place steps, both easy to ship silently
+broken: (1) `PkgValidate_Manifest` has declared zero actions since Task 2, deliberately - each
+`Core_AddAction` was deferred until its handler existed (Task 2 Step 1's note; see the P1 build-
+gate finding this addresses) - and now that Tasks 3-7 have created all five handlers, this task
+adds all five registrations at once; (2) per plan-of-record §3.4, "the single easiest way to
+ship a silently dead wave" is forgetting `CoreCandidates()`, so `PkgValidate.bas` would still do
+nothing even with a fully-registered manifest, because `Core_Run` never probes an unregistered
+package name.
 
-**Files:** Modify `src/core/Core.bas` — `CoreCandidates()`.
+**Files:** Modify `src/packages/PkgValidate.bas` (the manifest) and `src/core/Core.bas`
+(`CoreCandidates()`).
 
-**Interfaces:** Consumes nothing new. Produces: every `validate.*` action becomes reachable
-through `Core_Run` and appears on a generated Macros page.
+**Interfaces:** Consumes `Core_AddAction` (Core, already used elsewhere; not called from this
+package until now). Produces: every `validate.*` action becomes registered, then reachable
+through `Core_Run`, and appears on a generated Macros page.
 
-- [ ] **Step 1: Add the candidate**
+- [ ] **Step 1: Register the five actions in the manifest**
+
+Insert immediately before `PkgValidate_Manifest`'s `End Sub` (the deferral comment added in
+Task 2 Step 1 marks the spot), replacing that comment:
+
+```vb
+    Core_AddAction reg, "validate.reconcile", "Reconcile Two Datasets", "PkgValidate_Reconcile", _
+        "Pick two ranges and the key column(s) in each; reports rows found only in one side, rows sharing a key that is not unique on either side, rows with an empty key, and rows whose other columns differ - to a new sheet, after you confirm. Nothing in either range is changed.", _
+        "Validate / Reconcile"
+    Core_AddAction reg, "validate.scan", "Scan for Data Issues", "PkgValidate_Scan", _
+        "Pick a range; checks it against the Data rules table on Setup and writes every row that fails a rule to a new sheet, after you confirm. Nothing in the picked range is changed.", _
+        "Validate / Reconcile"
+    Core_AddAction reg, "validate.highlight_duplicates", "Highlight Duplicates", "PkgValidate_HighlightDuplicates", _
+        "Pick a range and the column(s) that form a key; colour-flags the key cell(s) of every row sharing a key with another row, after you confirm. Nothing is deleted or moved.", _
+        "Validate / Reconcile"
+    Core_AddAction reg, "validate.highlight_outliers", "Highlight Outliers", "PkgValidate_HighlightOutliers", _
+        "Pick a range; colour-flags any cell in a configured column that falls outside its bound from the Outlier bounds table on Setup, after you confirm. Nothing is deleted or moved.", _
+        "Validate / Reconcile"
+    Core_AddAction reg, "validate.missing_fields", "Flag Missing Required Fields", "PkgValidate_MissingFields", _
+        "Pick a range and the column(s) that are mandatory; colour-flags every blank cell in those columns, after you confirm. Nothing is deleted or moved.", _
+        "Validate / Reconcile"
+End Sub
+```
+
+- [ ] **Step 2: Build and syntax-check**
+
+```bash
+pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+```
+
+Expected: exit 0, `Core + 4 package(s)` — `PkgValidate.bas` has been on disk since Task 2, so
+the file count does not change here; this build is the first to exercise `build/build.ps1`'s
+action-id and dispatchable-handler gate against all five `validate.*` ids at once, now that
+every named entry point (`PkgValidate_Reconcile` etc.) exists as a `Public Sub` somewhere in
+`src/`.
+
+- [ ] **Step 3: Add the `CoreCandidates` entry**
 
 ```bash
 grep -n 'Function CoreCandidates' src/core/Core.bas
@@ -1378,16 +1747,18 @@ Find the `c.Add "Clean"` line inside it and add immediately after:
     c.Add "Validate"                ' probes PkgValidate_Manifest
 ```
 
-- [ ] **Step 2: Build and syntax-check**
+- [ ] **Step 4: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 grep -n 'c.Add "Validate"' src/core/Core.bas
 ```
 
-Expected: exit 0, `Core + 5 package(s)`.
+Expected: exit 0, `Core + 4 package(s)` — the on-disk package count is unaffected by
+`CoreCandidates` registration (that changes what `Core_Run` probes at run time, not how many
+`Pkg*.bas` files exist); one match on the grep.
 
-- [ ] **Step 3: Deliberate injection — prove the frozen-id gate still catches a mistake in a
+- [ ] **Step 5: Deliberate injection — prove the frozen-id gate still catches a mistake in a
       brand-new package**
 
 `build/build.ps1:452` fails a malformed action id (not exactly two lowercase segments). This
@@ -1405,7 +1776,7 @@ Expected: **exit 1** the first time, naming `validateReconcile` and "must be exa
 segments... Never camelCase"; **exit 0** after the revert. **Record both outputs in the PR
 body.**
 
-- [ ] **Step 4: Deliberate injection — prove `Core_DestUsable` refuses a second reconcile run**
+- [ ] **Step 6: Deliberate injection — prove `Core_DestUsable` refuses a second reconcile run**
 
 Confirms statically (per plan-of-record §3.5 item 4, replacing an owner gate item) that
 `validate.reconcile` will not silently overwrite its own prior output. This cannot be run
@@ -1416,11 +1787,11 @@ TITLE) Then Exit Sub`, **before** either `Core_AskRange` call. Record this read 
 as the static equivalent of the withdrawn gate item; append the run-time confirmation to
 `docs/designs/2026-07-28-deferred-validation-log.md` in Task 9.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/core/Core.bas
-git commit -m "feat(core): register PkgValidate as a candidate package - W2's actions are now reachable"
+git add src/packages/PkgValidate.bas src/core/Core.bas
+git commit -m "feat(validate): register the five validate.* actions and PkgValidate as a candidate package"
 ```
 
 ---
@@ -1454,7 +1825,11 @@ four, and state plainly that none of the five repairs anything.
   by RGB value against a white-sheet assumption, and nothing has checked it against a dark
   theme.
 - **`validate.reconcile`'s refusal on a second run against its own output sheet** was confirmed
-  by static read (Task 8 Step 4), not by an actual second run in Excel.
+  by static read (Task 8 Step 6), not by an actual second run in Excel.
+- **The confirm-before-write dialogs added to `validate.reconcile` and `validate.scan`, and the
+  scoped (marked-cells-only) selection the three highlight actions make before showing their
+  undo instruction, have not been seen on screen** - reasoned from `MsgBox`/`Range.Select`
+  semantics, not observed in a running workbook.
 - **`Range.Value2`'s one-cell-returns-a-scalar edge case** (`PkgValidate_Grid`) has not been
   exercised against an actual one-cell pick in Excel; the guard is reasoned from documented
   `Value2` behaviour, not observed.
