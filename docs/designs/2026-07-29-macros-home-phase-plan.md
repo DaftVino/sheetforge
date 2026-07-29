@@ -1922,23 +1922,44 @@ better guard than a regular expression would have been. These are the correction
 
 ---
 
-### Cross-cutting: confirmation dialogs inside a chain
+### Cross-cutting: confirmation dialogs inside a chain — SETTLED
 
-**This one needs the owner's answer before Tasks 2a, 2b and 2c are written.**
+Several of the new actions ask something before they do work: a confirmation before overwriting
+cells, restyling every chart or writing files, and a prompt for the case mode and the sheet to
+email. `Core_Done` and `Core_Refuse` suppress their dialogs when an action runs as a **quiet
+chain step**; a raw `MsgBox` or `Application.InputBox` does not. So a chain containing one of
+these stops and waits for a human.
 
-Three of the four drafts add a `MsgBox` confirmation before doing work — reasonably, since these
-actions overwrite cells, restyle every chart, or write files. But `Core_Done` and `Core_Refuse`
-suppress their dialogs when an action runs as a **quiet chain step**, and a raw `MsgBox` does
-not. So a chain containing any of them stops and waits for a human.
+**Owner's decision, 2026-07-29: accept that they block a chain, and say so in their help text.**
+Do not add a quiet-mode query to the Core API, and do not remove the confirmations — the actions
+that have them are the ones that change the most.
 
-Existing actions already prompt inside chains — `Core_AskRange` blocks the same way — so this is
-not a new class of behaviour. What is new is *confirmation* prompts, which are precisely the
-thing an unattended chain should not hit.
+Applies to every new action that asks anything before acting:
 
-The Core API has no public way for a package to ask whether it is running quietly. The options
-are: expose one and skip the confirmation in a chain; drop the confirmations and rely on the
-refusals, which are already thorough; or accept that these actions block a chain and say so in
-their help text. Do not guess — ask.
+| Action | What it asks |
+|---|---|
+| `clean.change_case` | which case to apply |
+| `format.highlight_special` | confirm before adding, and before removing, the audit view |
+| `format.chart_style` | confirm before restyling every chart |
+| `export.split_by_value` | confirm before writing the batch of files |
+| `export.email` | which sheet, and confirm before writing and drafting |
+
+**Each of those five `Core_AddAction` help strings must end with this sentence, verbatim, so it
+reads the same everywhere it appears:**
+
+```text
+In a chain, this one stops and waits for your answer before it does anything.
+```
+
+It lands in the help text, which is shown on the button card and — after Task 5 — in full on
+`Macros Home`, so a user composing a chain sees it at the moment they are choosing steps.
+
+`clean.split_column`, `workbook.sort_sheets` and `workbook.toc_links` ask nothing and do not get
+the sentence. Do not add it to them; a sentence that appears on every action stops being read.
+
+**This is not a new class of behaviour** — `Core_AskRange` already blocks a chain the same way in
+existing actions. What this decision settles is that the phase does not try to fix that, and
+states it plainly instead.
 
 ---
 
