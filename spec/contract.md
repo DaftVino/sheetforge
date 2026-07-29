@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.4.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.5.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -829,6 +829,54 @@ time (see §3, `range` note).
 | `clean.standardize_formats` | Standardize Formats | Prompt for a range; apply each `k_clean_formats` row's number format to that row's column **within the picked range only**. Changes formatting, never a stored value. A mapping row that resolves to no column in the picked range MUST be reported by name, not silently dropped. With no rows configured, the action MUST stop and say where to configure them (see the field's no-defaults rule above, which is what makes this state observable). |
 | `clean.text_to_numbers` | Convert Text to Numbers | Prompt for a range; convert text that represents a number into a real number, using **the same coercion the import action uses** (§8, column-type code `N`) rather than a second implementation. Formula cells are never touched. Text the coercion cannot parse is left exactly as it is. The completion report MUST state how many cells changed. **Known limitation, stated because it is visible to the user:** the `N` coercion strips a trailing `%`, so `12%` becomes the number `12`, not `0.12`. |
 
+### Package `validate` — "Validate & Reconcile" (v1.0.0, contract v2.5.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_validate_recon_dest` | text | simple | `Reconcile Exceptions` | Name of the **new** sheet `validate.reconcile` writes its exceptions report to. Created only when the run finds at least one exception; a perfect match creates no sheet. `usedBy` `validate.reconcile`. |
+| `k_validate_scan_dest` | text | simple | `Scan Exceptions` | Name of the **new** sheet `validate.scan` writes its exceptions report to. Created only when a configured rule finds at least one failing cell. `usedBy` `validate.scan`. |
+| `k_validate_scan_rules` | table | simple | **none** | Data-quality rules for `validate.scan`. Three columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks — a one-to-three-letter entry is always read as a letter), **Rule** (`blank`, `number`, `date`, or `range`), **Bound** (read only for `range`, as `min,max`; either side may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name, not silently skipped. A Rule value other than `blank`/`number`/`date`/`range`, a non-blank Bound component that does not parse as a number, or a `range` rule whose Bound is wholly blank, MUST cause `validate.scan` to refuse before scanning anything, naming the offending row - never silently treated as unbounded or as a rule that never fails. `usedBy` `validate.scan`. |
+| `k_validate_outliers` | table | simple | **none** | Numeric bounds for `validate.highlight_outliers`. Three columns: **Column** (letter or header name, same resolution rule as above), **Min**, **Max** (either may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name. A non-blank Min or Max that does not parse as a number MUST cause `validate.highlight_outliers` to refuse before checking anything, naming the offending row - never silently treated as unbounded on that side. `usedBy` `validate.highlight_outliers`. |
+
+`k_validate_scan_rules` header: `Column (letter or header name)|Rule (blank, number, date, range)|Bound (range rule only: min,max)`.
+`k_validate_outliers` header: `Column (letter or header name)|Min (blank = no floor)|Max (blank = no ceiling)`.
+
+**Both table fields declare NO default rows, deliberately — extending the `k_clean_formats`
+rule (§8, package `clean`) to two more fields, for a sharper reason.** `k_clean_formats` with a
+demo row risks an invisible number-format change; these two, with a demo row, risk *colouring
+real cells* — `validate.scan` writes an exceptions sheet named from a rule nobody configured,
+and `validate.highlight_outliers` colours cells against a bound nobody set, on a deployment's
+very first run, before anyone has looked at Setup. A conforming implementation MUST NOT ship
+default rows for either field. Worked examples live in each field's help text instead.
+
+**`validate.reconcile` needs no config field beyond its destination name.** Its two ranges, and
+the key column(s) within each, describe the SELECTION the caller is about to make — not the
+deployment — so per §5's rule (established for `clean`, §8) they are run-time inputs, asked at
+the moment the action runs, never stored on Setup.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `validate.reconcile` | Reconcile Two Datasets | Prompt for two ranges (Dataset A, Dataset B); row 1 of each is always its header, not asked. Prompt for the key column(s) of each, numbered from the LEFT of that range. A row whose key column(s) are ALL blank MUST be reported as its own status, `Empty key`, one row at a time, and MUST NEVER be entered into the match index - an empty key on each side MUST NOT be treated as a match. Build a key index per side from every remaining row (composite key -> the row(s) carrying it); a key present on only one side is reported `In A only` / `In B only`. A key whose count is greater than one on EITHER side MUST be reported as `Duplicate key`, with both sides' counts (zero for a side that lacks the key entirely), and its rows MUST NOT be compared column-by-column — an implementation MUST NOT pair same-key rows across sides by position or any other guess, and duplication MUST be evaluated on each side independently of whether the other side has the key at all. A non-key header name that occurs more than once in either range's header row MUST cause the action to refuse before comparing anything, naming the repeated header(s) and which side repeats them - an implementation MUST NOT silently compare only the first occurrence and drop the rest. A key matched exactly once on each side is compared across every header common to both ranges (excluding each side's own key column(s)); a numeric comparison MUST tolerate formatting differences (e.g. `100` vs `100.00`); a differing column is reported as `Differs`, one row per differing column. When there is at least one exception, the action MUST show the exception count and require an explicit confirmation before writing it to a new sheet named `k_validate_recon_dest`; declining or cancelling MUST change nothing. Neither input range is changed. |
+| `validate.scan` | Scan for Data Issues | Prompt for a range and whether its first row is a header. Before any cell is read, every `k_validate_scan_rules` row MUST be validated: an unrecognised Rule value, a non-blank Bound component that does not parse as a number, or a `range` rule whose Bound is wholly blank, MUST cause the action to refuse, naming the offending row(s), rather than silently treating the row as unbounded or as never failing. Apply every remaining `k_validate_scan_rules` row to its resolved column; a cell failing its rule is written to a new sheet named `k_validate_scan_dest`, only when at least one exception exists and only after the action shows the exception count and the user explicitly confirms; declining or cancelling MUST change nothing. A rule row whose Column resolves to nothing in the picked range MUST be reported by name. The picked range is not changed. |
+| `validate.highlight_duplicates` | Highlight Duplicates | Prompt for a range, whether its first row is a header, and the key column(s), numbered from the LEFT of that range. Colour every key-column cell belonging to a row whose key is shared with at least one other row in the range. A cell that already carries a fill colour of its own MUST be left alone and counted separately, never overwritten. Candidate cells MUST be deduplicated by address before the preview count is computed, so a repeated column selection cannot inflate the count. Before colouring anything, show a count of exactly what will be marked and require an explicit confirmation; declining or cancelling MUST change nothing. No value, formula, or existing formatting is changed. The undo instruction given afterward MUST refer only to the cells actually coloured, never to the whole picked range. |
+| `validate.highlight_outliers` | Highlight Outliers | Prompt for a range and whether its first row is a header. Before any cell is read, every `k_validate_outliers` row MUST be validated: a non-blank Min or Max that does not parse as a number MUST cause the action to refuse, naming the offending row(s), rather than silently treating that side as unbounded. For every remaining `k_validate_outliers` row, colour every numeric, non-blank cell in its resolved column that falls outside `Min`/`Max`. Same already-filled-cell carve-out, same deduplicated preview count, same confirm-before-colouring gate, same "nothing else changes" guarantee, and same scoped undo instruction as `validate.highlight_duplicates`. A configured column that resolves to nothing in the picked range MUST be reported by name. |
+| `validate.missing_fields` | Flag Missing Required Fields | Prompt for a range, whether its first row is a header, and which column(s), numbered from the LEFT of that range, are mandatory. Colour every blank cell in those columns. Same already-filled-cell carve-out, same confirm-before-colouring gate, same "nothing else changes" guarantee as the other two highlight actions. |
+
+**Colouring is reporting, not repair.** §7 classes `validate` as "checking data against a rule
+and reporting what fails; never repairs silently." The three actions above that write a fill
+colour change no value, no formula, and no shape of the data — they mark, in place, exactly
+what a written exceptions list marks on a separate sheet, using the sheet the data already
+lives on as the report surface instead of a new one. A conforming implementation MUST make
+this reversible without disturbing any other formatting: a cell that already carried a fill
+colour of its own MUST NOT be recoloured, and a cell this touches is guaranteed to have carried
+no fill immediately beforehand — so "clear the fill on the affected cells" always, and only,
+undoes what the action did. **No action in this package may delete, move, or overwrite a value
+or formula.**
+
 ---
 
 ## 9. Platform-abstraction appendix
@@ -886,6 +934,13 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.5.0 (additive):** a new package `validate` with four fields and five actions (§8):
+  `validate.reconcile`, `validate.scan`, `validate.highlight_duplicates`,
+  `validate.highlight_outliers`, `validate.missing_fields`. The `validate` domain has been
+  listed `active` in §7's vocabulary table since v2.3.0, before any package implemented it;
+  this version is the first to populate it. **Additive by the two-axes rule:** every existing
+  stored value keeps its meaning, no existing `key`, `id`, `kind` or encoding changes.
+  `SCHEMA_VER` does **not** move — it stays `"v2.0"`.
 - **v2.4.0 (additive):** a refusal becomes a distinct action outcome from a failure (§6); an
   implementation MUST expose a single record-and-present call for it; a chain now stops at a
   refused step instead of asking. `SCHEMA_VER` does **not** move — it stays `"v2.0"` and

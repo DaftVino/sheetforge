@@ -87,3 +87,29 @@ a chain halt.
   previously showed a message and returned **without** setting the failed flag, so a chain
   ticked them green — Task 4b. This is a behaviour change to shipped actions and is the one
   item here that touches something the owner has used before.
+
+---
+
+## W2 — Validate & Reconcile (v0.13.0, contract v2.5.0)
+
+- **`validate.reconcile` reports a duplicate key instead of pairing rows.** Build A and B
+  where one key appears twice on side A and once on side B, with different values. Expected:
+  one `Duplicate key` row naming counts 2 and 1, and **no `Differs` rows for that key**.
+  *Failure looks like:* a `Differs` row, which means rows were paired by position — a
+  difference the data does not contain. *Why:* this is the wrong-number-in-a-finance-report
+  case the action exists to avoid.
+- **A blank key is reported, never matched.** Give A and B one row each whose key cells are
+  empty. Expected: two `Empty key` rows. *Failure looks like:* a match, or a `Differs`.
+- **A repeated header stops the run before comparing.** Give range A two columns both headed
+  `Amount`. Expected: a refusal naming `Amount` and side A, and **no report sheet created**.
+- **Colouring is undoable and scoped.** Run `validate.highlight_duplicates` on a range where
+  some cells already carry a fill. Expected: the pre-filled cells keep their own colour and
+  are reported as skipped; only the newly marked cells are left selected; clearing the fill
+  on that selection restores the sheet exactly. *Failure looks like:* a pre-existing fill
+  overwritten, or the whole picked range selected afterwards — which would strip fills the
+  action deliberately did not set.
+- **Every confirm dialog cancels cleanly.** Cancel each of the five actions at its
+  confirmation. Expected: nothing coloured, no sheet created, no completion message.
+- **Colour legibility on a dark Excel theme.** The three highlight colours against a dark
+  theme. *Why:* pairs with the outstanding track-1 reskin item — same untested assumption,
+  same palette origin.
