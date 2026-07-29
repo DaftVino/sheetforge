@@ -528,7 +528,12 @@ End Function
 ' The original error is re-raised, so the caller's Core_Fail still reports the real
 ' cause rather than a swallowed one.
 Public Function Core_NewSheet(ByVal destName As String) As Worksheet
-    Dim ws As Worksheet, eNum As Long, eDesc As String
+    ' errNum, not eNum: "eNum" lower-cases to the VBA reserved word "enum", which
+    ' Excel refuses to compile and build.ps1's reserved-word guard rejects. This is
+    ' the exact identifier the global constraints list uses as its example, and it
+    ' still got written here - which is why that guard exists rather than the rule
+    ' being left to care.
+    Dim ws As Worksheet, errNum As Long, errDesc As String
     Set ws = ThisWorkbook.Worksheets.Add( _
         After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
 
