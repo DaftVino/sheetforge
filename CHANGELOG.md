@@ -6,6 +6,40 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-28
+
+### Added
+
+- **Five housekeeping actions**: unhide every worksheet, protect and unprotect every sheet
+  (two separate buttons, not one toggle), build a table of contents, and reset hidden rows and
+  columns.
+
+- **Unhide All Worksheets leaves the toolkit's own sheets hidden.** `_Config` holds your
+  settings and is hidden on purpose; unhiding it puts engine internals in front of you and
+  invites an edit that breaks the Setup tab. The most-downloaded version of this macro on the
+  internet unhides everything.
+
+- **Protect and Unprotect are two buttons because one toggle hides which way it will go.** A
+  single button on a workbook you have not looked at in a month is a guess.
+
+  **Protecting deliberately leaves drawing objects unprotected.** Excel's default protects
+  them, and the toolkit's buttons are drawing objects - so the default would leave the engine
+  unable to remove its own buttons on the next rebuild, permanently, with no way back that
+  does not involve changing protection you set. Unprotect reports which sheets refused the
+  password rather than stopping halfway with some sheets left open.
+
+- **The Table of Contents is create-only.** If a sheet by that name exists it stops and says
+  so, rather than clearing it and rebuilding. An earlier design recognised its own output by a
+  sentence written in A1 - but a sentence you could type yourself is not proof the toolkit
+  wrote the sheet, and the price of getting that wrong is a cleared sheet. Rebuilding means
+  deleting the old one yourself, which is the trade.
+
+### Changed
+
+- **Contract v2.9.0.** Adds the `workbook` package, and a normative rule that an
+  implementation creating a new destination sheet must refuse a name the engine reserves - not
+  only one that already exists.
+
 ## [0.16.0] - 2026-07-28
 
 ### Added

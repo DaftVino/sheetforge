@@ -1571,6 +1571,7 @@ Private Function CoreCandidates() As Collection
     c.Add "Summarize"               ' probes PkgSummarize_Manifest
     c.Add "Enrich"                  ' probes PkgEnrich_Manifest
     c.Add "Backup"                  ' probes PkgBackup_Manifest
+    c.Add "Workbook"                 ' probes PkgWorkbook_Manifest
     Set CoreCandidates = c
 End Function
 
