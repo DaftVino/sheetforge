@@ -57,7 +57,7 @@ Public Sub PkgClean_Manifest(reg As Object)
         "One row per column you want formatted. Left cell: a column letter like C, or the column's header text - a one-to-three-letter entry is always read as a letter, so a column headed exactly A or ID must be addressed by its letter. Right cell: the format, e.g. mm/dd/yyyy or $#,##0.00. Nothing happens until you fill this in.", _
         "clean.standardize_formats"
 
-    Core_AddSection reg, "Split Column"
+    Core_AddSection reg, "SPLIT COLUMN"
     Core_AddField reg, "k_clean_split_delimiter", "Split-column delimiter", "text", _
         "COMMA", "simple", _
         "Enter one delimiter character, or use COMMA, TAB, SEMICOLON, PIPE, or SPACE.", _

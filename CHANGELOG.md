@@ -49,10 +49,17 @@ All notable changes to this project are documented here. Format: [Keep a Changel
   shared by every export.
 
   **A band shared by several macros names all of them, and the list tracks what is switched
-  on.** The prefix is computed by re-running the same in-use test that decides which fields
-  appear, so a macro you turn off leaves the header as well as the band. Building it from what
-  a package *declares* would have been simpler and wrong in the one direction a user cannot
-  detect: the header would go on naming a macro they had deliberately disabled.
+  on.** One field can serve several actions — the backup folder serves all four backup macros —
+  so the header tests each action on its own rather than naming everything the field mentions.
+  Turn one off and it leaves the header. A macro set to `Chains only` stays named, because a
+  chain can still run it and its options still have to be answerable. Building the list from
+  what a package *declares* would have been simpler and wrong in the one direction a user
+  cannot detect: the header would go on advertising a macro they had deliberately disabled and
+  can see no button for.
+
+- **`SPLIT COLUMN` is now upper case like every other band title.** It was the toolkit's one
+  mixed-case section heading, which only became visible once the headings started carrying
+  macro names.
 
 ### Changed
 
