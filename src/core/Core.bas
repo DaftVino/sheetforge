@@ -1276,8 +1276,14 @@ Public Sub Core_Run(ByVal actionId As String)
     If Not res("found") And res("errNumber") = 0 Then
         MsgBox "Action not installed: " & actionId, vbExclamation, "Core"
     ElseIf Not res("ok") And Not res("reported") Then
+        ' FailCode, not a second copy of "#" & errNumber. This dialog is only
+        ' reachable today when errNumber is non-zero, but it used to hardcode the
+        ' "#" the same way Core_RunChain's summary did - and that copy is exactly
+        ' where the "X #0 <reason>" line came from. Reimplementing the format at a
+        ' second call site is how the defect got in; sharing the helper is how it
+        ' stays out when a future caller reaches here with a refusal.
         MsgBox "Action '" & actionId & "' failed:" & vbCrLf & vbCrLf & _
-               "#" & res("errNumber") & "  " & res("errText"), vbExclamation, "Macro Error"
+               Trim$(FailCode(res)) & "  " & res("errText"), vbExclamation, "Macro Error"
     End If
     Exit Sub
 
