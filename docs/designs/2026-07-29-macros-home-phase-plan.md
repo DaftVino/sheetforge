@@ -196,8 +196,14 @@ one or two chains — an index is clutter rather than navigation."* That was wri
 seven actions. At 51 it no longer holds. A contract that reverses itself without saying why
 teaches the next reader that its reasoning is decorative.
 
-Also record: the four retitled `importexport` captions (Task 4) are display strings, not ids,
-so retitling is additive; `SCHEMA_VER` does not move.
+**Write only what this commit actually changes.** Tasks 4 and 8 also amend the contract under
+this same v2.10.0 heading — the retitled `importexport` captions, and `Core_AddTable`'s optional
+per-column note — and each **appends its own paragraph to this entry when it lands**. Do not
+write them here. A §10 entry that describes §8 rows which still carry their old text leaves the
+document contradicting itself for the several commits in between, and the next reader cannot
+tell which half is stale.
+
+`SCHEMA_VER` does not move.
 
 - [ ] **Step 7: Bump the version header**
 
