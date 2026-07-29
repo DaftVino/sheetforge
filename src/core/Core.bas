@@ -1063,6 +1063,31 @@ Public Sub Core_Done(ctx As Object, ByVal msg As String, Optional ByVal title As
     If Not IsQuiet(ctx) Then MsgBox msg, vbInformation, title
 End Sub
 
+' Refusal sink. An action calls this INSTEAD of MsgBox when a precondition is not
+' met - the destination already exists, the folder is missing, nothing is
+' configured yet - and then exits having changed nothing.
+'
+' It records the outcome AND shows the dialog, in one call, deliberately. The
+' pattern it replaces was two calls: set a flag, then MsgBox. An action that did
+' one and forgot the other reported a success it never achieved, and a chain
+' printed a tick beside it. One call cannot be half-done.
+'
+' A refusal is NOT an error: failNumber stays 0, and Core_RunChain reads the
+' separate "refused" flag to decide it must stop rather than ask. See contract
+' section 6.
+Public Sub Core_Refuse(ctx As Object, ByVal msg As String, _
+                       Optional ByVal title As String = "Cannot run this yet")
+    On Error Resume Next
+    ctx("failed") = True          ' not-ok, so RunAction reports it as such
+    ctx("refused") = True         ' ...but a refusal, so the chain stops instead of asking
+    ctx("failNumber") = 0         ' explicit: there is no error number to show
+    ctx("failMsg") = msg
+    On Error GoTo 0
+
+    Core_Log ctx, "REFUSED: " & msg
+    If Not IsQuiet(ctx) Then MsgBox msg, vbExclamation, title
+End Sub
+
 ' Run one action under an isolated child context. Returns a result dictionary;
 ' never shows its own error/success dialog (callers decide). quiet=True suppresses
 ' the handler's Core_Done completion dialog and captures its message instead.
@@ -1077,6 +1102,11 @@ Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As 
     res("errNumber") = 0
     res("errText") = ""
     res("reported") = False
+    ' Core_RunChain reads res("refused") unconditionally, and reading a missing key
+    ' from a Scripting.Dictionary raises. This procedure has three early returns -
+    ' action-not-installed, StepFail, and the normal path - so the key has to exist
+    ' before any of them can be taken. Not cosmetic placement.
+    res("refused") = False
 
     On Error GoTo StepFail
 
@@ -1121,9 +1151,10 @@ Private Function RunAction(ByVal actionId As String, ByVal quiet As Boolean) As 
     On Error GoTo 0
     If CtxFlag(ctx, "failed") Then         ' handler swallowed its own error
         res("ok") = False
+        res("refused") = CtxFlag(ctx, "refused")
         res("errNumber") = CtxNum(ctx, "failNumber")
         res("errText") = CtxStr(ctx, "failMsg")
-        res("reported") = Not quiet        ' standalone: Core_Fail already showed it
+        res("reported") = Not quiet        ' standalone: the sink already showed it
     Else
         res("ok") = True
         res("message") = CtxStr(ctx, "doneMsg")
@@ -1223,7 +1254,7 @@ End Sub
 Private Sub Core_RunChain(ByVal chainId As String)
     Dim chains As Collection, ch As Object, target As Object
     Dim stepId As Variant, res As Object, n As Long, ok As Long, summary As String
-    Dim stopped As Boolean, total As Long
+    Dim stopped As Boolean, total As Long, refusedAt As Boolean
     On Error GoTo RunnerFail
 
     Set chains = ReadChains(CfgSheet())
@@ -1246,8 +1277,17 @@ Private Sub Core_RunChain(ByVal chainId As String)
             summary = summary & n & ". " & res("label") & "  " & ChrW$(&H2713) & _
                       IIf(Len(res("message")) > 0, "  (" & FirstLine(CStr(res("message"))) & ")", "") & vbCrLf
         Else
-            summary = summary & n & ". " & res("label") & "  X  #" & res("errNumber") & _
+            summary = summary & n & ". " & res("label") & "  X" & FailCode(res) & _
                       " " & res("errText") & vbCrLf
+            If res("refused") Then
+                ' A refusal means this step produced NOTHING. Continuing would run every
+                ' later step against whatever was already there - which is exactly how a
+                ' daily chain cleans last period's data and reports success. Contract
+                ' section 6: a chain stops at a refusal, and only asks on a failure.
+                stopped = True
+                refusedAt = True
+                Exit For
+            End If
             If Not AskContinue(n, CStr(res("label")), CStr(res("errText"))) Then stopped = True: Exit For
         End If
     Next stepId
@@ -1255,6 +1295,10 @@ Private Sub Core_RunChain(ByVal chainId As String)
     Dim head As String
     head = target("label") & IIf(stopped, "  - stopped at step " & n, "  - done") & _
            "  (" & ok & "/" & total & " ok)"
+    If refusedAt Then
+        head = head & vbCrLf & "Step " & n & " could not run, so the remaining " & _
+               (total - n) & " step(s) were skipped."
+    End If
     MsgBox head & vbCrLf & vbCrLf & summary, _
            IIf(stopped, vbExclamation, vbInformation), "Chain"
     Exit Sub
@@ -1269,6 +1313,14 @@ Private Function AskContinue(ByVal n As Long, ByVal label As String, ByVal reaso
     AskContinue = (MsgBox("Step " & n & "  '" & label & "'  failed:" & vbCrLf & vbCrLf & _
         reason & vbCrLf & vbCrLf & "Continue with the remaining steps?", _
         vbExclamation + vbYesNo, "Chain - step failed") = vbYes)
+End Function
+
+' "  #1004" for a real error, "" for a refusal. A refusal has no error number, and
+' a summary line reading "X #0 A sheet named 'Master' already exists" tells the user
+' their macro malfunctioned when it did exactly what it should.
+Private Function FailCode(res As Object) As String
+    On Error Resume Next
+    If CLng(res("errNumber")) <> 0 Then FailCode = "  #" & res("errNumber")
 End Function
 
 Private Function FirstLine(ByVal s As String) As String
