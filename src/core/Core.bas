@@ -180,7 +180,7 @@ Private Const END_KEY   As String = "_core_end"   ' sentinel key row: bounds the
 Private Const CHAINS_KEY As String = "k_core_chains"   ' Compose section: chains block sentinel (col A)
 Private Const LAYOUT_KEY As String = "k_core_layout"   ' Compose section: placement block sentinel (col A)
 Private Const RID_COL    As Long = 10                  ' Compose section: col J, hidden per-row id
-Private Const REMINDER_TEXT As String = "Actions are switched on. Click 'Finalize Setup Tab' and then 'Create Setup Tab' to reveal their option fields."
+Private Const REMINDER_TEXT As String = "Actions are switched on. Click 'Finalize Setup Tab', then 'Create Setup Tab' to show their option fields. Fill those in, then click 'Finalize Setup Tab' again to save them."
 
 ' ---- speed wrapper saved state (module-level, depth-counted) ----
 Private mSpeedDepth  As Long
@@ -875,11 +875,11 @@ Public Function Core_AlreadyOpen(ByVal fullPath As String) As Workbook
         "then run this again."
 End Function
 
-' "MIC!M2:M12", or "'MIC Data'!M2:M12" when the sheet name needs quoting.
+' "TabName!M2:M12", or "'TabName Data'!M2:M12" when the sheet name needs quoting.
 ' Range.Address omits the sheet name BY DESIGN, so every message that names a
 ' range must qualify it here or a cross-tab run is indistinguishable from a
 ' same-tab one - which is exactly what the owner hit at the v0.4.0 gate: three
-' PkgClean actions reported "M2:M12" whether they had acted on MIC or on the
+' PkgClean actions reported "M2:M12" whether they had acted on TabName or on the
 ' button's own tab.
 ' Lives in Core, not PkgClean: CLAUDE.md rule 4 puts shared helpers only in Core,
 ' and a copy in a package would be a standards deviation.
@@ -2279,6 +2279,58 @@ Fail:
     MsgBox "Core_BuildSetup error: " & Err.Description, vbExclamation, "Create Setup Tab"
 End Sub
 
+' Return the action ids, in declaration order, for fields that will actually render
+' under this section. Re-applying RenderTier's tier and FieldInUse tests prevents a
+' header from naming an action whose fields are in another tier or the off band;
+' trusting the section's declaration would let the scan drift from the lazy header.
+Private Function SectionActionIds(reg As Object, ByVal sectionIndex As Long, _
+                                  ByVal tier As String, availMap As Object, _
+                                  ByVal wantInUse As Boolean) As Collection
+    ' Explicit New, not "Dim result As New Collection" - the same call this file
+    ' already argues for at BuildRegistry: an auto-instantiating local silently
+    ' re-creates itself on the next reference after being set to Nothing.
+    Dim result As Collection, seen As Object, f As Object
+    Dim ids() As String, i As Long, j As Long, actionId As String
+
+    Set result = New Collection
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
+    For i = sectionIndex + 1 To reg("fields").Count
+        Set f = reg("fields")(i)
+        If f("kind") = "section" Then Exit For
+        If CStr(f("tier")) = tier Then
+            If FieldInUse(f, availMap) = wantInUse Then
+                If f.Exists("usedBy") Then
+                    If Len(Trim(CStr(f("usedBy")))) > 0 Then
+                        ids = Split(CStr(f("usedBy")), ",")
+                        For j = LBound(ids) To UBound(ids)
+                            actionId = Trim(ids(j))
+                            If Len(actionId) > 0 Then
+                                If Not seen.Exists(actionId) Then
+                                    seen.Add actionId, True
+                                    result.Add actionId
+                                End If
+                            End If
+                        Next j
+                    End If
+                End If
+            End If
+        End If
+    Next i
+    Set SectionActionIds = result
+End Function
+
+' Turn an ordered id list into the complete caption prefix. An empty list returns
+' an empty string so deployment-wide sections keep their original title unchanged.
+Private Function SectionActionPrefix(actionIds As Collection) As String
+    Dim actionId As Variant, prefix As String
+    For Each actionId In actionIds
+        If Len(prefix) > 0 Then prefix = prefix & ", "
+        prefix = prefix & ActionCaptionFor(CStr(actionId))
+    Next actionId
+    If Len(prefix) > 0 Then SectionActionPrefix = prefix & "  -  "
+End Function
+
 ' Render every field of the given tier whose in-use state matches wantInUse. When
 ' showSections is True, a section header is emitted just before its first matching
 ' field (so a section whose fields are all in the other tier is not drawn). When
@@ -2289,24 +2341,30 @@ Private Function RenderTier(ws As Worksheet, ByVal r As Long, reg As Object, _
                             ByVal bannerText As String, availMap As Object, _
                             ByVal wantInUse As Boolean) As Long
     Dim f As Object, pending As String, havePending As Boolean
-    For Each f In reg("fields")
+    Dim i As Long, pendingIndex As Long, actionIds As Collection
+    For i = 1 To reg("fields").Count
+        Set f = reg("fields")(i)
         If f("kind") = "section" Then
             ' Skip a section header that just repeats the package banner (a
             ' description identical to the header above it reads as a mistake).
             If UCase(Trim(CStr(f("label")))) <> bannerText Then
                 pending = CStr(f("label"))
+                pendingIndex = i
                 havePending = True
             End If
         ElseIf CStr(f("tier")) = tier Then
             If FieldInUse(f, availMap) = wantInUse Then
                 If showSections And havePending Then
-                    r = SectionHeader(ws, r, pending)
+                    Set actionIds = SectionActionIds(reg, pendingIndex, tier, _
+                                                     availMap, wantInUse)
+                    r = SectionHeader(ws, r, _
+                                      SectionActionPrefix(actionIds) & pending)
                     havePending = False
                 End If
                 r = RenderField(ws, r, reg, f)
             End If
         End If
-    Next f
+    Next i
     RenderTier = r
 End Function
 
@@ -2748,7 +2806,7 @@ End Function
 Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim existing As Collection, ch As Object, i As Long
     r = BlockIntro(ws, r, "Chains  -  one button that runs several actions in order", _
-                   "Button name + Steps (paste action ids from the Actions list, separated by commas) + Placement (1A, hide, or MIC!B4).")
+                   "Button name + Steps (paste action ids from the Actions list, separated by commas) + Placement (1A, hide, or TabName!B4).")
     ws.Cells(r, KEY_COL).Value = CHAINS_KEY
     ws.Cells(r, VAL_COL).Value = "Button name"
     ws.Cells(r, VAL_COL + 1).Value = "Steps (action ids, separated by commas)"
@@ -2759,7 +2817,7 @@ Private Function RenderChainsBlock(ws As Worksheet, ByVal r As Long) As Long
                "The older 'Caption [id]' form still works."
     HeaderNote ws.Cells(r, VAL_COL + 2), _
                "Placement forms: blank = automatic; 1A = page 1, column A; " & _
-               "hide = leave it off the pages; MIC!B4 = put the button on your own sheet at cell B4."
+               "hide = leave it off the pages; TabName!B4 = put the button at cell B4 on your own tab named TabName."
     r = r + 1
 
     Set existing = ReadChains(CfgSheet())          ' re-seed from activated config
@@ -3018,7 +3076,7 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                    "Placement: leave every code blank for the automatic layout; fill in even one " & _
                    "placement code and codes take over - number = page, letters = column (e.g. 1A). " & _
                    "Or put a button on one of your OWN tabs with  Sheet!Cell  - " & _
-                   "for example  MIC!B4  places it on cell B4 of the MIC tab, and " & _
+                   "for example  TabName!B4  places it on cell B4 of your own tab named TabName, and " & _
                    "does not change where any other button goes. " & _
                    "Type  hide  to leave any one button off, whether or not you use placement codes.")
     ' Reserve this row now and write its formula AFTER the action rows exist.
@@ -3044,7 +3102,7 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                "Chains only makes it usable inside a chain but gives it no button of its own."
     HeaderNote ws.Cells(r, VAL_COL + 2), _
                "Placement forms: blank = automatic; 1A = page 1, column A; " & _
-               "hide = leave it off the pages; MIC!B4 = put the button on your own sheet at cell B4."
+               "hide = leave it off the pages; TabName!B4 = put the button at cell B4 on your own tab named TabName."
     ' The machine-owned schema marker, in the hidden id column of the key row -
     ' NOT in the visible header. See Task 4 / contract section 5. Force Text so a
     ' General-formatted cell cannot coerce the marker to a number (belt-and-braces:
@@ -3077,6 +3135,12 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     ' formula rather than static text. The "<>" test excludes blanks: on a fresh
     ' import every cell reads Off and the line must stay empty.
     '
+    ' D1 gives the reminder empty E1:H1 to overflow across. Column D on the
+    ' reminder row holds the Setup Menu nav link, so column C has no empty
+    ' neighbour there; widening C would distort every block without removing
+    ' that overflow wall. AutoFit starts at firstContentRow (row 6), leaving a
+    ' row-1 write at its default height and preventing the clipping this move fixes.
+    '
     ' Compares against AvailLabel(AVAIL_OFF) - the "Off" actually written into
     ' the cell - not the AVAIL_OFF token "off". Excel's COUNTIFS text matching
     ' is believed case-insensitive, so the token would probably have worked, but
@@ -3091,7 +3155,9 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     Else
         f = "="""""
     End If
-    ws.Cells(reminderRow, VAL_COL).Formula = f
+    ws.Cells(1, 4).Formula = f
+    ws.Cells(1, 4).Font.Bold = True
+    ws.Cells(1, 4).Font.Color = RGB(150, 0, 0)
 
     ' ONE validation call over the exact block of action rows. Bounded to the
     ' rows actually written - never the whole column - so it cannot leak
@@ -3682,7 +3748,7 @@ End Function
 ' v0.4.0: a "Sheet!Cell" ANCHOR gets the same carve-out, and for the same reason.
 ' An anchor does not place a button on a generated page at all - it puts one on a
 ' sheet the engine otherwise never touches - so it is not a page-layout decision.
-' Without this, typing "MIC!B4" on ONE action would flip the workbook into manual
+' Without this, typing "TabName!B4" on ONE action would flip the workbook into manual
 ' mode and dump the other 81 buttons into page 1's Unassigned column. This is the
 ' third carve-out of the same shape; contract section 6 now carries the matching
 ' clause ("an anchor is NOT a placement code for the mode decision"), stated in
@@ -5213,7 +5279,7 @@ End Sub
 
 ' Resolve an anchor's sheet part to a Worksheet (Nothing when it does not exist)
 ' and hand back its cell part. The single place an anchor becomes objects, so the
-' Finalize checks and the placer cannot disagree about what "MIC!B4" resolves to.
+' Finalize checks and the placer cannot disagree about what "TabName!B4" resolves to.
 Private Function AnchorSheet(ByVal code As String, ByRef cellRef As String) As Worksheet
     Dim sh As String
     cellRef = ""
@@ -5536,7 +5602,7 @@ Private Function CodeKind(ByVal code As String) As String
     CodeKind = "page"
 End Function
 
-' "MIC!B4" / "'MIC Data'!$B$4" / "MIC Data!B4" -> sheetName "MIC Data",
+' "TabName!B4" / "'TabName Data'!$B$4" / "TabName Data!B4" -> sheetName "TabName Data",
 ' cellRef "B4". Returns False on anything malformed.
 '
 ' The sheet part may be quoted; an embedded apostrophe is doubled inside the
@@ -5564,8 +5630,8 @@ Private Function ParseAnchor(ByVal code As String, ByRef sheetName As String, _
         sh = Mid$(sh, 2, Len(sh) - 2)
         sh = Replace(sh, "''", "'")
     ElseIf Right$(sh, 1) = "'" And Len(sh) > 1 Then
-        ' EXCEL ATE THE OPENING QUOTE. Typing  'MIC Data'!B4  into a cell stores
-        ' the value  MIC Data'!B4  - a leading apostrophe is Excel's "treat this
+        ' EXCEL ATE THE OPENING QUOTE. Typing  'TabName Data'!B4  into a cell stores
+        ' the value  TabName Data'!B4  - a leading apostrophe is Excel's "treat this
         ' as text" prefix, consumed by the cell and stripped from .Value. It
         ' still shows in the formula bar, which is exactly what makes this so
         ' baffling to diagnose: the sheet plainly exists, the placement plainly

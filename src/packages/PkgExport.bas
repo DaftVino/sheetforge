@@ -26,7 +26,7 @@ Public Sub PkgExport_Manifest(reg As Object)
     Core_AddField reg, "k_export_folder", "Folder to write exported files to", "text", "", _
         "simple", _
         "Leave blank to use the folder this workbook is saved in - that is the usual " & _
-        "answer. Otherwise a full path, e.g. C:\Close\January.", _
+        "answer. Otherwise a full path, e.g. C:\Reports\January.", _
         "export.pdf,export.per_sheet,export.split_by_value,export.email"
     Core_AddField reg, "k_export_date_offset", "Date shift for exported file names (days)", "int", "-1", _
         "advanced", _

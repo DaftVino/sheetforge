@@ -392,21 +392,21 @@ either mode. Same-code buttons stack in authoring order. Core's own admin
 controls are never user-placeable.
 
 **Anchored placement (v1.2.0).** A placement value may instead take the form
-`<sheet>!<cell>` (e.g. `MIC!B4`), which anchors that one button to a single cell on a
+`<sheet>!<cell>` (e.g. `TabName!B4`), which anchors that one button to a single cell on a
 surface the user owns, rather than filing it onto a generated page. The
 discriminator is `!`. The two forms can never be confused — not because the platform
 forbids `!` in a surface name (Excel, for one, does not) but because a valid **page
 code** cannot contain `!` under the grammar above, so even a surface legitimately
 named `1A` is unambiguous. An implementation MUST split on the **last** `!`, so a
 surface whose own name contains one still resolves. The sheet part may
-be quoted (`'MIC Data'!B4`) or bare even when it contains spaces (`MIC Data!B4`); an
+be quoted (`'TabName Data'!B4`) or bare even when it contains spaces (`TabName Data!B4`); an
 embedded apostrophe is doubled inside the quotes. The cell part is a single A1
-reference with optional `$` (`MIC!$B$4`); a range (a colon) is rejected.
+reference with optional `$` (`TabName!$B$4`); a range (a colon) is rejected.
 
 **Normative, authoring-surface quirk (v1.2.0).** Where the authoring surface itself
 consumes a leading apostrophe — Excel treats one as a "this cell is text" prefix and
-strips it from the stored value, so a user who types `'MIC Data'!B4` into a cell
-stores `MIC Data'!B4` — an implementation MUST accept the resulting
+strips it from the stored value, so a user who types `'TabName Data'!B4` into a cell
+stores `TabName Data'!B4` — an implementation MUST accept the resulting
 opening-quote-less form and treat the orphaned closing quote as the eaten pair. Left
 unhandled, the quoted spelling this clause lists **first** is unreachable through
 that platform's own UI, and the user is told the surface does not exist while looking
