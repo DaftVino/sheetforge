@@ -8,15 +8,15 @@
 recalculate, build a summary table, freeze a pivot to values, and join in reference columns
 without a volatile lookup formula anywhere.
 
-**Architecture:** Two new packages, one new Core helper. `PkgSummarize` has four independent
+**Architecture:** Two new packages, no new Core helper. `PkgSummarize` has four independent
 actions - no two of them share real work, so there is no shared engine. `PkgEnrich` has two
 actions that ARE the same job with different inputs - `enrich.join` asks for everything at
 run time, `enrich.mapped_columns` reads four of its five inputs from Setup - so both delegate
 to one private `PkgEnrich_JoinEngine`, the same split `PkgImport`'s two combines already use
-for `PkgImport_CombineEngine`. Core gains one new helper, `Core_ResolveColumn`, because
-`PkgEnrich` needs the same letter-or-header column resolution `PkgClean_ResolveFormatCol`
-already has privately, and a second consumer is exactly the promotion trigger the
-Core-helper-promotion pass (phase 2) already established.
+for `PkgImport_CombineEngine`. `PkgEnrich` consumes `Core_ResolveColumn`, the letter-or-header
+column resolution phase 2 already promotes to Core
+(`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 2) - phase 2 also migrates
+`PkgClean_ResolveFormatCol`'s call site onto it, so this wave does not touch Core at all.
 
 **Tech stack:** VBA (Excel/Windows, one concatenated `.bas`), PowerShell for the build, Node
 for the syntax check. No test framework - see *Verification*.
@@ -67,7 +67,7 @@ than by omission.
 | 4 | A key present in the target but not the reference table? | **Left blank in the new columns, counted as unmatched, never refused.** A partial match is the ordinary outcome at month-end (a new store not yet in the master list), not an error condition. |
 | 5 | Does either side of a join, or the pivot builder, ever ask "is row 1 a header"? | **No - row 1 is always the header, on every range this wave prompts for.** `Core_AskHasHeader` exists and is available, but every use here needs the header text itself (to name new columns, or to name pivot fields) rather than just needing to skip it, so there is nothing to ask - the header's presence is a hard requirement stated in the prompt text ("include its header row"), not a run-time branch. This removes a whole class of "what if they say no" bugs at the cost of one constraint stated up front. |
 | 6 | `enrich.join`'s run-time key-column prompt returns a `Core_AskCols` result, which can name more than one column. What if the user names two? | **Refused, not silently narrowed to the first column.** A silent narrowing here is the same failure shape the duplicate-key question warns about, just moved one step earlier: a user who typed "1,2" meaning a composite key would get single-column matching with no indication anything was dropped, and their numbers would be wrong. Composite match keys are out of scope for v1 - refuse and name the count, rather than guess. |
-| 7 | `PkgEnrich` needs `PkgClean_ResolveFormatCol`'s letter-or-header column resolution. Copy it, or promote it? | **Promote it to Core now, as `Core_ResolveColumn` (Task 2), and leave `PkgClean_ResolveFormatCol` exactly where it is.** Phase 2 explicitly decided this helper stays private in `PkgClean` because it had one consumer at the time ("Each is one package's own job"). W4 gives it a second consumer, which is precisely phase 2's own promotion rule ("two consumers, or already duplicated"). Cross-package calls are forbidden, so copying it into `PkgEnrich` verbatim is a standards deviation this plan will not make; promoting is the only legal move that is not a deviation. `PkgClean.bas` itself is left untouched - migrating its existing call site onto the new Core helper is flagged as an escalation for a future cleanup pass, not done here, so this wave's diff stays inside the two packages it owns. |
+| 7 | `PkgEnrich` needs `PkgClean_ResolveFormatCol`'s letter-or-header column resolution. Copy it, or promote it? | **Neither - phase 2 already promoted it.** `Core_ResolveColumn` merges in phase 2 (`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 2), well before W4, with the exact signature this plan needs: `Core_ResolveColumn(rng As Range, ByVal spec As String) As Long`. Phase 2 also migrates `PkgClean_ResolveFormatCol`'s call site onto it and deletes that private, so the duplicate pair this plan once weighed - promote-and-leave-`PkgClean`-alone vs. copy - never exists: there is no second implementation to copy from and no private left in `PkgClean` to escalate a future cleanup pass against. W4 simply consumes the helper Core already has. |
 | 8 | `summarize.build_pivot`'s dimension/measure configuration - a config table, or run-time prompts? | **Fully run-time prompted, no config fields at all.** Which columns to group by and which to sum describes the range the caller is about to pick, not a deployment fact - the same normative rule contract §8 already states for `clean`'s withdrawn `clean_keycols`. Every value column is aggregated by SUM only; a per-column aggregation choice (average, count, ...) would need a second answer per measure, which is the config DSL this plan was explicitly told not to build. Anyone who needs a different aggregation can change the field's function by hand on the finished PivotTable - nothing here prevents that. |
 | 9 | `summarize.build_pivot`'s destination sheet name? | **Derived from the picked range's own reference (`Core_RangeRef`), safe-sheeted, refused via `Core_DestUsable` if taken.** A fixed name like "Summary" run twice in one session collides with itself on the second run; deriving from the range makes two summaries of two different ranges land on two different sheets without asking the user to type a name. |
 | 10 | `summarize.freeze_pivot` - which pivot range, and what does it preserve? | **`pt.TableRange2` (the whole visible pivot, including the report-filter area), copied as values + number formats + column widths.** `PasteSpecial xlPasteFormats` does not carry column width, so it is copied in a second explicit loop - otherwise the frozen copy would read correctly but not look like what was on screen, which defeats a "make it distributable" action. The source PivotTable is never refreshed and never written to - only read from via `.Copy`. |
@@ -107,7 +107,7 @@ Copied from `2026-07-28-track2-completion-plan-of-record.md` §4, binding on thi
 - **`dist/` is gitignored** - never `git add -f` the bundle. `.vscode/` stays untracked.
 - **No attribution footer, `Co-Authored-By`, or session URL** in any commit or PR body.
 - **No manual gate document.** Run-time-only claims go to
-  `docs/designs/2026-07-28-deferred-validation-log.md` (Task 10), per plan-of-record §3.5.
+  `docs/designs/2026-07-28-deferred-validation-log.md` (Task 9), per plan-of-record §3.5.
 - **Every package private carries its package prefix** (`PkgEnrich_JoinEngine`, never
   `JoinEngine`) - CLAUDE.md rule 4, enforced by `build.ps1`'s prefix guard once phase 2 ships.
 
@@ -123,10 +123,10 @@ Every task verifies with:
    packages of their own.
 2. `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` - no diagnostics.
 3. **A grep proving each new action id and field key exists exactly once** in its manifest.
-4. **A deliberate injection** (Task 9) proving `CoreCandidates()` registration actually
+4. **A deliberate injection** (Task 8) proving `CoreCandidates()` registration actually
    matters - the single easiest way to ship a dead wave, per the shared brief.
 5. Anything genuinely run-time-only (a live PivotTable, a live join over real data) is logged
-   in `docs/designs/2026-07-28-deferred-validation-log.md` (Task 10), not gated here.
+   in `docs/designs/2026-07-28-deferred-validation-log.md` (Task 9), not gated here.
 
 ---
 
@@ -135,7 +135,7 @@ Every task verifies with:
 | File | Change |
 |---|---|
 | `spec/contract.md` | v2.7.0. §8 gains a `summarize` package subsection (no fields, four actions) and an `enrich` package subsection (three fields, two actions); §10 gains the version entry. |
-| `src/core/Core.bas` | **+`Core_ResolveColumn`**, beside `Core_IsAlpha`. `CoreCandidates()` gains `c.Add "Summarize"` and `c.Add "Enrich"`. |
+| `src/core/Core.bas` | `CoreCandidates()` gains `c.Add "Summarize"` and `c.Add "Enrich"`. |
 | `src/packages/PkgSummarize.bas` | **New.** Manifest, four public entry points, no private helpers. |
 | `src/packages/PkgEnrich.bas` | **New.** Manifest, two public entry points, one private `PkgEnrich_JoinEngine`. |
 | `docs/designs/2026-07-28-deferred-validation-log.md` | Appended, not created (phase 1 creates it). |
@@ -151,7 +151,7 @@ is a slip every reviewer reads against.
 **Files:** Modify `spec/contract.md` - header (line 3), §8 (after the `clean` subsection,
 around line 797), §10 (top of the version list, around line 828).
 
-**Interfaces:** Consumes nothing. Produces the normative text Tasks 3-8 implement.
+**Interfaces:** Consumes nothing. Produces the normative text Tasks 2-7 implement.
 
 - [ ] **Step 1: Bump the version header**
 
@@ -232,7 +232,7 @@ grep -n "Package \`summarize\`\|Package \`enrich\`" spec/contract.md
 pwsh build/build.ps1
 ```
 
-Expected: both greps hit; the build still passes (Task 3/6's manifests are what makes the
+Expected: both greps hit; the build still passes (Task 2/5's manifests are what makes the
 domain-vocabulary parse meaningful, but the contract table itself already lists both domains
 `active`, so this build should already pass before any package code lands).
 
@@ -245,89 +245,7 @@ git commit -m "spec: contract v2.7.0 - summarize and enrich packages"
 
 ---
 
-### Task 2: Core gains `Core_ResolveColumn`
-
-**Owner: Opus, written directly.** This is Core, and it is a promotion decision (Decision 7)
-that needs to be readable as deliberate, not incidental.
-
-**Files:** Modify `src/core/Core.bas` - add beside `Core_IsAlpha` (phase 2, Task 2 Step 2).
-
-**Interfaces:**
-- Consumes: `Core_IsAlpha` (phase 2).
-- Produces: `Core_ResolveColumn(rng As Range, ByVal spec As String) As Long`. Tasks 4 and 5
-  depend on it.
-
-- [ ] **Step 1: Add the function**
-
-```vb
-' Resolve a "Column" spec against a range - a column LETTER (one to three
-' characters, e.g. B or AA) or a header NAME matched against the range's own
-' first row. The letter reading wins a tie, so a range whose header literally
-' reads "A" cannot be addressed by name; that is a call-site documentation
-' matter, not something to guess around here. Returns 0 when the column does
-' not resolve inside rng.
-'
-' PkgClean_StandardizeFormats has this exact algorithm today as a private
-' PkgClean_ResolveFormatCol (PkgClean.bas:470), left there by the
-' Core-helper-promotion pass because it had one consumer at the time. W4 gives
-' it a second - enrich.mapped_columns - so it is promoted now rather than
-' copied a third time; cross-package calls are forbidden, so copying was
-' never a legal option once a second consumer existed.
-'
-' Returns a column INDEX WITHIN rng, not a Range - PkgClean's original returns
-' a Range because its one caller sets a NumberFormat directly on it; this
-' helper's callers index into an in-memory array instead, so an index is what
-' they actually need.
-'
-' ESCALATION NOTE: PkgClean_ResolveFormatCol should move onto this helper in a
-' future cleanup pass, the same way PkgImport and PkgClean moved onto the
-' phase-2 helpers. Not done here, deliberately, to keep this wave's diff
-' inside the two packages it owns (PkgSummarize, PkgEnrich).
-Public Function Core_ResolveColumn(rng As Range, ByVal spec As String) As Long
-    Dim s As String, absCol As Long, i As Long, hdr As String
-    s = Trim(spec)
-    If Len(s) = 0 Then Exit Function
-
-    If Len(s) <= 3 And Core_IsAlpha(s) Then
-        On Error Resume Next
-        absCol = rng.Parent.Range(s & "1").Column
-        On Error GoTo 0
-        If absCol > 0 Then
-            If absCol >= rng.Column And absCol <= rng.Column + rng.Columns.Count - 1 Then
-                Core_ResolveColumn = absCol - rng.Column + 1
-            End If
-            Exit Function
-        End If
-    End If
-
-    For i = 1 To rng.Columns.Count
-        hdr = Trim(CStr(rng.Cells(1, i).Value))
-        If StrComp(hdr, s, vbTextCompare) = 0 Then
-            Core_ResolveColumn = i
-            Exit Function
-        End If
-    Next i
-End Function
-```
-
-- [ ] **Step 2: Build and syntax-check**
-
-```bash
-pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
-```
-
-Expected: exit 0, no diagnostics. `Function` count rises by one.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/core/Core.bas
-git commit -m "feat(core): Core_ResolveColumn, promoted ahead of enrich.mapped_columns"
-```
-
----
-
-### Task 3: `PkgEnrich` manifest and the shared join engine
+### Task 2: `PkgEnrich` manifest and the shared join engine
 
 **Owner: Opus, written directly.** The duplicate-key rule is the central design decision the
 brief calls out; it lives here and must be right once.
@@ -340,8 +258,8 @@ brief calls out; it lives here and must be right once.
 - Produces: `PkgEnrich_Manifest(reg As Object)`, and the private
   `PkgEnrich_JoinEngine(targetRng As Range, ByVal targetKeyCol As Long, lookupRng As Range,
   ByVal lookupKeyCol As Long, valueCols As Variant, newHeaders As Variant, ByRef matched As
-  Long, ByRef unmatched As Long, ByRef dupKeys As Long, ByRef appendedCols As Long)`. Tasks 4
-  and 5 both call it; nothing outside `PkgEnrich.bas` may.
+  Long, ByRef unmatched As Long, ByRef dupKeys As Long, ByRef appendedCols As Long)`. Tasks 3
+  and 4 both call it; nothing outside `PkgEnrich.bas` may.
 
 - [ ] **Step 1: Write the file header and manifest**
 
@@ -503,9 +421,9 @@ pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
 Expected: `PkgEnrich_Manifest` and `PkgEnrich_JoinEngine` are the only two procedures so far;
-the build should still pass structurally even with no actions calling the engine yet (Tasks 4
-and 5 add those). If `build.ps1`'s entry-point resolver complains about an action with no
-handler, that is expected until Task 4/5 land - do not silence it by adding a stub.
+the build should still pass structurally even with no actions calling the engine yet (Tasks 3
+and 4 add those). If `build.ps1`'s entry-point resolver complains about an action with no
+handler, that is expected until Task 3/4 land - do not silence it by adding a stub.
 
 - [ ] **Step 4: Commit**
 
@@ -516,7 +434,7 @@ git commit -m "feat(enrich): PkgEnrich manifest and the shared join engine"
 
 ---
 
-### Task 4: `enrich.join`
+### Task 3: `enrich.join`
 
 **Owner: Opus, written directly.** The brief names this "the valuable one" - it is where a
 finance user replaces a volatile formula with this action, and the multi-column-key refusal
@@ -527,7 +445,7 @@ finance user replaces a volatile formula with this action, and the multi-column-
 **Interfaces:**
 - Consumes: `Core_AskRange`, `Core_NarrowToUsed`, `Core_AskCols`, `Core_ParseCols`,
   `Core_Refuse`, `Core_Done`, `Core_Fail`, `Core_SpeedOn`, `Core_SpeedOff`, `Core_RangeRef`
-  (all phase 1/2), `PkgEnrich_JoinEngine` (Task 3).
+  (all phase 1/2), `PkgEnrich_JoinEngine` (Task 2).
 - Produces: `Public Sub PkgEnrich_Join(ctx As Object)`.
 
 - [ ] **Step 1: Add the action**
@@ -634,17 +552,17 @@ git commit -m "feat(enrich): enrich.join - ad hoc dictionary join, everything pi
 
 ---
 
-### Task 5: `enrich.mapped_columns`
+### Task 4: `enrich.mapped_columns`
 
-**Owner: Opus, written directly.** Shares the engine and the duplicate-key contract Task 4
+**Owner: Opus, written directly.** Shares the engine and the duplicate-key contract Task 3
 established; kept with the same owner for consistency across the pair.
 
 **Files:** Modify `src/packages/PkgEnrich.bas`.
 
 **Interfaces:**
-- Consumes: `Core_Cfg`, `Core_CfgTable`, `Core_SheetExists`, `Core_ResolveColumn` (Task 2),
-  `Core_AskRange`, `Core_NarrowToUsed`, `Core_Refuse`, `Core_Done`, `Core_Fail`,
-  `Core_SpeedOn`, `Core_SpeedOff`, `Core_RangeRef`, `PkgEnrich_JoinEngine` (Task 3).
+- Consumes: `Core_Cfg`, `Core_CfgTable`, `Core_SheetExists`, `Core_ResolveColumn` (Core, added
+  by phase 2), `Core_AskRange`, `Core_NarrowToUsed`, `Core_Refuse`, `Core_Done`, `Core_Fail`,
+  `Core_SpeedOn`, `Core_SpeedOff`, `Core_RangeRef`, `PkgEnrich_JoinEngine` (Task 2).
 - Produces: `Public Sub PkgEnrich_MappedColumns(ctx As Object)`.
 
 - [ ] **Step 1: Add the action**
@@ -758,8 +676,8 @@ pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
 Expected: exit 0, no diagnostics, `Core + N package(s)` where `N` includes `Enrich` for the
-first time (registration is Task 9 - until then `PkgEnrich`'s actions build and bundle but
-Core never calls them; that gap is expected and closed by Task 9, not here).
+first time (registration is Task 8 - until then `PkgEnrich`'s actions build and bundle but
+Core never calls them; that gap is expected and closed by Task 8, not here).
 
 - [ ] **Step 3: Commit**
 
@@ -770,7 +688,7 @@ git commit -m "feat(enrich): enrich.mapped_columns - config-driven join sharing 
 
 ---
 
-### Task 6: `PkgSummarize` manifest, `refresh_pivots`, `recalculate`
+### Task 5: `PkgSummarize` manifest, `refresh_pivots`, `recalculate`
 
 **Owner: delegate to codex (`sonnet`).** Both actions are short, pattern-matched closely off
 the legacy code already in `PkgImportExport.bas:178-188`, and carry no design decision this
@@ -934,7 +852,7 @@ git commit -m "feat(summarize): PkgSummarize manifest, refresh_pivots and recalc
 
 ---
 
-### Task 7: `summarize.build_pivot`
+### Task 6: `summarize.build_pivot`
 
 **Owner: Opus, written directly.** Real `PivotCaches.Create` / `CreatePivotTable` /
 `PivotFields` API risk - the most Excel-specific code in this wave, per the brief.
@@ -1046,7 +964,7 @@ git commit -m "feat(summarize): summarize.build_pivot - PivotTable from a picked
 
 ---
 
-### Task 8: `summarize.freeze_pivot`
+### Task 7: `summarize.freeze_pivot`
 
 **Owner: Opus, written directly.** Judgment calls on what "preserves the visible layout"
 means (`TableRange2`, explicit column widths) and the never-modify-source-pivot guarantee.
@@ -1141,7 +1059,7 @@ git commit -m "feat(summarize): summarize.freeze_pivot - copy a pivot to static 
 
 ---
 
-### Task 9: `CoreCandidates()` registration
+### Task 8: `CoreCandidates()` registration
 
 **Owner: delegate to codex (`sonnet`).** Two-line mechanical add, but this is the single
 easiest way to ship a dead wave (shared brief) - the deliberate injection in Step 3 is not
@@ -1150,8 +1068,8 @@ optional.
 **Files:** Modify `src/core/Core.bas` - `CoreCandidates()` (`:952` as of this writing; confirm
 via `docs/code-map.md` before editing, since phases 1/2 and W2/W3 add code above it first).
 
-**Interfaces:** Consumes `PkgSummarize_Manifest`, `PkgEnrich_Manifest` (Tasks 3 and 6).
-Produces nothing new - this is what makes Tasks 3-8's actions reachable at all.
+**Interfaces:** Consumes `PkgSummarize_Manifest`, `PkgEnrich_Manifest` (Tasks 2 and 5).
+Produces nothing new - this is what makes Tasks 2-7's actions reachable at all.
 
 - [ ] **Step 1: Add both packages to the candidate list**
 
@@ -1200,7 +1118,7 @@ Expected: the build still succeeds with the line commented out (this is exactly 
 `build.ps1` cannot catch a missing registration, only a run-time check or a human reading the
 Setup tab can). Record in the PR body that this was tried and that the bundle's own build
 output gives no signal either way - the run-time confirmation belongs in
-`docs/designs/2026-07-28-deferred-validation-log.md` (Task 10).
+`docs/designs/2026-07-28-deferred-validation-log.md` (Task 9).
 
 - [ ] **Step 4: Commit**
 
@@ -1211,7 +1129,7 @@ git commit -m "feat(core): register PkgSummarize and PkgEnrich in CoreCandidates
 
 ---
 
-### Task 10: Version, changelog, code map, deferred-validation log, PR
+### Task 9: Version, changelog, code map, deferred-validation log, PR
 
 **Owner: Opus.**
 
@@ -1257,7 +1175,7 @@ the track. Append a new `## W4` section:
 - `summarize.refresh_pivots` skipping engine-owned sheets via `Core_IsEngineSheet`, and
   correctly naming a pivot that fails to refresh, has not been run against a workbook with
   a genuinely broken pivot connection.
-- `CoreCandidates()` registration for `Summarize` and `Enrich` (Task 9): confirmed the build
+- `CoreCandidates()` registration for `Summarize` and `Enrich` (Task 8): confirmed the build
   gives no signal either way when the line is missing; NOT confirmed that both packages'
   buttons actually appear on the generated Setup/Macros pages when registered.
 ```
@@ -1289,13 +1207,13 @@ merged, per plan-of-record §2.
 **The PR body must state, in one line each:** that the legacy `PkgImportExport_Import` pivot
 refresh/recalc loop was deliberately left untouched (Decision 1); that
 `enrich.join`/`enrich.mapped_columns` share one engine and its duplicate-key rule is
-first-wins-and-counted, never a refusal (Decisions 2-4); and the two Task 9 injection results.
+first-wins-and-counted, never a refusal (Decisions 2-4); and the two Task 8 injection results.
 
 ---
 
 ## Unknowns and risks
 
-- **`summarize.build_pivot`'s duplicate-header-name gap** (Task 7): a source range with two
+- **`summarize.build_pivot`'s duplicate-header-name gap** (Task 6): a source range with two
   columns sharing a header text makes `pt.PivotFields(hdr)` ambiguous. No shipped source
   produces this today, so it is left as a known gap rather than solved here - fixing it would
   mean generating and tracking synthetic unique field names, which is a bigger change than
@@ -1304,14 +1222,11 @@ first-wins-and-counted, never a refusal (Decisions 2-4); and the two Task 9 inje
   scratch even inside a chain that calls it twice in a row against the same reference table.
   Acceptable for a per-run action; would need a cached dictionary keyed by range address if a
   later wave wants a "join against the same reference table N times" chain step.
-- **Core_ResolveColumn vs. PkgClean_ResolveFormatCol now differ by return type** (index vs.
-  Range) despite sharing an algorithm - flagged as an escalation (Decision 7), not fixed, to
-  keep this wave's diff inside the two packages it owns.
 - **The `On Error Resume Next` / `On Error GoTo Fail` toggle inside
   `PkgSummarize_RefreshPivots`'s inner loop** is the same shape the legacy code already uses
   and is assumed safe on the same basis - VBA's error handler stack tolerates being
   re-armed per iteration - but has not been stress-tested against a pivot that raises
   mid-`RefreshTable` in a way that corrupts the loop's own state.
 - **All run-time-only claims** are listed in `docs/designs/2026-07-28-deferred-validation-log.md`
-  (Task 10) rather than gated here, per plan-of-record §3.5 - none of this wave's PivotTable
+  (Task 9) rather than gated here, per plan-of-record §3.5 - none of this wave's PivotTable
   or join behavior has run against a real Excel session.
