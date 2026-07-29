@@ -207,7 +207,7 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
     Dim hdr As Variant, lastRow As Long, lastCol As Long, dLast As Long
     Dim j As Long, outR As Long, n As Long, k As Long
     Dim cols As Collection, nCols As Long, srcCol() As Long, missing As String
-    Dim mPrefix As String, mSheet As String, mDest As String
+    Dim mPrefix As String, mSheet As String, mDest As String, nMissing As Long
     On Error GoTo Fail
 
     mPrefix = Core_Cfg(ctx, "k_master_prefix")
@@ -255,14 +255,22 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
 
     For k = 1 To nCols
         srcCol(k) = Core_FindCol(hdr, CStr(cols(k)))
-        If srcCol(k) = 0 Then missing = missing & vbCrLf & "   - " & cols(k)
+        If srcCol(k) = 0 Then
+            missing = missing & vbCrLf & "   - " & cols(k)
+            nMissing = nMissing + 1
+        End If
     Next k
     If Len(missing) > 0 Then
         wbSrc.Close SaveChanges:=False
         Application.AskToUpdateLinks = True
         Core_SpeedOff
-        Core_Refuse ctx, "Could not find these column header(s) on sheet '" & mSheet & "':" & missing, _
-               "Update Ref_Master"
+        ' The COUNT goes on the first line, because that line is all a chain summary
+        ' shows. "Could not find these column header(s) on sheet 'X':" with every name
+        ' below the break reports that something is missing without saying how much,
+        ' which is the one fact this message exists to carry.
+        Core_Refuse ctx, "Could not find " & nMissing & " column header(s) on sheet '" & _
+               mSheet & "'." & missing & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", "Update Ref_Master"
         Exit Sub
     End If
 
