@@ -176,7 +176,7 @@ End Sub
 ' Core_Fail see the error directly.
 '
 ' It closes ONLY the workbooks it opened itself. weOpened tracks that per
-' source - see PkgImport_AlreadyOpen for why the distinction is the
+' source - see Core_AlreadyOpen for why the distinction is the
 ' difference between a combine and a colleague losing an afternoon.
 '================================================================
 Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As String, _
@@ -210,7 +210,7 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
             ' discard your changes" prompt never appears, and this action would report a
             ' successful combine over the top of it. Sources and this workbook usually sit
             ' in one folder, so somebody having a source open is the ordinary case here.
-            Set wbSrc = PkgImport_AlreadyOpen(CStr(one))
+            Set wbSrc = Core_AlreadyOpen(CStr(one))
             If wbSrc Is Nothing Then
                 Set wbSrc = Workbooks.Open(Filename:=CStr(one), ReadOnly:=True, UpdateLinks:=0)
                 weOpened = True                  ' ours to close; an already-open one is not
@@ -566,47 +566,6 @@ Private Function PkgImport_WorkbookPaths(ByVal folderPath As String) As Collecti
         End If
     Next one
     Set PkgImport_WorkbookPaths = out
-End Function
-
-' The workbook at this path IF it is already open in this Excel instance, else
-' Nothing. The caller uses what comes back in place and does NOT close it.
-'
-' This exists because Workbooks.Open is not a question - it is an answer. Handed a
-' path that is already open it returns the open workbook, ReadOnly:=True and all,
-' complete with whatever the user has typed and not yet saved. Closing that with
-' SaveChanges:=False discards their work, and under Core_SpeedOn DisplayAlerts is
-' False, so the prompt Excel would normally raise ("reopening will discard your
-' changes") never reaches them. They would see a combine report success and lose an
-' afternoon's edits in the same second.
-'
-' Probed by FILE NAME, because that is how the Workbooks collection is keyed - there
-' is no lookup by path. The name alone is not proof of identity, so the path is
-' confirmed afterwards: k_import_folder routinely points somewhere other than this
-' workbook's folder, and a close folder full of "January.xlsx" is the everyday shape
-' of this data. A same-name / different-path collision is raised rather than guessed
-' at - Excel will not hold two workbooks of one name open, so the combine cannot
-' proceed either way, and saying so beats silently combining last month's file.
-Private Function PkgImport_AlreadyOpen(ByVal fullPath As String) As Workbook
-    Dim wb As Workbook, nm As String, openPath As String
-    nm = Core_FileName(fullPath)
-    If Len(nm) = 0 Then Exit Function
-
-    On Error Resume Next
-    Set wb = Workbooks(nm)
-    On Error GoTo 0
-    If wb Is Nothing Then Exit Function          ' not open: the caller opens it itself
-
-    On Error Resume Next
-    openPath = wb.FullName
-    On Error GoTo 0
-    If StrComp(openPath, fullPath, vbTextCompare) = 0 Then
-        Set PkgImport_AlreadyOpen = wb
-        Exit Function
-    End If
-    Err.Raise vbObjectError + 1025, "PkgImport_AlreadyOpen", _
-        "A different workbook named '" & nm & "' is already open (" & openPath & "). " & _
-        "Excel cannot have two workbooks of the same name open at once. Close that one, " & _
-        "then run this again."
 End Function
 
 ' A sheet name from a file name: drop the extension, replace the characters

@@ -827,6 +827,52 @@ Private Function IsAllDigits(ByVal s As String) As Boolean
     IsAllDigits = True
 End Function
 
+' The workbook at this path IF it is already open in this Excel instance, else
+' Nothing. The caller uses what comes back IN PLACE and does NOT close it.
+'
+' This exists because Workbooks.Open is not a question - it is an answer. Handed a
+' path that is already open it returns the open workbook, ReadOnly:=True and all,
+' complete with whatever the user has typed and not yet saved. Closing that with
+' SaveChanges:=False discards their work, and under Core_SpeedOn DisplayAlerts is
+' False, so the prompt Excel would normally raise ("reopening will discard your
+' changes") never reaches them. They would see the action report success and lose an
+' afternoon's edits in the same second.
+'
+' Probed by FILE NAME, because that is how the Workbooks collection is keyed - there
+' is no lookup by path. The name alone is not proof of identity, so the path is
+' confirmed afterwards: a configured source folder routinely points somewhere other
+' than this workbook's folder, and a close folder full of "January.xlsx" is the
+' everyday shape of this data. A same-name / different-path collision is raised
+' rather than guessed at - Excel will not hold two workbooks of one name open, so
+' the action cannot proceed either way, and saying so beats silently reading last
+' month's file.
+'
+' Lives in Core because two packages need it. PkgImport found this the expensive
+' way at the W1 gate; PkgImportExport's import and updateMaster had the identical
+' defect and were only found by reviewing this pass's diff.
+Public Function Core_AlreadyOpen(ByVal fullPath As String) As Workbook
+    Dim wb As Workbook, nm As String, openPath As String
+    nm = Core_FileName(fullPath)
+    If Len(nm) = 0 Then Exit Function
+
+    On Error Resume Next
+    Set wb = Workbooks(nm)
+    On Error GoTo 0
+    If wb Is Nothing Then Exit Function          ' not open: the caller opens it itself
+
+    On Error Resume Next
+    openPath = wb.FullName
+    On Error GoTo 0
+    If StrComp(openPath, fullPath, vbTextCompare) = 0 Then
+        Set Core_AlreadyOpen = wb
+        Exit Function
+    End If
+    Err.Raise vbObjectError + 1025, "Core_AlreadyOpen", _
+        "A different workbook named '" & nm & "' is already open (" & openPath & "). " & _
+        "Excel cannot have two workbooks of the same name open at once. Close that one, " & _
+        "then run this again."
+End Function
+
 ' "TabName!M2:M12", or "'TabName Data'!M2:M12" when the sheet name needs quoting.
 ' Range.Address omits the sheet name BY DESIGN, so every message that names a
 ' range must qualify it here or a cross-tab run is indistinguishable from a
