@@ -6,7 +6,64 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-07-27
+## [0.10.0] - 2026-07-28
+
+### Added
+
+- **Seven new actions, and together they finish a job rather than sampling features.**
+  Three bring data in — combine every sheet in this workbook, combine every workbook in a
+  folder, import a delimited file — and four clean it up: remove blank rows and columns,
+  unmerge and fill down, standardize number formats, convert text to real numbers. With the
+  three cleaning actions that already shipped, they chain into one raw-files-to-clean-dataset
+  run you can wire to a single button the day you import this.
+
+  **The two combines line columns up by their header names, not by position.** A source
+  whose `Amount` sits in column D still lands under `Amount`, and a header no earlier
+  source declared becomes a new column on the right. A position-based combine quietly
+  scrambles a real month-end folder, which is the failure this exists to prevent.
+
+  **Neither combine will overwrite a sheet.** If the destination name is taken, the action
+  stops before touching anything and tells you which sheet is in the way. The standard
+  published version of this macro opens by deleting the existing sheet; that line does not
+  exist here.
+
+  **Removing blank rows shows you the count first and waits for a yes.** It also refuses to
+  delete a row that is blank inside your selection but holds data outside it, and says how
+  many it held back. The restore-point action that would make this safer is four waves
+  away, so the preview is the safety story.
+
+- **The build now refuses to ship a wrong action id.** Ids are permanent — there is no
+  alias table, by design, because an alias means two names for one action forever and both
+  would have to be ported to Apps Script. So a wrong id is unfixable, and the only useful
+  time to catch one is before it exists.
+
+  The gate reads its vocabulary of nine domains out of `spec/contract.md` rather than
+  keeping a second copy, and fails the build if that table is missing, duplicated or
+  malformed — never falling back to a built-in list, because a gate that quietly disables
+  itself when its input goes missing is worse than no gate. It rejects a duplicate id, a
+  camelCase id, an id in a reserved namespace, a new id in the closed legacy domain, and an
+  entry point that is not actually dispatchable.
+
+### Changed
+
+- **`spec/contract.md` is v2.3.0**: §7 gains the nine-domain vocabulary table it was always
+  assumed to have, §8 gains the `import` package and the new `clean` field and actions.
+  Additive throughout — `SCHEMA_VER` stays `"v2.0"` and every existing configuration keeps
+  its meaning.
+
+- **§7 no longer says an action id is `pkg.verb`.** It never really was: the first segment
+  is a user-facing vocabulary word, deliberately decoupled from the module that implements
+  it, so that splitting a package later is not a contract break. `import.*` actions live in
+  the new `PkgImport` while `importexport.import` stays where it is, and both appear on the
+  same card.
+
+### Fixed
+
+- **`build.ps1` matched VBA keywords case-sensitively.** VBA is not case-sensitive, so a
+  module written `public sub` slipped past the duplicate-name, block-balance and
+  declaration-order guards — it balanced against nothing and was invisible to all three.
+  Every pattern that matches VBA syntax now ignores case. Action ids are still matched
+  case-sensitively, because there the case rule is the point.
 
 ### Changed
 

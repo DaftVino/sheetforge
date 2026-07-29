@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.2.0** (2026-07-27) · SemVer, independent of the
+**Contract version: 2.3.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -296,7 +296,7 @@ An action is one thing a package *does* (it becomes a button). Each action is:
 
 | Field | Meaning |
 |---|---|
-| `id` | Dotted `pkg.verb` token, globally unique (`importexport.import`, `clean.dupes`). |
+| `id` | Dotted `<domain>.<operation>` token, globally unique (`import.combine_worksheets`, `clean.dupes`). The domain is a controlled user-facing vocabulary, **not** the package that implements it — see §7 for the vocabulary table and the full rule. |
 | `caption` | Button label (may carry an ordinal, e.g. `"2.  Import Source Data"`). |
 | `help` | Plain-language description shown on/near the button. |
 | `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on an index surface where a platform provides one (§6), and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
@@ -552,7 +552,68 @@ cells are forbidden on this grid precisely because Excel's AutoFit ignores them.
 - **Package id** — lowercase short token, unique.
 - **Field key** — opaque token, **unique across all enabled packages** (single
   shared config namespace). Namespace by convention (`k_*`, `clean_*`).
-- **Action id** — `pkg.verb`, unique.
+- **Action id** — `<domain>.<operation>`, unique, exactly two segments. Each segment
+  **begins with a lowercase ASCII letter** and continues with lowercase ASCII letters,
+  digits and underscores. (The leading-letter rule is stated because the build gate
+  enforces it; without it here, the gate would be stricter than the contract it claims to
+  implement.) **The domain is a controlled user-facing vocabulary, NOT the package or
+  module that implements it** — an action id is a permanent dispatch key stored in the
+  config (§5), so encoding the module in it would make a future package split a major
+  contract break for no benefit. The operation segment is
+  descriptive where ambiguity looms (`clean.remove_blank_rows`, never `clean.blank2`).
+  **No new id is ever camelCase.** Ids are immutable; captions, help text, entry points
+  and module assignment stay free to change. There is no alias or migration table, by
+  design: an alias means two permanent names for one action and would have to be ported to
+  Apps Script.
+
+  **The vocabulary is the table below, and it is normative.** The marker comment appears on
+  its own line above it — a blank line may separate the two — and is a parse anchor:
+  `build/build.ps1` reads the table from this file
+  and fails a build whose action ids use a domain that is not listed `active` or
+  `grandfathered`. Do not reformat the table, rename its columns, or remove the marker
+  without changing that parser in the same commit.
+
+  **Machine-readable constraints, because a build gate reads this table.** The marker
+  appears **exactly once** in this document. The header row is exactly
+  `| domain | status | meaning |` and is followed by exactly `|---|---|---|`. Every row
+  between the header and the terminating blank line is a data row of the form
+  `` | `<domain>` | <status> | <meaning> | `` where `<status>` is one of `active`,
+  `reserved`, `grandfathered`. **No cell may contain a `|` character** — there is no
+  escaping rule and none is wanted; a pipe would corrupt the rendered table as well as the
+  parse. A domain appears at most once. The parser **fails the build** on any violation
+  rather than skipping the offending row: a gate that quietly parses eleven of twelve rows
+  still goes green while silently permitting the twelfth domain.
+
+<!-- action-domain-vocabulary -->
+
+| domain | status | meaning |
+|---|---|---|
+| `import` | active | Bringing outside data into the workbook: files, folders, other sheets. |
+| `clean` | active | Repairing data already present: blanks, duplicates, merges, text that should be numbers. |
+| `validate` | active | Checking data against a rule and reporting what fails; never repairs silently. |
+| `enrich` | active | Adding derived or looked-up columns from a reference table. |
+| `format` | active | Presentation only: number formats, styles, print layout. Changes no value. |
+| `summarize` | active | Aggregating: pivots, recalculation, summary sheets, charts. |
+| `export` | active | Writing data out of the workbook: files, PDFs, values-only snapshots. |
+| `workbook` | active | Housekeeping on the workbook itself: sheet visibility, protection, ordering, navigation. |
+| `backup` | active | Restore points: timestamped copies, pre-operation snapshots, archives. |
+| `chain` | reserved | Engine chains (section 6). No package action id may use it. |
+| `core` | reserved | Engine-internal sentinels (v2.1.0, this section). No package action id may use it. |
+| `importexport` | grandfathered | The pre-v1.2.0 package-named domain. Its five shipped ids are permanent; no new id may be added to it. It is direct evidence for the domain-is-not-the-module rule above. |
+
+**The eight shipped ids are permanent exceptions**, listed literally, never renamed and
+never aliased: `clean.dupes`, `clean.trim`, `clean.filldown`, `importexport.clear`,
+`importexport.import`, `importexport.updateMaster`, `importexport.export`,
+`importexport.suggestTypes`. Two are camelCase and the `importexport` domain conflates two
+different jobs; both stay exactly as they are, and the rules above exist because of them.
+
+**Enforcement, in two places.** The engine rejects a duplicate id during registry
+assembly, which protects a hand-edited bundle. The build gate extracts literal action-id
+declarations from source and fails on a duplicate, a malformed id, a reserved domain, a new
+id in a grandfathered domain, an unknown domain, or an entry point no source declares as
+dispatchable. A platform without a build step performs the equivalent checks at
+manifest-assembly time.
+
 - **Reserved:** the id namespace `chain.*` is reserved for engine chains; no package action id may use it.
 - **Reserved (v2.1.0):** the action-id namespace `core.*` is reserved for engine-internal
   sentinels; no package action id may use it. The reference implementation uses
@@ -646,13 +707,64 @@ Demo default rows (`|`-delimited): `IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N
 | `importexport.export` | `4.  Export Dashboard (.xlsx)` | Write a **values-only** snapshot of the `k_export_tabs` (in order) to a dated file (§ base/offset). Flatten dynamic-array spills, legacy CSE arrays, and formulas to static values; keep formatting, filters, and conditional formatting; break external links. |
 | `importexport.suggestTypes` | Suggest Import Types | Setup helper: after the input tabs + source prefixes are filled, open each matched source file, sample it, and write a **suggested** type-map for review (never applied silently; ID/code columns flagged to stay `T`). |
 
+### Package `import` — "Bring Data In" (v1.0.0, contract v2.3.0)
+
+A second package in the `import` domain. `importexport.import` keeps its id and its
+module; both packages' actions declare the display category `Import / Export`, so the user
+sees one coherent card while the modules stay whatever is convenient to maintain (§7's
+domain-is-not-the-module rule, realized).
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_import_dest` | text | simple | `Master` | Name of the **new** sheet a combine action creates. `usedBy` the two combines. A conforming implementation MUST create this sheet and MUST NOT overwrite, clear or delete an existing sheet of that name — if one exists the action MUST stop before changing anything and say so, naming the sheet. Kind is `text`, deliberately **not** `sheet`: a `sheet` field is validated at activation to **exist**, and this one must not. |
+| `k_import_folder` | text | simple | *(blank)* | Folder the workbook combine reads from. **Blank means the deployment's data location** (§9 — the workbook's containing folder in Excel, a Drive folder in Sheets), which is the common case and the reason the default is blank rather than a path. `usedBy` `import.combine_workbooks`. |
+| `k_import_delim` | text | advanced | `comma` | Column separator for delimited files. Token vocabulary: `comma`, `tab`, `semicolon`, `pipe`, `space`; any other non-blank value is read as **the literal separator character** (its first character). Blank reads as `comma`. `usedBy` `import.delimited_file`. |
+| `k_import_qualifier` | text | advanced | `"` | The character wrapping text that itself contains the separator. `"` (double quote), `'` (single quote), or the token `none` to disable qualification entirely. **A blank cell reads as the declared default `"`, not as `none`** — §5's blank-means-never-set rule resolves a blank to the manifest default, so `none` must be typed to be meant. Any other value also reads as `"`. `usedBy` `import.delimited_file`. |
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `import.combine_worksheets` | Combine All Worksheets | Stack every data sheet in this workbook into one new sheet named `k_import_dest`, **aligning columns by header text, not by position**: a source's `Amount` column lands under the master `Amount` wherever it sits, and a header no earlier source declared is appended as a new column on the right. Row 1 of each source is its header and is not repeated. Two columns sharing a header *within one source* MUST NOT overwrite each other. Engine-owned sheets (the Setup surface, the config store and its staging sheet, the package-enable sheet, and every generated button page) MUST be excluded — and only those: a user sheet whose name merely resembles a generated one MUST still be combined. If `k_import_dest` already names an existing sheet the action MUST stop having changed nothing. A failure part-way MUST leave no partially built destination sheet behind. |
+| `import.combine_workbooks` | Combine All Workbooks in a Folder | As `import.combine_worksheets`, but the sources are the first worksheet of every workbook in `k_import_folder`, excluding this workbook itself. Each source is opened read-only and closed without saving, one at a time. Same header alignment, same refusal, same partial-failure cleanup. A missing folder, and a blank folder setting in a workbook that has never been saved, MUST each be reported as themselves rather than surfacing as an engine error. |
+| `import.delimited_file` | Import a Delimited File | Prompt for one delimited file; parse it with the explicit separator and text qualifier from config rather than letting the platform guess; write it to a new sheet named after the file. Same refusal rule as the combines if that sheet name is taken. The prompt MUST offer a cancel that abandons the action having changed nothing. A failure after the file is opened MUST leave neither the opened source nor a partial destination sheet behind. |
+
 ### Package `clean` — "Clean & Standardize" (v1.0.0)
 
 **Fields**
 
-**None (v2.0.0).** `clean` declares no configuration fields at all, and a
-conforming implementation MUST therefore render no configuration band for it —
-see §2's rule on a package with no visible fields.
+**One field (v2.3.0).** `clean` declared no configuration fields at all from v2.0.0 to
+v2.2.0. It now declares exactly one:
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_clean_formats` | table | simple | **none** | Column-to-number-format map for `clean.standardize_formats`. Two columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks) and **Number format** (a platform number-format string). A row whose Column resolves to nothing inside the picked range MUST be reported, not silently skipped. `usedBy` `clean.standardize_formats`. |
+
+`k_clean_formats` header: `Column (letter or header name)|Number format`.
+
+**This field declares NO default rows, and that is normative, not incidental.** §5's
+fallback resolves an empty stored table to the field's declared defaults — so a field that
+declared demo rows could never observe "the user configured nothing", and
+`clean.standardize_formats`' required refusal below would be unreachable. It is also the
+difference between an action that does nothing until told and one that silently applies a
+demo date format to whatever range a first-time user picked. A conforming implementation
+MUST NOT ship default rows for this field.
+
+`k_import`'s demo rows (§8, package `importexport`) are the opposite case and stay: a
+three-column type map is genuinely hard to guess from an empty grid, and its action already
+refuses to run against tabs that do not exist, so a stale demo row cannot silently act on
+real data. Worked examples for `k_clean_formats` live in its help text instead, where they
+teach without becoming stored configuration.
+
+**This does not reopen the rule below, it satisfies it.** A house number format is a fact
+about the deployment — the same columns get the same formats every close — not a fact
+about the range the caller is about to pick, which is precisely the distinction the
+withdrawn fields failed. Resolution by **column letter or header name**, never by position
+within the selection, is what keeps it on the deployment side of that line: a position
+counted from the left of a selection that does not exist yet would be the withdrawn
+`clean_keycols` under a new name.
 
 It previously declared `clean_keycols` and `clean_hasheader`. Both were withdrawn
 because each describes **the range the caller selects**, not the
@@ -678,6 +790,10 @@ time (see §3, `range` note).
 | `clean.dupes` | Remove Duplicates | Prompt for a range; then prompt for **(a)** whether that range's first row is a header and **(b)** which column(s), numbered from the LEFT of that range, decide a duplicate. Remove duplicate rows accordingly; a header row is excluded from comparison and never removed. Each of the three prompts MUST offer a cancel that abandons the action having changed nothing, and MUST be distinguishable from an empty answer. A column number outside the selected range MUST be rejected before any edit, naming the range's width. The completion report MUST state which header interpretation was applied, since it is not recoverable from the result. |
 | `clean.trim` | Trim & Clean Text | Prompt for a range; strip leading/trailing spaces, collapse double spaces, remove non-printing characters. |
 | `clean.filldown` | Fill Blanks Down | Prompt for a range; fill each blank cell with the value from the cell above it. |
+| `clean.remove_blanks` | Remove Blank Rows & Columns | Prompt for a range; find every entirely blank row and column inside it. **Delete only those that are also blank across the whole sheet's used extent**, so deleting a whole row can never destroy data sitting outside the caller's selection; report the ones held back and why. Before deleting anything, show a count of exactly what will go and require an explicit confirmation; declining or cancelling MUST change nothing. The completion report MUST state both counts, because neither is recoverable from the result. |
+| `clean.unmerge_fill` | Unmerge & Fill Down | Prompt for a range; unmerge every merged block **wholly inside** it and write the block's value into every cell it covered. A block crossing the selection's edge MUST be left alone and reported — unmerging it would change cells the caller did not select. A merge anchor holding a formula MUST keep its formula; the cells it covered receive the computed value. |
+| `clean.standardize_formats` | Standardize Formats | Prompt for a range; apply each `k_clean_formats` row's number format to that row's column **within the picked range only**. Changes formatting, never a stored value. A mapping row that resolves to no column in the picked range MUST be reported by name, not silently dropped. With no rows configured, the action MUST stop and say where to configure them (see the field's no-defaults rule above, which is what makes this state observable). |
+| `clean.text_to_numbers` | Convert Text to Numbers | Prompt for a range; convert text that represents a number into a real number, using **the same coercion the import action uses** (§8, column-type code `N`) rather than a second implementation. Formula cells are never touched. Text the coercion cannot parse is left exactly as it is. The completion report MUST state how many cells changed. **Known limitation, stated because it is visible to the user:** the `N` coercion strips a trailing `%`, so `12%` becomes the number `12`, not `0.12`. |
 
 ---
 
@@ -736,6 +852,20 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.3.0 (additive):** the action-id domain vocabulary becomes a normative, marked table
+  in §7 and the enforcement it always described becomes real; a new package `import` with
+  four fields and three actions (§8); one new `clean` field and four new `clean` actions
+  (§8). **Additive by the two-axes rule:** every existing stored value keeps its meaning,
+  no `key`, `id`, `kind` or encoding changes, and the eight shipped ids are listed as
+  permanent exceptions so the new shape rules cannot invalidate them. `SCHEMA_VER` does
+  **not** move — it stays `"v2.0"` and every v0.5.0 and v0.6.0 config remains readable.
+  The one thing that changes an outcome is a **build** outcome, not a runtime one: a
+  source tree declaring a malformed or off-vocabulary action id now fails to build. No
+  shipped source does.
+  **One normative negative worth naming:** `k_clean_formats` MUST ship with no default
+  rows. §5 resolves an empty stored table to the declared defaults, so demo rows would
+  make `clean.standardize_formats`' required "nothing configured" refusal unreachable —
+  the field's own semantics depend on the absence.
 - **v2.2.0 (additive):** three hardening rules, none of which touches a stored value's
   meaning. (a) **Durable replacement (§5):** activating MUST stage, verify, then swap;
   delete-then-write is now non-conforming, and a reader MUST adopt an orphaned staged
