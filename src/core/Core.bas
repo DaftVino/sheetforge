@@ -952,6 +952,7 @@ End Function
 Private Function CoreCandidates() As Collection
     Dim c As New Collection
     c.Add "ImportExport"            ' probes PkgImportExport_Manifest
+    c.Add "Import"                  ' probes PkgImport_Manifest
     c.Add "Clean"                   ' probes PkgClean_Manifest
     Set CoreCandidates = c
 End Function

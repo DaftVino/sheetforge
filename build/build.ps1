@@ -194,10 +194,295 @@ if ($reservedProblems.Count -gt 0) {
     exit 1
 }
 
+# --- guard: action ids - vocabulary, shape, uniqueness, resolvable entry point ---
+# Ids are immutable, two-segment <domain>.<operation>, and there is deliberately NO
+# alias table (spec/contract.md section 7) - so a wrong id is unfixable and has to be
+# caught before it ships, not after. Nothing else here can see it: the id is a string
+# literal, valid VBA to every other check in this file and to vba-syntax-check.mjs.
+#
+# The vocabulary is READ FROM THE CONTRACT, not duplicated here. Section 7 says the
+# contract owns that table; a hardcoded copy would make this file a second owner, and
+# the two would drift the first time a wave added a domain. The parse is anchored on an
+# HTML-comment marker rather than on the heading text, so re-wording section 7 cannot
+# silently disarm this.
+#
+# It FAILS CLOSED. An unreadable, malformed or empty table is a build failure, never a
+# fallback to some built-in list: a gate that quietly disables itself when its input goes
+# missing is worse than no gate, because the build still goes green.
+#
+# CASE SENSITIVITY - the one thing to get right here. PowerShell's -match and -ne are
+# case-INSENSITIVE by default, which silently defeats every lowercase rule below. Two
+# different rules apply and the distinction is deliberate:
+#   * VBA SOURCE SYNTAX is matched case-INSENSITIVELY (-match), because VBA itself is:
+#     `public sub Foo(ctx as object)` is a valid handler and must be found.
+#   * ACTION ID VALUES and CONTRACT TABLE TEXT are matched case-SENSITIVELY (-cmatch,
+#     -cne), because the id rule IS a case rule. Verified: with plain -match,
+#     "import.combineWorksheets" passes the lowercase-only shape check, which would make
+#     contract section 7's "no new id is ever camelCase" unenforceable - the single rule
+#     this gate exists to enforce. Do not "simplify" the c-operators away.
+$contractPath = Join-Path $Root 'spec/contract.md'
+if (-not (Test-Path -LiteralPath $contractPath)) {
+    Write-Host "BUILD FAILED - action id validation:" -ForegroundColor Red
+    Write-Host "  contract not found: $contractPath" -ForegroundColor Red
+    Write-Host "  The action-id domain vocabulary is read from that file; without it no id can be checked." -ForegroundColor Red
+    exit 1
+}
+$contractLines = Get-Content -LiteralPath $contractPath
+$vocabMarker = '<!-- action-domain-vocabulary -->'
+$vocabProblems = New-Object System.Collections.Generic.List[string]
+
+# EXACTLY one marker. Two markers (a copied section, a half-finished edit) would silently
+# make the first one win, and which table is authoritative would depend on file order.
+$markerLines = @()
+for ($i = 0; $i -lt $contractLines.Count; $i++) {
+    if ($contractLines[$i].Trim() -ceq $vocabMarker) { $markerLines += ($i + 1) }
+}
+if ($markerLines.Count -ne 1) {
+    Write-Host "BUILD FAILED - action id validation:" -ForegroundColor Red
+    if ($markerLines.Count -eq 0) {
+        Write-Host "  marker '$vocabMarker' not found in spec/contract.md." -ForegroundColor Red
+        Write-Host "  Section 7 must carry that marker on its own line above the domain table (a blank line between the two is fine)." -ForegroundColor Red
+    } else {
+        Write-Host "  marker '$vocabMarker' appears $($markerLines.Count) times in spec/contract.md (lines $($markerLines -join ', ')). It must appear exactly once." -ForegroundColor Red
+    }
+    exit 1
+}
+$markerAt = $markerLines[0] - 1
+
+# Walk the table. EVERY line between the marker and the terminating blank must be
+# recognised - header, separator, or a well-formed data row. An unrecognised row is a
+# BUILD FAILURE, not a skip: silently parsing 11 of 12 rows leaves the build green while
+# the 12th domain quietly stops being enforced, which is the exact failure this gate
+# exists to prevent.
+#
+# ONLY a genuinely blank line ends the table. This previously broke on any non-pipe
+# line once the header had been seen, which made a stray prose line mid-table a SILENT
+# truncation: verified by inserting one after the `validate` row, which cut the
+# vocabulary to three domains and then failed the build claiming the shipped
+# `importexport` ids had an unknown domain - the wrong error entirely, pointing at
+# innocent source. Worse, the same line placed after the last USED domain truncates the
+# vocabulary with the build still green. Anything else after the header is malformed and
+# is reported as such.
+# Ordinal (case-sensitive) dictionary, NOT @{} or [ordered]@{}. PowerShell hashtable
+# keys are case-INSENSITIVE, so `$domainStatus.ContainsKey('Import')` would be true for
+# a stored 'import' - quietly accepting an id whose domain is mis-cased, which is the
+# same camelCase hole the -c operators close everywhere else in this block.
+$domainStatus = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+$sawHeader = $false
+$sawSeparator = $false
+for ($i = $markerAt + 1; $i -lt $contractLines.Count; $i++) {
+    $ln = $contractLines[$i]
+    $lineNo = $i + 1
+    if ($ln -notmatch '^\s*\|') {
+        if (-not $sawHeader) { continue }                # blank line between marker and table
+        if ([string]::IsNullOrWhiteSpace($ln)) { break } # the terminating blank: table ends here
+        $vocabProblems.Add("contract.md:${lineNo}: a non-table line inside the domain table. The table runs from the header row to the first BLANK line, so nothing else may sit between them - move this line below the table (leaving a blank line after the last row). Found: $($ln.Trim())")
+        break
+    }
+    if (-not $sawHeader) {
+        if ($ln.Trim() -cne '| domain | status | meaning |') {
+            $vocabProblems.Add("contract.md:${lineNo}: expected the header row '| domain | status | meaning |', found: $($ln.Trim())")
+            break
+        }
+        $sawHeader = $true
+        continue
+    }
+    if (-not $sawSeparator) {
+        if ($ln.Trim() -cne '|---|---|---|') {
+            $vocabProblems.Add("contract.md:${lineNo}: expected the separator row '|---|---|---|', found: $($ln.Trim())")
+            break
+        }
+        $sawSeparator = $true
+        continue
+    }
+    # The trailing [^|]* is what rejects a stray pipe inside the meaning cell: it
+    # corrupts the rendered table, so it must not parse cleanly here either.
+    if ($ln -cmatch '^\s*\|\s*`([a-z][a-z0-9_]*)`\s*\|\s*(active|reserved|grandfathered)\s*\|[^|]*\|\s*$') {
+        $dom = $matches[1]
+        if ($domainStatus.ContainsKey($dom)) {
+            $vocabProblems.Add("contract.md:${lineNo}: domain '$dom' is listed more than once.")
+        } else {
+            $domainStatus[$dom] = $matches[2]
+        }
+    } else {
+        $vocabProblems.Add("contract.md:${lineNo}: unrecognised vocabulary row. Expected | ``<domain>`` | active/reserved/grandfathered | <meaning with no pipe> |  --  found: $($ln.Trim())")
+    }
+}
+if (-not $sawHeader -or -not $sawSeparator) {
+    $vocabProblems.Add("contract.md: the domain table under '$vocabMarker' has no header and separator row.")
+}
+if ($domainStatus.Count -eq 0) {
+    $vocabProblems.Add("contract.md: the domain table under '$vocabMarker' parsed to zero domains.")
+}
+if ($vocabProblems.Count -gt 0) {
+    Write-Host "BUILD FAILED - action id vocabulary (spec/contract.md section 7):" -ForegroundColor Red
+    $vocabProblems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 1
+}
+
+# The eight ids shipped before the shape rules existed. Listed literally in contract
+# section 7 as permanent exceptions, never renamed and never aliased - two are camelCase
+# and would fail the shape check below. This list does NOT exempt them from the
+# duplicate or entry-point checks.
+$legacyIds = @(
+    'clean.dupes', 'clean.trim', 'clean.filldown',
+    'importexport.clear', 'importexport.import', 'importexport.updateMaster',
+    'importexport.export', 'importexport.suggestTypes'
+)
+# Ordinal, for the same reason as $domainStatus: a case-insensitive set makes
+# $legacySet.ContainsKey('Clean.Dupes') true, which skips the shape check on a
+# mis-cased id and then misattributes the resulting duplicate error to the real,
+# permanent declaration - pointing a future maintainer at breaking an immutable id.
+$legacySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$legacyIds | ForEach-Object { [void]$legacySet.Add($_) }
+
+# Entry points that Core_Run can actually dispatch. Core_Run reaches a handler through
+# Application.Run, which cannot call a Private or Friend procedure - so "a Sub of that
+# name exists somewhere" is NOT the question. The question is whether a PUBLIC Sub taking
+# a single ctx argument exists. A Private Sub with the right name would sail through a
+# name-only check and fail at the button, which is the most expensive place to find it.
+# (In VBA an unqualified `Sub Foo` is Public, so both spellings count.)
+#
+# IgnoreCase is passed EXPLICITLY. [regex]::Match is case-SENSITIVE in .NET, unlike
+# PowerShell's -match operator - so without this, `public sub Foo(ctx as object)` is not
+# found and this guard reports "no dispatchable handler" for a handler that is really
+# there. VBA is case-insensitive, so matching its syntax case-sensitively is simply wrong.
+#
+# Every other structural guard in this file was made case-insensitive in the same commit,
+# and that was not optional. Fixing only this one opened a hole: a procedure written
+# `public sub Foo(ctx as object)` ... `end sub` - consistently lowercase - was counted by
+# NEITHER the Sub-open nor the End-Sub pattern, so it balanced, and it was simultaneously
+# invisible to the duplicate-name and module-declaration guards. It shipped with zero
+# structural validation, having previously been stopped (confusingly, but stopped) right
+# here. VBA is case-insensitive; every pattern in this file that matches VBA syntax now
+# carries (?i) or IgnoreCase, and any new one must too.
+#
+# $dispatchable itself stays a case-INSENSITIVE hashtable on purpose, because VBA resolves
+# procedure names case-insensitively and so does Application.Run - an entry point declared
+# `PkgFoo_Bar` and referenced as `pkgfoo_bar` really does dispatch.
+$vbaIC = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+$dispatchable = @{}
+foreach ($f in $asciiCandidates) {
+    foreach ($line in (Get-Content -LiteralPath $f)) {
+        $m = [regex]::Match($line, '^\s*(?:Public\s+)?(?:Static\s+)?Sub\s+([A-Za-z_]\w*)\s*\(\s*(?:ByRef\s+|ByVal\s+)?\w+\s+As\s+Object\s*\)', $vbaIC)
+        if ($m.Success) { $dispatchable[$m.Groups[1].Value] = Split-Path $f -Leaf }
+    }
+}
+
+# Truncate a VBA line at its first comment apostrophe that is OUTSIDE a string literal,
+# and return the code portion. VBA has no escape character: a quote inside a string
+# literal is written by DOUBLING it, so toggling the state on every `"` gets it right -
+# the doubled pair toggles off then straight back on, leaving the walk inside the string.
+#
+# Needed because the Core_AddAction detector below tests the whole line rather than only
+# its start, and Core.bas mentions the name in a TRAILING comment. Without this the gate
+# would fail the build on a comment, and - the other way round - a commented-out
+# declaration would be validated as if it were a real one.
+function Get-VbaCodePortion([string]$line) {
+    $inStr = $false
+    for ($j = 0; $j -lt $line.Length; $j++) {
+        $ch = $line[$j]
+        if ($ch -eq '"') { $inStr = -not $inStr }
+        elseif ($ch -eq "'" -and -not $inStr) { return $line.Substring(0, $j) }
+    }
+    return $line
+}
+
+# Core_AddAction reg, "<id>", "<caption>", "<entryPoint>", "<help>" [, "<category>"]
+#
+# The trailing `\s*,` is load-bearing: without it `"Handler" & suffix,` matches as far as
+# the closing quote and the gate validates "Handler" as though it were the whole entry
+# point, checking a name the running code never registers. Requiring the delimiter makes
+# a built-up entry point fail to parse, which the unparseable-call check below then
+# reports. Every real call has a help argument after the entry point, so the comma is
+# always there.
+$addActionRe = 'Core_AddAction\s+\w+\s*,\s*"([^"]*)"\s*,\s*"[^"]*"\s*,\s*"([^"]*)"\s*,'
+# Core_AddAction's OWN declaration in Core.bas contains the name in code, not as a call.
+# The detector below matches anywhere on the line, so the declaration needs an explicit
+# carve-out - (?i) because VBA is case-insensitive, like every other syntax pattern here.
+$addActionDeclRe = '(?i)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?(?:Sub|Function)\s+Core_AddAction\b'
+$idShapeRe = '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'
+$allowed = ($domainStatus.Keys | Where-Object { $domainStatus[$_] -ne 'reserved' } | Sort-Object) -join ', '
+# Ordinal: two ids differing only in case are two DIFFERENT ids by section 7's rules,
+# and each must be judged on its own rather than one masking the other.
+$idSeen = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+$idProblems = New-Object System.Collections.Generic.List[string]
+foreach ($f in $asciiCandidates) {
+    $leaf = Split-Path $f -Leaf
+    $srcLines = Get-Content -LiteralPath $f
+    for ($i = 0; $i -lt $srcLines.Count; $i++) {
+        # Judge the CODE only. A whole-line comment collapses to "" and falls out below;
+        # a trailing comment can neither trip the detector nor be read as a declaration.
+        $code = Get-VbaCodePortion $srcLines[$i]
+        if ($code -notmatch '\S') { continue }                     # blank, or all comment
+        $m = [regex]::Match($code, $addActionRe, $vbaIC)
+        if (-not $m.Success) {
+            # A CALL to Core_AddAction that does not parse is a failure, not a skip.
+            # Otherwise a wave that wraps its arguments differently - a line continuation
+            # before the entry point, `Call Core_AddAction(...)`, a named argument -
+            # registers an action this gate never looks at, and the build goes green
+            # having checked nothing. Fail loudly and make the author either reformat the
+            # call or extend this regex deliberately.
+            #
+            # Matched ANYWHERE in the code portion, not anchored at statement position.
+            # The old `^\s*(?:Call\s+)?Core_AddAction\b` anchor was a bypass, verified:
+            # `If True Then Core_AddAction reg, _` with the arguments on a continuation
+            # line registered `tidy.bogus` and the build exited 0. The two things the
+            # anchor was really protecting against - Core.bas's own declaration and its
+            # trailing-comment mention - are handled precisely instead, by
+            # $addActionDeclRe and by Get-VbaCodePortion.
+            if ($code -match '(?i)Core_AddAction' -and $code -notmatch $addActionDeclRe) {
+                $idProblems.Add("${leaf}:$($i + 1): a Core_AddAction call this gate cannot parse. Put the whole call at the start of its own line, with the id, caption and entry point as three literal strings followed by a comma (a continuation may follow that comma). Line: $($srcLines[$i].Trim())")
+            }
+            continue
+        }
+        $id = $m.Groups[1].Value
+        $entry = $m.Groups[2].Value
+        $where = "${leaf}:$($i + 1)"
+
+        if ($idSeen.ContainsKey($id)) {
+            $idProblems.Add("duplicate action id '$id' at $where - already declared at $($idSeen[$id]). Ids are unique across every package.")
+        } else {
+            $idSeen[$id] = $where
+        }
+
+        if (-not $legacySet.Contains($id)) {
+            # -cnotmatch, NOT -notmatch. See the case-sensitivity note above.
+            if ($id -cnotmatch $idShapeRe) {
+                $idProblems.Add("malformed action id '$id' at $where - must be exactly two segments, <domain>.<operation>, each starting with a lowercase letter and continuing with lowercase letters/digits/underscores. Never camelCase.")
+            }
+        }
+
+        $domain = if ($id -match '^([^.]+)\.') { $matches[1] } else { $id }
+        if (-not $domainStatus.ContainsKey($domain)) {
+            $idProblems.Add("unknown domain '$domain' in action id '$id' at $where - not in the vocabulary table in spec/contract.md section 7. Allowed: $allowed.")
+        } elseif ($domainStatus[$domain] -eq 'reserved') {
+            $idProblems.Add("reserved domain '$domain' in action id '$id' at $where - '$domain.*' is reserved for the engine in spec/contract.md section 7 and no package action may use it.")
+        } elseif ($domainStatus[$domain] -eq 'grandfathered' -and -not $legacySet.Contains($id)) {
+            # 'grandfathered' means "these exact shipped ids are permanent", NOT "this
+            # domain is open for business". Without this branch a wave could add
+            # importexport.some_new_id and pass, which is precisely what section 7's
+            # "no new id may be added to it" forbids.
+            $idProblems.Add("new action id '$id' at $where uses the grandfathered domain '$domain'. That domain is closed: only its shipped ids are permitted, and no new id may be added to it (spec/contract.md section 7). Pick an active domain.")
+        }
+
+        if ($entry -eq '') {
+            $idProblems.Add("action '$id' at $where declares an empty entry point.")
+        } elseif (-not $dispatchable.ContainsKey($entry)) {
+            $idProblems.Add("action '$id' at $where names entry point '$entry', for which no source declares a dispatchable handler. Core_Run calls it through Application.Run, so it must be a PUBLIC (or unqualified) Sub taking one Object argument: Public Sub $entry(ctx As Object). A Private or Friend Sub, or a different signature, cannot be dispatched.")
+        }
+    }
+}
+if ($idProblems.Count -gt 0) {
+    Write-Host "BUILD FAILED - action id validation:" -ForegroundColor Red
+    $idProblems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 1
+}
+
 # --- guard: every Sub/Function/Property name must be unique across all modules ---
 # NOTE: Property Get/Let/Set sharing a name would false-positive here; this
 # codebase uses none. Add kind to the key if that changes.
-$procRe = '^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)'
+$procRe = '(?i)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)'
 $seen = @{}
 $dupes = New-Object System.Collections.Generic.List[string]
 foreach ($src in $sources) {
@@ -260,10 +545,10 @@ foreach ($src in $sources) {
 $text = $sb.ToString()
 $attr = ([regex]::Matches($text, '(?m)^Attribute VB_Name')).Count
 $opt = ([regex]::Matches($text, '(?m)^Option Explicit')).Count
-$subO = ([regex]::Matches($text, '(?m)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Sub\s')).Count
-$subC = ([regex]::Matches($text, '(?m)^\s*End Sub\b')).Count
-$fnO = ([regex]::Matches($text, '(?m)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Function\s')).Count
-$fnC = ([regex]::Matches($text, '(?m)^\s*End Function\b')).Count
+$subO = ([regex]::Matches($text, '(?im)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Sub\s')).Count
+$subC = ([regex]::Matches($text, '(?im)^\s*End Sub\b')).Count
+$fnO = ([regex]::Matches($text, '(?im)^\s*(?:Public\s+|Private\s+|Friend\s+)?(?:Static\s+)?Function\s')).Count
+$fnC = ([regex]::Matches($text, '(?im)^\s*End Function\b')).Count
 
 $problems = New-Object System.Collections.Generic.List[string]
 if ($attr -ne 1) { $problems.Add("expected 1 Attribute VB_Name, found $attr") }
@@ -286,9 +571,9 @@ if ($fnO -ne $fnC) { $problems.Add("Function/End Function imbalance: $fnO / $fnC
 # does not compile VBA, so catch that structural error here.
 $declLines = [regex]::Split($text, "\r?\n")
 $inProc = $false; $sawProc = $false
-$procOpen = '^\s*(?:Public\s+|Private\s+|Friend\s+|Global\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s'
-$procClose = '^\s*End\s+(?:Sub|Function|Property)\b'
-$moduleDecl = '^\s*(?:Public\s+|Private\s+|Global\s+)?(?:Const|Dim|Type|Enum|Declare)\b|^\s*(?:Public|Private|Global)\s+(?:WithEvents\s+)?\w+\s+As\b'
+$procOpen = '(?i)^\s*(?:Public\s+|Private\s+|Friend\s+|Global\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s'
+$procClose = '(?i)^\s*End\s+(?:Sub|Function|Property)\b'
+$moduleDecl = '(?i)^\s*(?:Public\s+|Private\s+|Global\s+)?(?:Const|Dim|Type|Enum|Declare)\b|^\s*(?:Public|Private|Global)\s+(?:WithEvents\s+)?\w+\s+As\b'
 for ($i = 0; $i -lt $declLines.Count; $i++) {
     $ln = $declLines[$i]
     if ($ln -match $procOpen) { $inProc = $true; $sawProc = $true; continue }
