@@ -28,13 +28,20 @@ downstream of those.
 
 ## Next — active
 
-- [ ] **Run the W1 manual gate** (`docs/designs/2026-07-28-w1-manual-gate.md`, 37
+- [~] **W1 manual gate — DEFERRED 2026-07-28 by owner decision.** Folded into one
+      end-to-end validation on the finished workbook, after the Core pass and the
+      remaining waves. Four items ran first; item 2.3 found a real defect (every source
+      spaced ~15 rows apart, from an inflated `UsedRange`), fixed in `bafb905` and **not
+      yet verified in Excel**. Items 1.5 and 2.4 exist to confirm that fix when the gate
+      resumes. Original item text below, kept for when it does:
+
+- [ ] ~~**Run the W1 manual gate** (`docs/designs/2026-07-28-w1-manual-gate.md`, 37
       items) and merge **PR #19**. **Start with item 2.3** — it is the only item
       that puts a colleague's unsaved workbook in the combine's path, which is
       exactly where the whole-branch review found a Critical: `Workbooks.Open` on
       an already-open file returns *the user's copy*, and closing it with alerts
       suppressed destroyed their unsaved edits while reporting success. Fixed, but
-      unverified in Excel.
+      unverified in Excel.~~
 
 - [ ] **Finish the 8 unrun track-1 gate items.** Hardening 1.3, 2.2, 3.1, 4.1,
       4.2 · reorder 2 (clipping half), 3 · reskin 4. **Reskin 4 is the likeliest
