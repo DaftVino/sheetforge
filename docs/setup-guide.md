@@ -96,13 +96,15 @@ three choices:
 
 Every macro starts as **Off**. Pick **Button** for each one you want.
 
-A line of text shows up above the list as soon as you pick your first one. It
-says:
+Red text shows up at the top of the page as soon as you pick your first one. It
+is next to the words **Toolkit Setup**. It says:
 
-> Actions are switched on. Click 'Finalize Setup Tab' and then 'Create Setup
-> Tab' to reveal their option fields.
+> Actions are switched on. Click 'Finalize Setup Tab', then 'Create Setup Tab'
+> to show their option fields. Fill those in, then click 'Finalize Setup Tab'
+> again to save them.
 
-That is the loop from the top of this page. You are about to do it.
+That is the loop from the top of this page. You are about to do it. The next
+three steps are those three clicks, in that order.
 
 ### 9. Save what you picked
 
@@ -120,6 +122,10 @@ Go back to the `Setup Menu` tab. Click `Create Setup Tab`.
 
 New yellow boxes show up on the `Setup` tab. They are the questions your chosen
 macros need answered. A macro that saves files will ask where to put them.
+
+The boxes come in groups. Each group has a grey bar above it. The bar starts
+with the name of the macro the boxes belong to, so you can tell which questions
+go with which macro.
 
 Answer them. Then go to `Setup Menu` and click `Finalize Setup Tab` again.
 
