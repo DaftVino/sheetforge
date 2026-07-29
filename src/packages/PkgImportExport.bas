@@ -77,10 +77,10 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     Core_AddDefault reg, "k_master_cols", "Mgr (Loc) Name"
 
     ' ---- ACTIONS (become buttons) ----
-    Core_AddAction reg, "importexport.clear", "1.  Clear Input Tabs", "PkgImportExport_Clear", "Deletes data (row 2 down) on the input tabs. Keeps headers + formatting."
-    Core_AddAction reg, "importexport.import", "2.  Import Source Data", "PkgImportExport_Import", "Clears the input tabs, then imports the matching source files from this folder (auto-handles (1)/(2) name suffixes)."
-    Core_AddAction reg, "importexport.updateMaster", "3.  Update Ref_Master", "PkgImportExport_UpdateMaster", "Refreshes the Ref_Master tab from the master-list file in this folder."
-    Core_AddAction reg, "importexport.export", "4.  Export Dashboard (.xlsx)", "PkgImportExport_Export", "Saves a values-only copy of the main tabs (formatting + filters + conditional formatting kept)."
+    Core_AddAction reg, "importexport.clear", "Clear Input Tabs", "PkgImportExport_Clear", "Deletes data (row 2 down) on the input tabs. Keeps headers + formatting."
+    Core_AddAction reg, "importexport.import", "Import Source Data", "PkgImportExport_Import", "Clears the input tabs, then imports the matching source files from this folder (auto-handles (1)/(2) name suffixes)."
+    Core_AddAction reg, "importexport.updateMaster", "Update Ref_Master", "PkgImportExport_UpdateMaster", "Refreshes the Ref_Master tab from the master-list file in this folder."
+    Core_AddAction reg, "importexport.export", "Export Dashboard (.xlsx)", "PkgImportExport_Export", "Saves a values-only copy of the main tabs (formatting + filters + conditional formatting kept)."
     Core_AddAction reg, "importexport.suggestTypes", "Suggest Import Types", "PkgImportExport_SuggestTypes", "SETUP HELPER: after you fill the input tabs + source prefixes on the Setup tab, this opens each source file and fills a SUGGESTED type map for review. Always double-check ID/code columns stay T."
 End Sub
 

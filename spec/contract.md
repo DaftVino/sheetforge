@@ -297,7 +297,7 @@ An action is one thing a package *does* (it becomes a button). Each action is:
 | Field | Meaning |
 |---|---|
 | `id` | Dotted `<domain>.<operation>` token, globally unique (`import.combine_worksheets`, `clean.dupes`). The domain is a controlled user-facing vocabulary, **not** the package that implements it — see §7 for the vocabulary table and the full rule. |
-| `caption` | Button label (may carry an ordinal, e.g. `"2.  Import Source Data"`). |
+| `caption` | Button label. Free display text, not an identifier: it MAY be changed without a breaking-change bump, and MAY carry an ordinal where a deployment's actions run in a fixed order. The reference implementation's `importexport` captions carried one until v2.10.0 and no longer do (§10). |
 | `help` | Plain-language description shown on/near the button. |
 | `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on an index surface where a platform provides one (§6), and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
 | `availability` | Deployment config, not manifest data (v1.2.0): one of `button`, `chains-only`, `off`. **Defaults to `off` (v2.1.0)** — an action arrives switched off and is turned on deliberately. This changes no stored value's meaning: a stored `button` still reads as `button`. The default applies only where nothing was ever stored. For the pre-v1.2.0 legacy case the default is pinned separately and does NOT follow this row — see §5. |
@@ -750,10 +750,10 @@ Demo default rows (`|`-delimited): `IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N
 
 | id | caption | semantics |
 |---|---|---|
-| `importexport.clear` | `1.  Clear Input Tabs` | Delete data from row 2 down on every input tab; keep headers + formatting. |
-| `importexport.import` | `2.  Import Source Data` | Clear the input tabs, then for each `k_import` row import the newest matching source file (prefix rule, §3), coercing each column per its type-map codes. One confirmation dialog. |
-| `importexport.updateMaster` | `3.  Update Ref_Master` | Refresh `k_master_dest` from the newest `k_master_prefix` file: read `k_master_sheet`, copy the `k_master_cols` columns in order, keep the first column as text. |
-| `importexport.export` | `4.  Export Dashboard (.xlsx)` | Write a **values-only** snapshot of the `k_export_tabs` (in order) to a dated file (§ base/offset). Flatten dynamic-array spills, legacy CSE arrays, and formulas to static values; keep formatting, filters, and conditional formatting; break external links. |
+| `importexport.clear` | `Clear Input Tabs` | Delete data from row 2 down on every input tab; keep headers + formatting. |
+| `importexport.import` | `Import Source Data` | Clear the input tabs, then for each `k_import` row import the newest matching source file (prefix rule, §3), coercing each column per its type-map codes. One confirmation dialog. |
+| `importexport.updateMaster` | `Update Ref_Master` | Refresh `k_master_dest` from the newest `k_master_prefix` file: read `k_master_sheet`, copy the `k_master_cols` columns in order, keep the first column as text. |
+| `importexport.export` | `Export Dashboard (.xlsx)` | Write a **values-only** snapshot of the `k_export_tabs` (in order) to a dated file (§ base/offset). Flatten dynamic-array spills, legacy CSE arrays, and formulas to static values; keep formatting, filters, and conditional formatting; break external links. |
 | `importexport.suggestTypes` | Suggest Import Types | Setup helper: after the input tabs + source prefixes are filled, open each matched source file, sample it, and write a **suggested** type-map for review (never applied silently; ID/code columns flagged to stay `T`). |
 
 ### Package `import` — "Bring Data In" (v1.0.0, contract v2.3.0)
@@ -1127,6 +1127,12 @@ port realizes them per platform rather than re-deriving them:
   occur in an id — is unchanged, and a comma cannot occur in an id. Reference notes are not
   normative (§ preamble), so this is not a breaking change; an implementation that still reads
   newline-delimited steps stays conforming.
+
+  Four `importexport` captions lose a leading step number — `1.  Clear Input Tabs` becomes
+  `Clear Input Tabs`, and likewise for `import`, `updateMaster` and `export` (§8). Captions are
+  display strings, not ids: no id is renamed, `importexport.updateMaster` keeps its camelCase,
+  and §7's eight permanent shipped exceptions are untouched. The numbers described a fixed
+  four-step order that stopped being the only way to use these actions once chains existed.
 
 - **v2.9.0 (additive):** the `workbook` domain's package, fields, and five actions (§8); one
   new reserved-name normative rule for `text`-kind destination fields (§7). The reserved-name

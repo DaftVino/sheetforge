@@ -64,14 +64,14 @@ These are the items where a failure costs you something you cannot get back.
 
 - [ ] **2.1 — An already-open source workbook keeps its unsaved edits.**
   Open one of the files configured in `k_import`, type something into it, **do not save**, and
-  leave it open. Run **2.  Import Source Data**.
+  leave it open. Run **Import Source Data**.
   *Expected:* the action completes; the source is **still open**; your typed text is **still
   there**; and the completion message says a source was already open and that what was read
   was its on-screen state.
   *Failure:* the source closed, or your typing gone.
   *Why:* `Workbooks.Open` handed an already-open path returns **your copy**, and closing it
   discards unsaved work — with alerts suppressed, so Excel never warns you. **This is the
-  single most valuable item in this document.** Repeat it for **3.  Update Ref_Master**.
+  single most valuable item in this document.** Repeat it for **Update Ref_Master**.
 
 - [ ] **2.2 — Snapshot pruning leaves a lookalike file alone.**
   Put two files in the Snapshots folder: `SNAPSHOT_notes.txt` (anything) and
