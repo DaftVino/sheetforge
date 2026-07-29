@@ -185,6 +185,57 @@ These are the items where a failure costs you something you cannot get back.
   conditional-format rules rather than direct fills precisely so removal can tell its own
   marking from yours — if that fails, running it costs you formatting you cannot recover.
 
+- [ ] **2.15 — `Complete Macro Setup` refuses on a workbook that has never been finalized.**
+  Import into a clean workbook, run `Core_BuildSetup`, then go to Setup Menu and click
+  `Complete Macro Setup` **without** finalizing.
+  *Expected:* a refusal telling you to Finalize first. **Every tab still there.**
+  *Failure:* anything deleted.
+
+- [ ] **2.16 — `Complete Macro Setup` refuses when there are no macro pages.**
+  Set all 51 actions to `Off`, Finalize, then click it.
+  *Expected:* a refusal saying it would leave you with nothing. **Nothing deleted.**
+  *Failure:* it strips the setup tabs off a workbook that has no buttons either, leaving no
+  on-sheet way back.
+
+- [ ] **2.17 — Answering No deletes nothing, and Enter alone answers No.**
+  Click it on a properly finalized workbook, read the confirmation, press **Enter** without
+  clicking.
+  *Expected:* nothing happens; every tab still there.
+  *Failure:* Enter triggering the deletion. The dialog defaults to No deliberately.
+
+- [ ] **2.18 — After Yes, the setup tabs are gone AND every button still works.**
+  Click it and answer Yes. Then click one of your macro buttons.
+  *Expected:* `Setup`, `Setup Menu` and `Macros Home` are gone; the `Macros <n>` pages remain;
+  **and the button you clicked actually runs.**
+  *Failure:* the button doing nothing, or reporting the action is not available.
+  ***This is the single most important item in this section.*** It proves `_Config` survived.
+  If `_Config` were deleted, every button would still be sitting there looking normal and
+  would silently do nothing — the worst possible failure shape, because nothing on screen
+  says anything is wrong.
+
+- [ ] **2.19 — B1 of every remaining page is empty, with no dead link.**
+  *Expected:* the `<< Home` cell is blank on every `Macros <n>` page.
+  *Failure:* text that still looks like a link, or a click that raises an error because the
+  sheet it pointed at is gone.
+
+- [ ] **2.20 — `Alt+F8` then `Core_BuildSetup` brings the Setup tab back, with your settings
+  still in it.** *Expected:* Setup is rebuilt and your answers are still there — they were
+  read back out of the surviving `_Config`.
+  *Failure:* a blank Setup tab. That means the settings did not survive, and the confirmation
+  dialog promised a way back that does not exist.
+
+- [ ] **2.21 — `Alt+F8` lists exactly three names.**
+  *Expected:* `Core_BuildSetup`, `Core_FinalizeSetup`, `Core_CompleteSetup` — and nothing
+  else.
+  *Failure:* `Core_SpeedOn` or `Core_SpeedOff` still listed. Running either leaves Excel with
+  calculation and screen updating switched off and nothing on screen saying so, which then
+  looks like the toolkit broke the workbook.
+
+  **Assumption, flagged per rule 7:** that a macro can delete the sheet hosting the button
+  that invoked it. Nothing in this codebase has ever exercised that. `Setup Menu` is deleted
+  **last** so a failure leaves the most recoverable state. If Excel refuses, the fallback is
+  `Application.OnTime` to defer the final delete past the end of the handler.
+
 ---
 
 ## 3. Can it hand you a wrong number that looks right? — run these second
