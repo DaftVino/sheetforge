@@ -14,12 +14,12 @@ The two ratings are independent on purpose: a few things are hugely popular but 
 
 Every item now carries a verdict, making this file the **authoritative build queue**. Rationale and the wave protocol live in `docs/designs/2026-07-24-finish-excel-design.md`.
 
-- **W1**–**W6** — assigned to that wave, with the frozen action id.
-- **Later** — in scope, no wave assigned yet.
+- **W1**–**W7** — assigned to that wave, with the frozen action id. **W7** is the Macros Home phase, which built the last of the *Later* items.
+- **Later** — in scope, no wave assigned yet. None are left; the verdict is kept in this list because the vocabulary is still the one a future entry would be filed under.
 - **Deferred** — blocked on a safety story (destructive with no preview, or an undefined failure mode).
 - **Declined** — will not be built; reason given inline.
 
-Waves W1–W6 assign 34 items (35 new actions). With the 13 already shipped or embedded that brings the toolkit to ~48 listed actions. 8 items are *Later*, 5 *Deferred*, 4 *Declined*. "Build all 60" is explicitly not the goal — an action earns its place only with a stable user story, bounded inputs/outputs, a safe cancel and error-restore path, and a repeatable hand-verification script.
+Waves W1–W7 assign 42 items (43 new actions — one item covers both protect and unprotect). With the eight standalone actions already shipped before the waves, the toolkit ships 51 actions. **No items remain *Later***; 5 are *Deferred* and 4 *Declined*. "Build all 60" is explicitly not the goal — an action earns its place only with a stable user story, bounded inputs/outputs, a safe cancel and error-restore path, and a repeatable hand-verification script.
 
 Action ids follow the frozen `<domain>.<operation>` scheme (contract v1.2.0). The domain is a user-facing vocabulary, **not** the module that implements it.
 
@@ -45,7 +45,7 @@ Loops a folder, appends each file's data. Universal for consolidations and rollu
 ### Import CSV / TXT with delimiter parsing — ⭐⭐⭐⭐ · Grade A — **W1** `import.delimited_file`
 Bring in a delimited file with explicit qualifiers and type handling.
 
-### Split one column into many (Text to Columns) — ⭐⭐⭐ · Grade A — **Later**
+### Split one column into many (Text to Columns) — ⭐⭐⭐ · Grade A — **W7** `clean.split_column`
 For exports that land everything in column A.
 
 ### Pull data from a closed workbook — ⭐⭐⭐ · Grade B — **Deferred**
@@ -76,7 +76,7 @@ Turns merged report layouts back into analyzable data.
 ### Standardize number / date formats — ⭐⭐⭐⭐ · Grade B — **W1** `clean.standardize_formats`
 Apply consistent formats to key columns after transfer.
 
-### Change case (UPPER / lower / Proper) — ⭐⭐⭐ · Grade A — **Later**
+### Change case (UPPER / lower / Proper) — ⭐⭐⭐ · Grade A — **W7** `clean.change_case`
 Normalize text casing across a range.
 
 ### Convert text-numbers to real numbers — ⭐⭐⭐ · Grade B — **W1** `clean.text_to_numbers`
@@ -136,7 +136,7 @@ One-click brand/format standard for any table.
 ### Print-layout prep (landscape / fit-to-width / margins) — ⭐⭐⭐ · Grade B — **W3** `format.print_layout`
 Board-pack and period-end binder formatting.
 
-### Highlight cells with comments / formulas / blanks — ⭐⭐ · Grade A — **Later**
+### Highlight cells with comments / formulas / blanks — ⭐⭐ · Grade A — **W7** `format.highlight_special`
 Popular audit-view helper; light value in a driven library.
 
 ### Spotlight the active row / column — ⭐⭐ · Grade A — **Declined**
@@ -158,7 +158,7 @@ Generate a summary table from chosen dimensions + measures.
 ### Copy a pivot to a static values sheet — ⭐⭐⭐ · Grade B — **W4** `summarize.freeze_pivot`
 Freeze pivot output as values + formatting for distribution.
 
-### Apply a consistent style to all charts — ⭐⭐ · Grade B — **Later**
+### Apply a consistent style to all charts — ⭐⭐ · Grade B — **W7** `format.chart_style`
 Enforce one visual standard across chart objects.
 
 ---
@@ -180,10 +180,10 @@ One-click PDF of a range, sheet, or whole book.
 ### Save each worksheet as its own file / PDF — ⭐⭐⭐⭐ · Grade A — **W3** `export.per_sheet`
 Explode a workbook into per-tab deliverables.
 
-### Save each filtered group (or row) as its own file — ⭐⭐⭐ · Grade B — **Later**
+### Save each filtered group (or row) as its own file — ⭐⭐⭐ · Grade B — **W7** `export.split_by_value`
 Split by a column value into separate files.
 
-### Email a sheet / range as an attachment (Outlook) — ⭐⭐⭐⭐ · Grade A — **Later**
+### Email a sheet / range as an attachment (Outlook) — ⭐⭐⭐⭐ · Grade A — **W7** `export.email`
 Send the current output straight from Excel. In scope, but needs a defined behaviour when Outlook is absent or blocked by policy.
 
 ### Send bulk personalized emails from a list — ⭐⭐⭐ · Grade A — **Declined**
@@ -205,13 +205,13 @@ Auto-built index linking to every tab.
 ### Unhide all rows & columns — ⭐⭐ · Grade B — **W6** `workbook.unhide_rows_cols`
 Reset visibility across the sheet.
 
-### Sort worksheets alphabetically — ⭐⭐ · Grade B — **Later**
+### Sort worksheets alphabetically — ⭐⭐ · Grade B — **W7** `workbook.sort_sheets`
 Reorder tabs.
 
 ### Hide all sheets except the active one — ⭐⭐ · Grade B — **Deferred**
 Focus/presentation mode. *Blocked on:* destructive to workbook state with no preview and no one-click undo.
 
-### Add a "Back to TOC" link on every sheet — ⭐⭐ · Grade B — **Later**
+### Add a "Back to TOC" link on every sheet — ⭐⭐ · Grade B — **W7** `workbook.toc_links`
 Companion to the TOC macro.
 
 ### Delete all empty sheets — ⭐⭐ · Grade C — **Deferred**
