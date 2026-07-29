@@ -299,6 +299,101 @@ concrete answer to designing a 60-button layout while only 7 actions exist.
 
 ## 5. Handoff log
 
+### 2026-07-28 — W1 built and open as PR #19; gate DEFERRED; Core pass planned
+
+**Branch / PR.** All work on `feat/w1-ingest-clean`, 27 commits, `29a3392..bafb905`,
+open as **PR #19 against `main`** and **not merged**. Nothing was squash-merged. One PR,
+not stacked — the #18 lesson held.
+
+**What shipped.** `spec/contract.md` v2.2.0 → **v2.3.0**; `build/build.ps1` gained the
+action-id gate; **new** `src/packages/PkgImport.bas`; `src/packages/PkgClean.bas` +1 field
++4 actions; one line in `Core.bas`'s `CoreCandidates`; `tools/GateAudit.bas` gained an
+action-catalog probe; **new** `docs/designs/2026-07-28-w1-manual-gate.md` (39 items);
+**new** `docs/designs/2026-07-28-core-refuse-pass-plan.md`. Build: `Core + 3 package(s)`,
+`Sub 75/75`, `Function 148/148`, 223 procedures. **Test count unchanged: none, by repo
+policy** — VBA has no headless runner.
+
+**Corrections made during execution — DO NOT REVERT:**
+
+- **`PkgImport_AppendSheet` measures its extent per column with `End(xlUp)` from the
+  bottom, taking the maximum — NOT from `UsedRange`.** *Reason:* `UsedRange` is a rectangle
+  Excel inflates with formatting and with cells that once held data, so a two-row sheet can
+  report itself sixteen rows deep. The function advances `destRow` by the extent it is
+  given, so an inflated source pushed every LATER source down by the difference: sources
+  landed ~15 rows apart and a two-row file wrote to rows 27–28. Found by the owner at gate
+  item 2.3. Do **not** "simplify" this back to `UsedRange` — a prior round did exactly that
+  to fix a column-A truncation, and traded a smaller bug for a bigger one.
+- **The combine probes for an already-open workbook and never closes one it did not open**
+  (`PkgImport_AlreadyOpen`, `weOpened`). *Reason:* `Workbooks.Open` on a file already open
+  in the same instance returns **the user's own copy**, and with `DisplayAlerts` suppressed
+  under `Core_SpeedOn` the "you will lose your changes" prompt never fires — so
+  `Close SaveChanges:=False` silently destroyed a colleague's unsaved edits while reporting
+  success. The probe also confirms `wb.FullName`, because the `Workbooks` collection is
+  keyed on file *name*.
+- **`ThisWorkbook` is excluded by path OR by file name, not path alone.** *Reason:* on
+  OneDrive/AutoSave `ThisWorkbook.FullName` is an `https://` URL, and on a share it can be
+  UNC while the configured folder is a mapped drive — path-only misses, this workbook joins
+  its own source list, and the run dies on a name collision that does not exist.
+- **Every VBA-syntax pattern in `build.ps1` carries `(?i)`.** *Reason:* `[regex]::Match` is
+  case-sensitive in .NET, so lowercase VBA went unmatched. Fixing only the id gate opened a
+  worse hole: a consistently-lowercase procedure was counted by neither balance pattern and
+  became invisible to every structural guard — a silent full pass.
+- **The id gate's comparers are ORDINAL and its id checks use `-cmatch`/`-cne`.** *Reason:*
+  PowerShell's `-match` and hashtable keys are case-INSENSITIVE, so
+  `import.combineWorksheets` passed the lowercase-only shape check and §7's no-camelCase
+  rule — the one rule the gate exists to enforce — was unenforced.
+- **`k_clean_formats` declares NO default rows.** *Reason:* §5 resolves an empty stored
+  table to the field's declared defaults, so demo rows make
+  `clean.standardize_formats`' required refusal **unreachable dead code** and its gate item
+  unexecutable. Now normative in contract §8.
+- **`PkgImport_DelimitedFile`'s cleanup lives one frame down** (`PkgImport_ImportDelimited`).
+  *Reason:* VBA will not re-enter a handler in the same procedure, so a re-raise inside
+  `Fail:` escaped and `Core_Fail` never ran.
+
+**Discovered (empirical — each cost a round trip):**
+
+- **`Workbooks.Open` on an already-open file returns the open copy**, not a read-only
+  second one. This is the whole basis of the critical fix above.
+- **A `vbYesNo` MsgBox has its title-bar X DISABLED** — it does not return `vbNo`. A gate
+  item telling the owner to dismiss one with the X is unexecutable. Corrected in place.
+- **`Core_RunChain` does NOT abort on a failed step** — it asks "Continue with the
+  remaining steps?" (`Core.bas:1248-1252`, `AskContinue`). A refusal therefore reports as a
+  green tick unless the action sets `ctx("failed")`, which is the entire premise of the
+  Core pass planned next.
+- **`node scripts/code-map.mjs` stamps the PREVIOUS commit** when run before committing,
+  because it reads `git log -1` over indexed files. Regenerate and commit, then regenerate
+  again if the stamp matters — or accept the off-by-one. Bit this session twice.
+- **The blind dry-run cannot catch an instruction that is wrong about which workbook to
+  use.** It holds the built bundle, so it already knows `import.combine_worksheets`
+  iterates `ThisWorkbook.Worksheets`, and "make a scratch workbook" reads as harmless
+  shorthand. The owner hit it on the first section. It remains an authoring gate, not a
+  test.
+
+**Still open — the W1 manual gate is DEFERRED, and needs the human.**
+Owner decision 2026-07-28: fold it into one end-to-end validation on the finished workbook
+once the Core pass and the remaining waves are built, rather than spending owner time on
+defects a careful read should find. **4 of 39 items ran.** 0.1, 0.2, 0.4 passed
+(`GateAudit_Run`: 31 PASS / 0 FAIL / 2 SKIP, all fifteen action ids present). 0.3 is
+inconclusive — `Macros 1` did not exist afterwards, so redo it first. **2.3 failed and
+found the used-range defect above; the fix in `bafb905` is NOT verified in Excel.** Items
+**1.5** and **2.4** exist to confirm it when the gate resumes. Also still unrun: the 8
+track-1 items, of which reskin 4 (dark theme) remains the likeliest real finding.
+
+**Next phase — the Core pass**, planned in full at
+`docs/designs/2026-07-28-core-refuse-pass-plan.md` (28K, 5 tasks). `Core_Refuse` +
+`Core_IsEngineSheet` + the `X #0` chain-summary fix, then delete the package copies that
+exist only because Core lacked them. Owner decisions already settled: Core owns the refusal
+dialog; a refusal STOPS a chain while an error still asks; scope excludes the remaining W1
+minors. Contract goes to v2.4.0.
+
+**Read manifest for the next phase.** `docs/designs/2026-07-28-core-refuse-pass-plan.md`
+(28K — the contract, read whole) · `spec/contract.md` (68K — **over the slice threshold**;
+grep `## 6.` and `## 10.`) · `src/core/Core.bas` (232K — **never read whole**; grep
+`docs/code-map.md` (36K, current at `bafb905`) for `Core_Done`, `RunAction`,
+`Core_RunChain`, `Core_SheetExists`) · `src/packages/PkgImport.bas` (40K — 8 refusal sites)
+· `src/packages/PkgClean.bas` (36K — 1 refusal site) ·
+`docs/designs/2026-07-28-w1-manual-gate.md` (32K — gains the new items in Task 5).
+
 ### 2026-07-28 — track 1 finished and shipped (v0.7.0–v0.9.0); W1 approved, not started
 
 **Branch / commits.** All on `main`, five PRs merged: **#14** Part A (v0.6.0),
