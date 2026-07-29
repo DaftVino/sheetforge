@@ -121,14 +121,26 @@ Rules, each of which exists because of something in the current code:
 - **Ids are de-duplicated and kept in declaration order.** Several fields in one section
   usually share a `usedBy`; `BACKUP & SNAPSHOT` has one field used by four actions and another
   used by one.
-- **A field with an empty `usedBy` contributes nothing.** An empty `usedBy` means
-  deployment-wide, and `FieldInUse` returns True for it unconditionally. A section of only
-  such fields — `GENERAL` is the case — gets **no prefix at all**, not an empty one and not a
-  separator with nothing before it.
+- **Each id is tested on its own, not just the field it sits on.** `FieldInUse` is an **ANY**
+  test — it reports a field in use when *one* of its ids is runnable. `k_backup_folder` names
+  all four backup actions, so switching three on leaves the field in use while one action is
+  `Off`. Naming all four there would caption a macro the user deliberately disabled and can see
+  no button for, which is wrong in the direction they cannot detect. So the per-id filter is
+  separate from the per-field one. `Chains only` counts as runnable: a chain can still run the
+  action, so its options still have to be answerable and its name still belongs on the band.
+- **A field with an empty `usedBy` contributes nothing**, so a band with no macro of its own
+  keeps its bare title with no orphaned separator. **This path is unreachable today** — all 40
+  field declarations name at least one action — so it is defensive only, and no checklist item
+  covers it because none could be executed. `GENERAL` is **not** an example: both `GENERAL`
+  bands tie every field to specific export actions and therefore do get a prefix.
 - **No truncation.** The four-caption case is long, and a shortened list that silently drops a
   macro is worse than a long header: the whole point is to tell the user which macros these
-  fields reach. The header row is a full-width tinted row with nothing to its right, so it
-  overflows like any other.
+  fields reach. **Note the height mechanism, because it is not AutoFit.** `TintRow` merges B:E,
+  and Excel's AutoFit does not resize a row containing merged cells — which is why `TintRow`
+  computes the height itself, as `(Len(txt) \ 115) + 1` lines. The longest header the toolkit can
+  currently produce is the four backup captions at ~132 characters, which that estimate puts on
+  two lines. It fits, but it fits by estimate rather than by measurement, so checklist item 4.39
+  exists to look at exactly that case.
 - **Captions, not ids.** The user picked captions in the action catalog. `ActionCaptionFor`
   falls back to the id when a lookup fails, which is the right failure: an unresolvable id
   shows as itself rather than vanishing.

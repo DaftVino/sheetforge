@@ -2279,10 +2279,25 @@ Fail:
     MsgBox "Core_BuildSetup error: " & Err.Description, vbExclamation, "Create Setup Tab"
 End Sub
 
-' Return the action ids, in declaration order, for fields that will actually render
-' under this section. Re-applying RenderTier's tier and FieldInUse tests prevents a
-' header from naming an action whose fields are in another tier or the off band;
-' trusting the section's declaration would let the scan drift from the lazy header.
+' Return the action ids, in declaration order, that this section's header should
+' name. Two filters, and BOTH are load-bearing.
+'
+' FIELD level: re-apply RenderTier's own tier and FieldInUse tests, so the header
+' cannot name an action whose fields are in another tier or down in the off band.
+' Trusting the section's declaration instead would let this scan drift away from
+' the lazy header RenderTier actually draws.
+'
+' ID level: FieldInUse is an ANY test - it reports a field in use when just ONE of
+' its ids is runnable - so passing it does NOT mean every id on that field is on.
+' k_backup_folder names all four backup actions; switch three on and the field is
+' in use, but naming all four would caption an action the user deliberately turned
+' Off. That is wrong in the one direction the user cannot detect, since the header
+' would be advertising a macro they cannot see a button for. So each id is tested
+' on its own with the same IsRunnable call FieldInUse uses per id.
+'
+' An UNKNOWN id is kept, matching FieldInUse's own "unknown id -> in use" stance.
+' ActionCaptionFor falls back to the raw id, so a stale usedBy surfaces as itself
+' in the header rather than disappearing silently.
 Private Function SectionActionIds(reg As Object, ByVal sectionIndex As Long, _
                                   ByVal tier As String, availMap As Object, _
                                   ByVal wantInUse As Boolean) As Collection
@@ -2290,7 +2305,7 @@ Private Function SectionActionIds(reg As Object, ByVal sectionIndex As Long, _
     ' already argues for at BuildRegistry: an auto-instantiating local silently
     ' re-creates itself on the next reference after being set to Nothing.
     Dim result As Collection, seen As Object, f As Object
-    Dim ids() As String, i As Long, j As Long, actionId As String
+    Dim ids() As String, i As Long, j As Long, actionId As String, entry As String
 
     Set result = New Collection
     Set seen = CreateObject("Scripting.Dictionary")
@@ -2306,9 +2321,11 @@ Private Function SectionActionIds(reg As Object, ByVal sectionIndex As Long, _
                         For j = LBound(ids) To UBound(ids)
                             actionId = Trim(ids(j))
                             If Len(actionId) > 0 Then
-                                If Not seen.Exists(actionId) Then
-                                    seen.Add actionId, True
-                                    result.Add actionId
+                                If IdWorthNaming(actionId, availMap, entry) Then
+                                    If Not seen.Exists(actionId) Then
+                                        seen.Add actionId, True
+                                        result.Add actionId
+                                    End If
                                 End If
                             End If
                         Next j
@@ -2318,6 +2335,18 @@ Private Function SectionActionIds(reg As Object, ByVal sectionIndex As Long, _
         End If
     Next i
     Set SectionActionIds = result
+End Function
+
+' One id's own verdict, split out so the per-id rule sits beside FieldInUse's
+' identical per-id test rather than being paraphrased inside a nested loop.
+' entry is FindActionOwner's ByRef out-parameter and is not used here.
+Private Function IdWorthNaming(ByVal actionId As String, availMap As Object, _
+                               ByRef entry As String) As Boolean
+    If FindActionOwner(actionId, entry) Is Nothing Then
+        IdWorthNaming = True                  ' unknown id - surface it, do not hide it
+    Else
+        IdWorthNaming = IsRunnable(availMap, actionId)
+    End If
 End Function
 
 ' Turn an ordered id list into the complete caption prefix. An empty list returns

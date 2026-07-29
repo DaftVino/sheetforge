@@ -544,17 +544,25 @@ neighbour to overflow into, so the text was clipped at 34 characters no matter w
 - [ ] **4.33a — The reminder is fully readable, and tells you to Finalize TWICE.**
   Switch one action to `Button` and read `D1` without widening any column or clicking into the
   cell.
-  *Expected:* the whole sentence is visible, spilling right across E, F, G and H, in **bold
-  dark red**. It names three clicks in order: `Finalize Setup Tab`, then `Create Setup Tab`,
-  then `Finalize Setup Tab` **again**.
+  *Expected:* the whole sentence is visible, in **bold dark red**, and it names three clicks in
+  order: `Finalize Setup Tab`, then `Create Setup Tab`, then `Finalize Setup Tab` **again**.
   *Failure:* text cut off at the edge of column D; or a version that stops after
   `Create Setup Tab` and never mentions finalizing a second time.
-  *Why:* both halves of this are the defect being fixed. The old text taught two of the loop's
-  four steps and went quiet exactly where the user has new fields in front of them and no idea
-  that answering them is not enough. And the old cell had a nav link to its right, so it could
-  not overflow — this one is legible only because `E1:H1` are empty. **A wrapped `D1` is a
-  failure even if you can read it**: wrapping means someone set `WrapText`, which reintroduces
-  clipping the moment the text grows.
+
+  **How to tell a pass from a near-pass, since both are readable.** Row 1 must still be a
+  **single line tall** — the same height as every other row on the sheet — with the sentence
+  running unbroken to the right, straight across where the borders of E, F, G and H would be.
+  That is spill.
+  *Failure, even though you can read it:* row 1 is **two or three lines tall** and the text is
+  stacked inside the width of column D. That is wrap, and it means someone set `WrapText` on the
+  cell. It looks fine at today's length and silently clips the moment the sentence grows, which
+  is the original defect coming back by another route.
+
+  *Why:* both halves of this item are the defect being fixed. The old text taught two of the
+  loop's four steps and went quiet exactly where the user has new fields in front of them and no
+  idea that answering them is not enough. And the old cell had the `Setup Menu` nav link
+  immediately to its right — Excel spills overflow text only across **empty** cells, so it was
+  clipped at 34 characters no matter what. This one is legible only because `E1:H1` are empty.
 
 ### New in this phase — the header notes
 
@@ -596,18 +604,27 @@ neighbour to overflow into, so the text was clipped at 34 characters no matter w
   Set **Split One Column Into Many** to `Button`, Finalize, then Create Setup Tab. Scroll to the
   `Clean & Standardize` band and read the header above the two split fields.
   *Expected:* it reads **`Split One Column Into Many  -  SPLIT COLUMN`** — the macro's caption
-  first, then the old band title, separated by a dash.
-  *Failure:* a bare `SPLIT COLUMN`, or a header naming a macro you did not switch on.
+  first, then the band title, separated by a dash. The band title is upper case; it was the one
+  mixed-case section title in the toolkit until v0.18.0 and was normalised in the same change.
+  *Failure:* a bare `SPLIT COLUMN`, a mixed-case `Split Column`, or a header naming a macro you
+  did not switch on.
   *Why:* you just picked from 51 captions, and a band named after a topic gives you nothing to
   match that choice against.
 
 - [ ] **4.39 — A band shared by several macros names every one of them.**
-  Set **all four** Protect & Back Up actions to `Button` (Backup Now, Snapshot Before a Risky
-  Step, Save Month-End Version, Archive a Generated Output), Finalize, Create Setup Tab.
-  *Expected:* the `BACKUP & SNAPSHOT` header lists **all four captions** before the title. The
-  row is taller than one line and **every caption is readable** — the header is a merged,
-  wrapped B:E row that AutoFit grows.
-  *Failure:* a truncated list, an "and 3 more", or a caption cut off at the row's edge.
+  Set **all four** Protect & Back Up actions to `Button` — `Backup Now (Timestamped Copy)`,
+  `Snapshot Before a Risky Step`, `Save Month-End Version`, `Archive a Generated Output` — then
+  Finalize and Create Setup Tab. Those are the full captions as they appear in the action
+  catalog.
+  *Expected:* the `BACKUP & SNAPSHOT` header lists **all four captions** before the title, and
+  **every caption is readable**. The row will be two lines tall.
+  *Failure:* a truncated list, an "and 3 more", or a caption cut off at the bottom of the row.
+  *Why the row height matters:* band header rows are merged B:E, and **Excel's AutoFit does not
+  resize a row containing merged cells** — so the engine sets the height itself from a character
+  count (roughly 115 characters per line). This is the longest header the toolkit can currently
+  produce, at about 132 characters, so it is the case that tests whether that estimate is
+  generous enough. A caption clipped at the bottom edge means the estimate is short, not that
+  the prefix is wrong.
   *Why:* one field there is used by all four actions. A header that silently drops one tells
   you a setting reaches fewer macros than it does, which is the opposite of the point.
 
@@ -623,14 +640,26 @@ neighbour to overflow into, so the text was clipped at 34 characters no matter w
   forever — and it would be wrong in the one direction a user cannot detect, because the macro
   it names is one they deliberately turned off.
 
-- [ ] **4.41 — A band with no macro of its own gets no prefix.**
-  Find a band whose fields are deployment-wide rather than belonging to one action — `GENERAL`
-  is the case.
-  *Expected:* its header is unchanged: **no caption, and no leading dash or separator**.
-  *Failure:* a header that starts with a dash before its title, or one naming an unrelated
-  macro.
-  *Why:* those fields have an empty `usedBy`, which means "applies to the whole deployment".
-  An empty prefix must render as nothing at all, not as an empty slot.
+- [ ] **4.41 — A macro set to `Chains only` is still named on its band.**
+  Set **Split One Column Into Many** to `Chains only` — not `Button` — then Finalize and Create
+  Setup Tab.
+  *Expected:* the `SPLIT COLUMN` band is **present** in the main area with its two fields, and
+  its header still reads `Split One Column Into Many  -  SPLIT COLUMN`.
+  *Failure:* the band missing, dropped into the collapsed `SETTINGS FOR ACTIONS YOU HAVEN'T
+  TURNED ON` band, or present with its caption gone from the header.
+  *Why:* `Chains only` gives the action no button but a chain can still run it — so its options
+  still have to be answerable, and the header still has to say whose they are. This is the case
+  where "is it switched on?" and "does it have a button?" give different answers, and the code
+  has to use the first. Getting it wrong the other way hides the settings for a macro that can
+  still run, and the user has nowhere to set them.
+
+**No item covers a band whose fields have an empty `usedBy`**, and that is deliberate rather
+than an omission. Every one of the 40 field declarations in the toolkit names at least one
+action, so a band with no macro of its own cannot occur today — an item for it could not be
+executed. The engine still handles the case (an empty list yields no prefix and no orphaned
+separator) because a future field may omit `usedBy`; it is simply not reachable to test. `GENERAL`
+is **not** an example: both `GENERAL` bands tie every field to specific export actions, so they
+do get a prefix.
 
 ---
 
