@@ -93,7 +93,7 @@ Public Sub PkgImportExport_Clear(ctx As Object)
     On Error GoTo Fail
 
     If Not Core_CfgTable(ctx, "k_import", tabNames, prefixes, typeMaps) Then
-        MsgBox "No input tabs are configured.", vbExclamation, "Clear Input Tabs"
+        Core_Refuse ctx, "No input tabs are configured.", "Clear Input Tabs"
         Exit Sub
     End If
 
@@ -123,7 +123,7 @@ Public Sub PkgImportExport_Import(ctx As Object)
     On Error GoTo Fail
 
     If Not Core_CfgTable(ctx, "k_import", tabNames, prefixes, typeMaps) Then
-        MsgBox "No import files are configured.", vbExclamation, "Import Source Data"
+        Core_Refuse ctx, "No import files are configured.", "Import Source Data"
         Exit Sub
     End If
 
@@ -216,20 +216,20 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
 
     srcPath = Core_FindFile(mPrefix)
     If srcPath = "" Then
-        MsgBox "No file matching """ & mPrefix & "*"" was found in this folder.", _
-               vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "No file matching """ & mPrefix & "*"" was found in this folder.", _
+               "Update Ref_Master"
         Exit Sub
     End If
     If Not Core_SheetExists(mDest) Then
-        MsgBox "Destination tab '" & mDest & "' was not found in this workbook.", _
-               vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "Destination tab '" & mDest & "' was not found in this workbook.", _
+               "Update Ref_Master"
         Exit Sub
     End If
     Set wsDst = ThisWorkbook.Worksheets(mDest)
     Set cols = Core_CfgList(ctx, "k_master_cols")
     nCols = cols.Count
     If nCols = 0 Then
-        MsgBox "No Ref_Master columns are configured.", vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "No Ref_Master columns are configured.", "Update Ref_Master"
         Exit Sub
     End If
     ReDim srcCol(1 To nCols)
@@ -245,8 +245,8 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
         wbSrc.Close SaveChanges:=False
         Application.AskToUpdateLinks = True
         Core_SpeedOff
-        MsgBox "Sheet '" & mSheet & "' not found in the master file.", _
-               vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "Sheet '" & mSheet & "' not found in the master file.", _
+               "Update Ref_Master"
         Exit Sub
     End If
 
@@ -261,8 +261,8 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
         wbSrc.Close SaveChanges:=False
         Application.AskToUpdateLinks = True
         Core_SpeedOff
-        MsgBox "Could not find these column header(s) on sheet '" & mSheet & "':" & missing, _
-               vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "Could not find these column header(s) on sheet '" & mSheet & "':" & missing, _
+               "Update Ref_Master"
         Exit Sub
     End If
 
@@ -318,7 +318,7 @@ Public Sub PkgImportExport_Export(ctx As Object)
 
     Set expTabs = Core_CfgList(ctx, "k_export_tabs")
     If expTabs.Count = 0 Then
-        MsgBox "No export tabs are configured.", vbExclamation, "Export Dashboard"
+        Core_Refuse ctx, "No export tabs are configured.", "Export Dashboard"
         Exit Sub
     End If
     mainTabs = CollectionToArray(expTabs)
@@ -327,14 +327,17 @@ Public Sub PkgImportExport_Export(ctx As Object)
     ' every visible main tab must exist
     For Each t In mainTabs
         If Not Core_SheetExists(CStr(t)) Then
-            MsgBox "Missing tab: " & t & vbCrLf & "Export cancelled.", vbExclamation, "Export Dashboard"
+            Core_Refuse ctx, "Missing tab: " & t & vbCrLf & "Export cancelled.", "Export Dashboard"
             Exit Sub
         End If
     Next t
     If Not Core_SheetExists(setSh) Then
-        MsgBox "Settings sheet '" & setSh & "' not found. It must stay in" & vbCrLf & _
-               "the export (hidden) for the conditional-formatting thresholds.", _
-               vbExclamation, "Export Dashboard"
+        ' The line break moved to after the first SENTENCE, not into the middle of the
+        ' second one. A chain summary quotes only the first line, and "It must stay in"
+        ' cut off there reads as a truncated message rather than a reason.
+        Core_Refuse ctx, "Settings sheet '" & setSh & "' not found." & vbCrLf & _
+               "It must stay in the export (hidden) for the conditional-formatting " & _
+               "thresholds.", "Export Dashboard"
         Exit Sub
     End If
 
@@ -457,9 +460,9 @@ Public Sub PkgImportExport_SuggestTypes(ctx As Object)
     On Error GoTo Fail
 
     If Not Core_SetupTable("k_import", tabs, prefixes, typeMaps) Then
-        MsgBox "No import rows on the Setup tab yet." & vbCrLf & _
+        Core_Refuse ctx, "No import rows on the Setup tab yet." & vbCrLf & _
                "Run 'Create Setup Tab', fill each input tab + source-file prefix, then try again.", _
-               vbExclamation, "Suggest Import Types"
+               "Suggest Import Types"
         Exit Sub
     End If
 
