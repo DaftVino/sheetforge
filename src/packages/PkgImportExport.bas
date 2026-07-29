@@ -50,7 +50,8 @@ Public Sub PkgImportExport_Manifest(reg As Object)
     Core_AddSection reg, "IMPORT FILES"
     Core_AddTable reg, "k_import", "Import files (one row per input tab)", "Input tab (in this workbook)|Source file (name starts with...)|Column types", _
         help:="Input tab = the tab in THIS workbook to paste the data into.   Source file = the newest file in THIS workbook's folder whose name STARTS WITH the text you type (a trailing (1) or (2) copy number is ignored, so downloads don't need renaming).   Column types = one letter per column, left to right, comma-separated: T=Text (keeps IDs, codes, leading zeros), N=Number, D=Date, DT=Date+time, B=Yes/No, G=auto-detect.   Tip: fill the first two columns, then click 'Suggest Import Types' to fill the letters for you, and review them.", _
-        usedBy:="importexport.clear, importexport.import, importexport.suggestTypes"
+        usedBy:="importexport.clear, importexport.import, importexport.suggestTypes", _
+        colNotes:="||T keeps text exactly as it is, including IDs and leading zeros; N is a number; D is a date; DT is date and time; B is yes/no; G lets Excel decide. Enter one code per column, left to right, separated by commas. Any other code is treated as G (auto-detect) with no warning, so a typo can cause an ID column to lose leading zeros."
     Core_AddDefault reg, "k_import", "IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_Data2|Source File B|T,T,T,T,T,T,T,T,N,N,N,N,N,N,N"
     Core_AddDefault reg, "k_import", "IN_Data3|Source File C|T,T,T,T,T,T,T,N,N,N,N"

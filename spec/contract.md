@@ -51,11 +51,22 @@ field is the following record:
   "tier":     "\"simple\" | \"advanced\"  (see §4)",
   "default":  "string — scalar default (kinds text/int/sheet/file/bool)",
   "headers":  "string — column header(s); list = one header, table = \"|\"-delimited",
+  "headerNotes": "string — optional per-column note, \"|\"-delimited, positionally matching headers (v2.10.0)",
   "defaults": ["ordered seed rows for kind list/table; see §3"],
   "help":     "string — optional plain-language note shown under the field",
   "usedBy":   "string — optional comma-separated action ids this field configures (v1.2.0)"
 }
 ```
+
+- **`headerNotes` (v2.10.0, optional).** A per-column explanation of what the
+  column accepts, attached to the column's own header rather than printed as
+  more prose above the block. Positionally matched to `headers`; an empty entry
+  means no note for that column. It exists because a `table` field's headers are
+  **package-supplied**, so the engine cannot annotate them without knowing which
+  packages exist — which is the layering rule this contract keeps. A platform
+  whose surface has no per-cell annotation MAY render these anywhere it likes,
+  or not at all: no behaviour depends on them, and a port is not obliged to
+  invent a tooltip mechanism to conform.
 
 - **`key` uniqueness is contract-critical.** The runtime config is a single flat
   key→value store shared by all enabled packages, so every `key` must be unique
@@ -1133,6 +1144,13 @@ port realizes them per platform rather than re-deriving them:
   display strings, not ids: no id is renamed, `importexport.updateMaster` keeps its camelCase,
   and §7's eight permanent shipped exceptions are untouched. The numbers described a fixed
   four-step order that stopped being the only way to use these actions once chains existed.
+
+  A `table` field gains an optional `headerNotes` (§2): a per-column explanation attached to
+  the column's own header. It is optional and positionally matched to `headers`, so no
+  existing declaration changes shape. It exists because a table's headers are package-supplied
+  and the engine cannot annotate them without knowing which packages exist. A platform with no
+  per-cell annotation surface may render them however it likes or not at all — nothing depends
+  on them.
 
 - **v2.9.0 (additive):** the `workbook` domain's package, fields, and five actions (§8); one
   new reserved-name normative rule for `text`-kind destination fields (§7). The reserved-name
