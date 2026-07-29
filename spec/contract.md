@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.6.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.7.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -931,6 +931,43 @@ unconfigured deployment.
 | `export.freeze_values` | Freeze Formulas to Values | Prompt for a range. Count its formula cells (including dynamic-array spill anchors); refuse if none. Show the count and ask to proceed, stating this cannot be undone. On yes: convert every formula in the range - including spills and legacy CSE arrays - to a static value, using the same flattening behavior `importexport.export` already applies per sheet (§ Core_FreezeValues). Promoted from being embedded inside `importexport.export` to a standalone, range-scoped action; `importexport.export`'s own behavior is unchanged. |
 | `export.pdf` | Export to PDF | Resolve the export folder; refuse if the workbook has never been saved and no folder is configured, or if the configured folder does not exist. Ask whether to export the whole workbook, one sheet, or a range (workbook / sheet / range); an unrecognised answer is refused, naming the three accepted tokens. Build the dated output path (`k_export_date_offset` + `k_export_pdf_base`); refuse rather than overwrite if a file already exists at that path. For "sheet", refuse if the named sheet does not exist or is engine-owned. For "range", the picked range temporarily becomes the target sheet's print area for the export and is restored to its prior value immediately after, whether the export succeeds or fails. Writes one PDF. |
 | `export.per_sheet` | Export Each Tab Separately | Validate `k_export_persheet_format` is `pdf` or `xlsx`; refuse otherwise. Resolve and validate the export folder as `export.pdf` does. Build the list of every VISIBLE, non-engine-owned sheet (§ Decision 6 - hidden sheets are excluded too, on top of the required engine-sheet exclusion); refuse if none. Check every target file path for an existing collision, AND every target path against every other target path for a collision WITHIN this batch (sanitizing is many-to-one - two different, both-legal sheet names can produce the identical file name); refuse the WHOLE batch, naming every collision, if even one exists - no file is written until every target is clear. That refusal is all-or-nothing; the write itself is not transactional - it proceeds file by file, and a failure partway through leaves the files already written in place, with the failure message stating how many succeeded before the error. Otherwise show the full file list and ask to proceed. On yes: write one file per sheet, named `<date> <sheet name>.<ext>`. The `xlsx` path flattens every formula in a full workbook copy (via `Core_FreezeValues`, same technique `importexport.export` already relies on) before isolating each sheet, so a sheet with a cross-sheet formula does not export with a broken reference. |
+### Package `summarize` - "Summarize & Analyze" (v1.0.0)
+
+**Fields**
+
+None. Every action either takes no input (`summarize.recalculate`), operates on every sheet
+(`summarize.refresh_pivots`), or prompts for its range and columns at run time
+(`summarize.build_pivot`, `summarize.freeze_pivot`) - none of the four describes a fact about
+the deployment, so none is a config field. Same precedent `clean` set before v2.3.0 gave it
+its first field.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `summarize.refresh_pivots` | Refresh All PivotTables | Refresh every PivotTable on every sheet in the workbook, skipping engine-owned sheets (§7's `Core_IsEngineSheet` test). Success MUST be read from `RefreshTable`'s own documented Boolean return value, not merely inferred from the absence of a raised error. A PivotTable whose refresh raises or returns `False` MUST NOT stop the others; it MUST be counted and named (sheet, pivot, error) in the completion report rather than silently skipped or aborting the run. With no PivotTables anywhere in the workbook the action MUST refuse rather than report a vacuous success. |
+| `summarize.recalculate` | Recalculate Workbook | Force a full recalculation of every formula in the workbook. This action MUST NOT refuse under any condition: it changes no stored value, so no precondition can be unmet. |
+| `summarize.build_pivot` | Build a Summary Table | Prompt for a range whose first row MUST be treated as its header, then which column(s) to group by and which to sum. Write the result as a new PivotTable on a new sheet. Every value column is aggregated by SUM; a per-column aggregation choice is out of scope for this version. The destination sheet MUST NOT overwrite an existing sheet - same refusal rule as `import.combine_worksheets`. |
+| `summarize.freeze_pivot` | Freeze a Pivot to Values | Prompt for a cell; resolve the PivotTable that cell belongs to, refusing by name if it belongs to none. Copy that pivot's current output - values, number formats, and column widths - to a new sheet. The action MUST NOT modify the source PivotTable (no refresh, no write to its cells). Same destination-sheet refusal rule as `summarize.build_pivot`. |
+
+### Package `enrich` - "Match & Enrich" (v1.0.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_enrich_lookup_sheet` | sheet | simple | `Ref_Master` | The reference sheet `enrich.mapped_columns` reads from. Unlike a destination-sheet field (e.g. `k_import_dest`), this one MUST already exist - a conforming implementation MUST refuse rather than create it. `usedBy` `enrich.mapped_columns`. |
+| `k_enrich_lookup_key` | text | simple | `Store ID` | A column letter or header-text spec, resolved the same way as `k_clean_formats`' Column cell (§8, package `clean`): a one-to-three-letter value is read as a letter, anything else is matched against the target's own first row. Used against BOTH the reference sheet and whatever range the caller selects - the matching column has one name for both sides. `usedBy` `enrich.mapped_columns`. |
+| `k_enrich_mapped` | table | simple | none | One row per column to add. Two columns: **Reference column** (letter or header text in the reference sheet) and **New column header** (the header given to the added column). Declares NO default rows, for the same reason `k_clean_formats` does not (§8, package `clean`): §5 resolves an empty stored table to the field's declared defaults, so demo rows would make `enrich.mapped_columns`' required "nothing configured" refusal unreachable. `usedBy` `enrich.mapped_columns`. |
+
+`k_enrich_mapped` header: `Reference column (letter or header)|New column header`.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `enrich.join` | Join / Enrich Columns | Prompt for a target range and a reference range, each with its header row included and treated as such - there is no "does this have a header" branch. Prompt for the ONE matching column on each side (a multi-column answer MUST be refused, not narrowed to its first entry) and which reference column(s) to copy in. Match by building an in-memory dictionary keyed on the reference's matching column, then scanning the target once - an implementation MUST NOT re-scan the reference table per target row (dictionary lookup, not nested iteration). Key comparison MUST be exact aside from leading/trailing whitespace and case; an implementation MUST NOT normalize keys in any way that could make two distinct source values compare equal (e.g. collapsing internal whitespace or stripping characters). A reference key seen more than once MUST resolve to its FIRST occurrence; the number of DISTINCT reference keys that had at least one duplicate MUST be counted and reported, never silently overwritten and never a reason to refuse the whole action. A target row matching no reference key, or whose own key is blank, MUST be left blank in the new columns and counted as unmatched, not treated as an error. New columns are written immediately to the right of the target range, headed with the reference table's own header text, and only after the implementation confirms every cell in that exact destination block is empty and the user has confirmed the write; if any cell there is already occupied, the action MUST refuse rather than overwrite it. |
+| `enrich.mapped_columns` | Add Mapped Columns | Prompt only for the target range; the reference sheet, its matching column, and which columns to add come from `k_enrich_lookup_sheet` / `k_enrich_lookup_key` / `k_enrich_mapped`. MUST share the match implementation with `enrich.join` - same first-wins-and-counted-by-distinct-key duplicate-key rule, same key normalization policy, same unmatched-row rule, same append-to-the-right placement guarded by the same empty-destination check - differing only in where its five inputs come from. MUST refuse if the configured reference sheet does not exist, if the configured key does not resolve on the reference sheet, or if `k_enrich_mapped` is empty or none of its rows resolve to a real reference column. |
 ---
 
 ## 9. Platform-abstraction appendix
@@ -995,6 +1032,12 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.7.0 (additive):** two new packages, `summarize` (four actions, no fields) and `enrich`
+  (three fields, two actions). Both domains were already listed `active` in §7's vocabulary
+  table before this version - this bullet backs that listing with a shipping package, and
+  changes no vocabulary. `SCHEMA_VER` does **not** move - it stays `"v2.0"` and every existing
+  configuration keeps its meaning. No `key`, action `id`, or field `kind` from any earlier
+  version is renamed, removed, or reinterpreted.
 - **v2.6.0 (additive):** two new packages, `format` (one field, five actions) and `export`
   (four fields, three actions) - §8. `export.freeze_values` promotes logic that already
   shipped embedded inside `importexport.export`; that action's own id, fields and behavior

@@ -6,6 +6,43 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-28
+
+### Added
+
+- **A join done in code, not with lookup formulas.** Point it at a target range and a
+  reference sheet, name the key column in each, list the columns to pull across, and it
+  writes them in. It builds an index of the reference table once and looks each key up
+  directly, so it does not slow down as the data grows the way a sheet full of VLOOKUPs does.
+
+  **Two things it does deliberately, because both are how a join quietly produces wrong
+  numbers.** Keys are compared after trimming outside whitespace and nothing else - an
+  earlier version also collapsed spaces *inside* the key, which can map two genuinely
+  different identifiers onto one another. And when the reference table has the same key more
+  than once, it reports **how many distinct keys were duplicated**, not how many extra rows it
+  saw; it takes the first and tells you, rather than picking one silently.
+
+- **Add mapped columns from a reference sheet** shares that same engine, driven from Setup
+  rather than asked each run.
+
+- **Refresh all pivots and Force full recalculation are now their own buttons.** Both were
+  locked inside the import action, so the only way to refresh a pivot was to re-import
+  everything. As standalone actions they can also be chain steps.
+
+  **Refresh reports a pivot it could not refresh rather than counting it as done.** A pivot
+  whose source has gone raises, and the old inline version could not tell you which one.
+
+- **Build a summary pivot** from a range, and **Freeze a pivot to values** for distribution.
+  Both refuse a source range with a blank or duplicated header, because a pivot built on one
+  fails later with an error that points nowhere near the cause. If either fails partway, it
+  removes the half-built sheet rather than leaving it behind, and still reports the original
+  error rather than the cleanup.
+
+### Changed
+
+- **Contract v2.7.0.** Adds the `summarize` and `enrich` packages. Additive: `SCHEMA_VER`
+  stays `"v2.0"`.
+
 ## [0.14.0] - 2026-07-28
 
 ### Added

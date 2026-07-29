@@ -10,16 +10,20 @@ section 7): `backup.timestamped_copy`, `backup.snapshot`, `backup.month_end_vers
 the unblocker several *Deferred* catalog items are waiting on - so this plan is explicit and
 loud about exactly how much of that promise it delivers and how much it does not.
 
-**Architecture:** One new package, one new module, no Core behaviour change beyond promoting
-one existing helper. Three of the four actions (`timestamped_copy`, `snapshot`,
-`month_end_version`) are the same underlying move - copy this workbook, as it stands right
-now, to a computed path that does not yet exist - with a different destination-naming rule
-each. They share two small private helpers (`PkgBackup_EnsureFolder`, `PkgBackup_Ext`) but do
-their own precondition checks and write their own refusal text, because the earliest-cheapest-
-failure rule and the per-action wording both matter more than collapsing three call sites into
-one. The fourth (`archive_output`) is the wave's only genuinely destructive filesystem action -
-it moves a file that already exists - and reuses `Core_FindFile` (existing) and a newly
-promoted `Core_AlreadyOpen` (moved from `PkgImport`) rather than inventing either.
+**Architecture:** One new package, one new module, **no Core behaviour change** - the one
+helper this package leans on for `archive_output` (`Core_AlreadyOpen`) was already promoted to
+Core ahead of this wave and is already in use by `PkgImport`; this plan only consumes it. Three
+of the four actions (`timestamped_copy`, `snapshot`, `month_end_version`) are the same
+underlying move - copy this workbook, as it stands right now, to a computed path that does not
+yet exist - with a different destination-naming rule each. They share small private helpers
+(`PkgBackup_EnsureFolder`, `PkgBackup_Ext`, and the snapshot-only `PkgBackup_PruneSnapshots` /
+`PkgBackup_IsSnapshotName`) but do their own precondition checks and write their own refusal
+text, because the earliest-cheapest-failure rule and the per-action wording both matter more
+than collapsing three call sites into one. The fourth (`archive_output`) moves a file that
+already exists and reuses `Core_FindFile` (existing) and `Core_AlreadyOpen` (existing) rather
+than inventing either - and it is **not** this package's only destructive filesystem operation:
+`backup.snapshot`'s own pruning step also deletes files, held to the same ownership-proof
+standard described where it is defined below.
 
 **Tech stack:** VBA (Excel/Windows, one concatenated `.bas`), PowerShell for the build, Node
 for the syntax check. No test framework - see *Verification*.
@@ -27,9 +31,10 @@ for the syntax check. No test framework - see *Verification*.
 **Runs after W4** (`2026-07-28-w4-summarize-enrich-plan.md`) and **before W6**. Sequencing:
 `2026-07-28-track2-completion-plan-of-record.md` section 2. Written against the Core API from
 `2026-07-28-core-helper-promotion-plan.md` - every `Core_*` helper this plan calls is assumed
-already merged to `main` by the time this wave branches.
+already merged to `main` by the time this wave branches. `Core_AlreadyOpen` specifically is
+already merged (`src/core/Core.bas`) and already consumed by `PkgImport_CombineEngine`.
 
-**Also depends on `2026-07-28-w3-format-export-plan.md` having landed**, because Task 5 calls
+**Also depends on `2026-07-28-w3-format-export-plan.md` having landed**, because Task 3 calls
 `Core_SafeFileName`, which that plan adds to Core (its Task 2, Step 2). W3 ships as phase 4 and
 this wave as phase 6, so `Core_SafeFileName` is expected to already be in `main` by the time this
 wave branches - but if it is not there when this plan is picked up, W3 has not landed; reconcile
@@ -53,15 +58,20 @@ story." That claim needs checking, not repeating, so this plan checked it.
 | Delete all empty sheets | 217 | Destructive with no preview; "empty" is easy to get wrong. |
 | Loop a folder of workbooks and process each | 252 | A defined per-file continue/abort contract and failure reporting. |
 
-**Only three of the five actually name a missing-undo problem** (rows 2-4). The other two are
-blocked on something a restore point cannot fix: a closed-workbook read failure mode, and a
-chain-contract question. Snapshot is irrelevant to those two regardless of how good its restore
-story is. This is stated here, once, so a later reader does not have to re-derive it from a
-looser "several" and conclude this wave unblocked five items when it is at most three - and, per
-the next section, actually zero.
+**Only one of the five actually names a missing-undo problem: "Hide all sheets except the
+active one" (line 211).** Read closely, the other two destructive items are blocked on
+something else entirely - "Delete all hidden rows / columns" (line 85) is blocked on the
+*absence of a preview*, not on undo, and "Delete all empty sheets" (line 217) is blocked on that
+same missing preview plus an undefined term ("empty"). Neither of those two blockers names undo
+as the problem, so a restore point does not address either one, whatever the quality of its
+restore story is. The remaining two items (closed-workbook read, folder loop) are blocked on
+things a restore point was never going to fix: a read failure mode, and a chain-contract
+question. This is stated here, once, so a later reader does not have to re-derive it from a
+looser "several" and conclude this wave unblocked several items when it is at most one - and,
+per the next section, actually zero.
 
-**And of those three, this wave does not unblock any of them, and says so instead of implying
-otherwise.** See "Restore path" below.
+**And of that one, this wave does not unblock it, and says so instead of implying otherwise.**
+See "Restore path" below.
 
 ---
 
@@ -70,9 +80,9 @@ otherwise.** See "Restore path" below.
 | # | Question | Decision |
 |---|---|---|
 | 1 | Where does a snapshot live - a hidden sheet in this workbook, or a separate file? | **A separate file: a full `SaveCopyAs` copy of the whole workbook.** A hidden sheet is recoverable in one click and travels with the workbook, but it dies with the workbook - and the entire reason a restore point exists is the scenario where the workbook itself is the thing that broke (a crash mid-write, a macro that corrupts a structure, a bad save). A sheet-shaped snapshot also only ever captures one sheet; the actions it is meant to guard (Import, Clear, and by extension anything W5 cannot see the shape of yet) can touch more than one. A separate file is heavier to produce and has no one-click recovery, but it is the only shape that survives the failure it exists to protect against. |
-| 2 | Does this wave provide a restore path? | **No, and that is stated loudly rather than implied away.** None of the four frozen action ids for W5 is a restore action, and no restore id appears anywhere in the catalog. `backup.snapshot` supplies the save half of "an undo story"; the restore half does not exist in this codebase. **The three Deferred items that cite a missing-undo blocker (hide-all-except-active, delete-hidden-rows/cols, delete-empty-sheets) stay Deferred after this wave ships.** Unblocking any of them needs a `backup.restore_*`-shaped action - itself a destructive overwrite of live data, needing its own confirm-and-preview design - which is not in this wave's frozen scope and is not proposed here. |
+| 2 | Does this wave provide a restore path? | **No, and that is stated loudly rather than implied away.** None of the four frozen action ids for W5 is a restore action, and no restore id appears anywhere in the catalog. `backup.snapshot` supplies the save half of "an undo story"; the restore half does not exist in this codebase. **The one Deferred item that actually cites a missing-undo blocker - hide-all-except-active (line 211) - stays Deferred after this wave ships**, and so do delete-hidden-rows/cols (line 85) and delete-empty-sheets (line 217), which were never blocked on undo in the first place - both name the absence of a *preview* as their blocker, a gap this wave does not touch either. Unblocking hide-all-except-active needs a `backup.restore_*`-shaped action - itself a destructive overwrite of live data, needing its own confirm-and-preview design - which is not in this wave's frozen scope and is not proposed here. |
 | 3 | Chosen restore workaround for the user, given no restore action exists | The completion message for `backup.snapshot` says explicitly: "There is no automatic restore for this snapshot. To use it, close this workbook and open the snapshot file directly, or copy what you need from it by hand." A safety feature that implies a capability it does not have is worse than one that is honest about its limit. |
-| 4 | Snapshot naming and retention | Snapshots are named `SNAPSHOT_<yyyy-mm-dd_HHnnss>[_<label>]<ext>` (timestamp first, so the newest sorts last by name too, though pruning below does not rely on that) in `<root>\Backup\Snapshots\`. `k_backup_snapshot_keep` (default 20) caps how many are kept; each successful snapshot prunes its own folder down to that count by file modified time, oldest first. The prune touches only files that start with `SNAPSHOT_` inside that one subfolder - never a user's own file, never a plain timestamped backup. |
+| 4 | Snapshot naming and retention | Snapshots are named `SNAPSHOT_<yyyy-mm-dd_HHnnss>[_<label>]<ext>` (timestamp first, so the newest sorts last by name too, though pruning below does not rely on that) in `<root>\Backup\Snapshots\`. `k_backup_snapshot_keep` (default 20) caps how many are kept; each successful snapshot prunes its own folder down to that count by file modified time, oldest first. The prune touches only files whose name matches that exact pattern inside that one subfolder - a prefix match on `SNAPSHOT_` alone is not enough proof of ownership, so a user's own file that happens to start with `SNAPSHOT_` (e.g. `SNAPSHOT_notes.txt`) is left alone, never a plain timestamped backup either. |
 | 5 | One shared `k_backup_folder` field, or a field per action? | **One shared root.** All four actions write under the same "where does this deployment keep its backups" concept; the specific subfolder name (`Backup`, `Backup\Snapshots`, `Archive\yyyy_mm`) is a package convention, not something worth a Setup-tab field each. Splitting it would add four fields to answer one question. |
 | 6 | Create a missing backup/archive folder, or refuse? | **Create it.** `k_import_folder` (existing) refuses on a missing folder because that folder is meant to already hold the user's source files - an empty freshly-made one is never useful, and creating it would hide a real misconfiguration. A backup or archive folder is the opposite: it is this package's own workspace, and refusing would make every deployment's very first backup fail with "folder not found" for a folder this action is supposed to own. `Core_FolderExists` is checked first in both cases; only the response to "false" differs, and it differs for a stated reason in each package, not by accident. |
 | 7 | Never overwrite | Every one of the four computes its destination path, then checks `Dir(destPath)` **before** `Core_SpeedOn` runs and before anything is written. A hit refuses with the path named and changes nothing. This is the earliest-cheapest-failure ordering `PkgImport` already uses for its destination-sheet check. |
@@ -85,25 +95,28 @@ otherwise.** See "Restore path" below.
 
 ## Escalations to Core
 
-**One helper is promoted in this wave's diff: `PkgImport_AlreadyOpen` becomes `Core_AlreadyOpen`
-(Task 2).** The phase-2 promotion plan deliberately left it in `PkgImport`, calling W5's need
-for it "speculative," and named the correct move if that turned out wrong: "promote it then, in
-W5's own diff, and say so in that PR." It turned out not speculative. `backup.archive_output`
+**No new escalation: `Core_AlreadyOpen` already exists.** The phase-2 promotion plan left
+`PkgImport_AlreadyOpen` in `PkgImport`, calling W5's need for it "speculative," and named the
+correct move if that turned out wrong: "promote it then, in W5's own diff, and say so in that
+PR." That promotion has since happened - `Core_AlreadyOpen` is live in `src/core/Core.bas`, and
+`PkgImport_CombineEngine` already calls it in place of the old package-private name. This wave
+does not repeat that move; it only **consumes** the existing function. `backup.archive_output`
 moves a file with `FileSystemObject.MoveFile`, and moving a file Excel currently has open fails
 partway and can leave neither a clean source nor a clean destination - exactly the failure mode
-`PkgImport_AlreadyOpen`'s own header describes for the combine actions. The probe (is a workbook
-of this name open, and is it *this* file or a same-name collision) is identical; only the policy
-built on top of it differs; `PkgImport` opens-in-place, `PkgBackup` refuses outright, because
-this wave has no legitimate reason to use an already-open file in place of the one on disk.
+`Core_AlreadyOpen`'s own header describes for the combine actions it already guards. The probe
+(is a workbook of this name open, and is it *this* file or a same-name collision) is identical;
+only the policy built on top of it differs: `PkgImport` opens-in-place, `PkgBackup` refuses
+outright, because this wave has no legitimate reason to use an already-open file in place of
+the one on disk.
 
 **`PkgImport_WorkbookPaths` is not promoted and not needed.** No W5 action loops a folder of
 workbooks; `archive_output` targets exactly one file via `Core_FindFile`. The phase-2 decision
 to leave it in `PkgImport` stands unchanged.
 
-**Nothing else escalates.** `PkgBackup_EnsureFolder`, `PkgBackup_Ext`, and
-`PkgBackup_PruneSnapshots` are used only by this package's own four actions; no other wave's
-plan names a consumer for any of them, so by the same YAGNI reasoning phase 2 used, they stay
-package-private and prefixed.
+**Nothing else escalates.** `PkgBackup_EnsureFolder`, `PkgBackup_Ext`,
+`PkgBackup_PruneSnapshots`, and `PkgBackup_IsSnapshotName` are used only by this package's own
+four actions; no other wave's plan names a consumer for any of them, so by the same YAGNI
+reasoning phase 2 used, they stay package-private and prefixed.
 
 **One helper is removed, not added: this package declares no package-private "safe file name"
 function.** An earlier revision of this plan declared its own copy of that job, but
@@ -143,7 +156,7 @@ does not need to be read alongside that one.
   do not commit it and do not remove it.
 - **No attribution footer, `Co-Authored-By`, or session URL** in any commit or PR body.
 - **No manual gate document.** Run-time-only claims append to
-  `docs/designs/2026-07-28-deferred-validation-log.md` (Task 9).
+  `docs/designs/2026-07-28-deferred-validation-log.md` (Task 8).
 
 ---
 
@@ -152,18 +165,22 @@ does not need to be read alongside that one.
 1. `pwsh build/build.ps1` - exit 0, `Core + <n+1> package(s)` (one more than the W4 baseline),
    balanced `Sub`/`Function` counts, no id-gate or prefix-gate failures.
 2. `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` - no diagnostics.
-3. **Two deliberate injections** (Task 7's step, kept there since that is where the guards being
+3. **Two deliberate injections** (Task 6's step, kept there since that is where the guards being
    tested already exist in full): an unprefixed private in `PkgBackup.bas`, to prove the phase-2
    prefix guard fires against a *new* module and not just the three it was written against; and
    a malformed action id, to prove the id gate's vocabulary/shape check fires against `backup`
    specifically rather than only the domains already exercised.
-4. **A grep proving `CoreCandidates` was actually edited** (Task 8) - the one change none of the
+4. **A grep proving `CoreCandidates` was actually edited** (Task 7) - the one change none of the
    build gates can see, per the plan-of-record's own finding that a missing candidate "builds,
    bundles, passes every gate, and never runs."
-5. Everything genuinely run-time-only (a real `SaveCopyAs` producing an openable file with its
+5. Every task's own build/syntax-check step in this plan is expected to pass, not to fail -
+   `Core_AddAction` for an action and that action's handler always land in the same task's
+   commit (see Task 2's manifest and Tasks 3-6 below), so the build gate is green at every
+   commit in this wave, not only at the end.
+6. Everything genuinely run-time-only (a real `SaveCopyAs` producing an openable file with its
    macros intact; folder auto-creation on a real filesystem; the prune deleting the right files
    and no others; `MoveFile` actually moving across drives) is not claimed here - it is logged in
-   Task 9 for the single end-to-end validation, per plan-of-record section 3.5.
+   Task 8 for the single end-to-end validation, per plan-of-record section 3.5.
 
 ---
 
@@ -172,8 +189,6 @@ does not need to be read alongside that one.
 | File | Change |
 |---|---|
 | `src/packages/PkgBackup.bas` | **New.** Manifest, four actions, four private helpers. |
-| `src/core/Core.bas` | `Core_AlreadyOpen` added (promoted from `PkgImport`). |
-| `src/packages/PkgImport.bas` | `PkgImport_AlreadyOpen` deleted; its one call site renamed. |
 | `src/core/Core.bas` (`CoreCandidates`) | `c.Add "Backup"`. |
 | `spec/contract.md` | v2.8.0. New section 8 subsection `Package backup`; one section 10 bullet. |
 | `docs/designs/2026-07-28-deferred-validation-log.md` | + W5's run-time-only claims. |
@@ -187,7 +202,7 @@ does not need to be read alongside that one.
 
 **Files:** Modify `spec/contract.md` - header, section 8, section 10.
 
-**Interfaces:** Produces the normative text Tasks 3-7 implement. Consumes nothing.
+**Interfaces:** Produces the normative text Tasks 2-6 implement. Consumes nothing.
 
 - [ ] **Step 1: Bump the version header**
 
@@ -270,114 +285,23 @@ git commit -m "spec: contract v2.8.0 - the backup package"
 
 ---
 
-### Task 2: Core gains `Core_AlreadyOpen`
+### Task 2: `PkgBackup.bas` - module skeleton, manifest fields, shared helpers
 
-**Owner: Opus, written directly.** Core edit, and the reasoning for promoting it now (rather
-than leaving it, per phase 2's default) needs to be right, not mechanical.
-
-**Files:** Modify `src/core/Core.bas` (grep `docs/code-map.md` for `Core_FolderExists` and
-insert immediately after it - do not trust a fixed line number here, the map will have moved
-by the time this wave lands). Modify `src/packages/PkgImport.bas`.
-
-**Interfaces:**
-- Consumes: `Core_FileName` (existing).
-- Produces: `Core_AlreadyOpen(ByVal fullPath As String) As Workbook`. Task 7 depends on it.
-
-- [ ] **Step 1: Move the function, rename it, make it Public**
-
-The body is a verbatim move from `PkgImport_AlreadyOpen` (`PkgImport.bas:652`), except the
-`Err.Raise` source string and the header comment's first line, which now explains a second
-consumer:
-
-```vb
-' The workbook at this path IF it is already open in this Excel instance, else
-' Nothing. PkgImport uses what comes back IN PLACE and does not close it; PkgBackup
-' (archive_output) uses it only to REFUSE - it has no legitimate reason to move a
-' file out from under an open handle. The probe is shared; the policy on top of it
-' is each caller's own.
-'
-' This exists because Workbooks.Open is not a question - it is an answer. Handed a
-' path that is already open it returns the open workbook, ReadOnly:=True and all,
-' complete with whatever the user has typed and not yet saved. Closing that with
-' SaveChanges:=False discards their work, and under Core_SpeedOn DisplayAlerts is
-' False, so the prompt Excel would normally raise ("reopening will discard your
-' changes") never reaches them.
-'
-' Probed by FILE NAME, because that is how the Workbooks collection is keyed - there
-' is no lookup by path. The name alone is not proof of identity, so the path is
-' confirmed afterwards. A same-name / different-path collision is raised rather than
-' guessed at.
-Public Function Core_AlreadyOpen(ByVal fullPath As String) As Workbook
-    Dim wb As Workbook, nm As String, openPath As String
-    nm = Core_FileName(fullPath)
-    If Len(nm) = 0 Then Exit Function
-
-    On Error Resume Next
-    Set wb = Workbooks(nm)
-    On Error GoTo 0
-    If wb Is Nothing Then Exit Function          ' not open: the caller opens it itself
-
-    On Error Resume Next
-    openPath = wb.FullName
-    On Error GoTo 0
-    If StrComp(openPath, fullPath, vbTextCompare) = 0 Then
-        Set Core_AlreadyOpen = wb
-        Exit Function
-    End If
-    Err.Raise vbObjectError + 1025, "Core_AlreadyOpen", _
-        "A different workbook named '" & nm & "' is already open (" & openPath & "). " & _
-        "Excel cannot have two workbooks of the same name open at once. Close that one, " & _
-        "then run this again."
-End Function
-```
-
-- [ ] **Step 2: Delete the original and rename its one call site**
-
-In `PkgImport.bas`, delete the `Private Function PkgImport_AlreadyOpen` block (`:652-673`).
-At its one call site (`PkgImport_CombineEngine`, `:211`):
-
-```vb
-' was:  Set wbSrc = PkgImport_AlreadyOpen(CStr(one))
-Set wbSrc = Core_AlreadyOpen(CStr(one))
-```
-
-- [ ] **Step 3: Prove the old name is gone**
-
-```bash
-grep -nE '(^|[^_[:alnum:]])PkgImport_AlreadyOpen\b' src/packages/*.bas
-```
-
-Expected: no output.
-
-- [ ] **Step 4: Build and syntax-check**
-
-```bash
-pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
-```
-
-Expected: exit 0, no diagnostics. `Function` count unchanged overall (one moved, not added);
-`PkgImport.bas`'s own count falls by one, `Core.bas`'s rises by one.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/core/Core.bas src/packages/PkgImport.bas
-git commit -m "refactor(core): promote PkgImport_AlreadyOpen to Core_AlreadyOpen for backup.archive_output"
-```
-
----
-
-### Task 3: `PkgBackup.bas` - module skeleton, manifest, shared helpers
-
-**Owner: delegate to codex (sonnet).** New file, but every line below is exact.
+**Owner: delegate to codex (sonnet).** New file, but every line below is exact. This task
+declares the package's fields but **no actions** - each of Tasks 3-6 below appends its own
+`Core_AddAction` call to this same manifest Sub in the same task that adds that action's
+handler, so a build taken at any commit in this wave never has a declared action without a
+handler, and the build gate stays green throughout the wave rather than going red between tasks.
 
 **Files:** New `src/packages/PkgBackup.bas`.
 
 **Interfaces:**
-- Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_AddAction`,
-  `Core_ResolveFolder`, `Core_FolderExists`, `Core_FileName` (all existing).
-- Produces: `PkgBackup_Manifest`, `PkgBackup_EnsureFolder`, `PkgBackup_Ext`,
-  `PkgBackup_PruneSnapshots`. Tasks 4-7 depend on all four.
+- Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_FolderExists` (all
+  existing).
+- Produces: `PkgBackup_Manifest` (declares the package, its two sections, and its six fields -
+  no actions yet), `PkgBackup_EnsureFolder`, `PkgBackup_Ext`, `PkgBackup_PruneSnapshots`,
+  `PkgBackup_IsSnapshotName`. Tasks 3-6 depend on all four helpers, and each also extends
+  `PkgBackup_Manifest` with its own `Core_AddAction` call.
 
 - [ ] **Step 1: Header and manifest**
 
@@ -396,9 +320,13 @@ Option Explicit
 '   backup.timestamped_copy    a manual "back this up right now"
 '   backup.snapshot             an automatic pre-risky-step restore point
 '   backup.month_end_version    named for the last closed calendar month
-' The fourth is the only genuinely destructive filesystem action in
-' this package - it MOVES a file that already exists:
+' The fourth MOVES a file that already exists rather than copying
+' one:
 '   backup.archive_output       relocate a generated output into Archive\yyyy_mm
+' It is NOT this package's only destructive filesystem operation -
+' backup.snapshot's own pruning step below also deletes files,
+' validated against the exact name shape this package writes before
+' anything is Kill'd.
 '
 ' backup.snapshot writes a restore point but this package has no
 ' restore action. See the plan this shipped from
@@ -411,6 +339,10 @@ Option Explicit
 '================================================================
 ' MANIFEST
 '================================================================
+' Fields and sections only. Tasks 3-6 each insert ONE Core_AddAction
+' call into this Sub, immediately above End Sub, in the same task
+' that adds that action's handler - so this Sub never declares an
+' action this build's entry-point gate cannot find a handler for.
 Public Sub PkgBackup_Manifest(reg As Object)
     Core_DeclarePackage reg, "backup", "Protect & Back Up", "1.0.0"
 
@@ -449,24 +381,8 @@ Public Sub PkgBackup_Manifest(reg As Object)
         "with this text.", _
         "backup.archive_output"
 
-    Core_AddAction reg, "backup.timestamped_copy", "Backup Now (Timestamped Copy)", "PkgBackup_TimestampedCopy", _
-        "Saves a full copy of this workbook, exactly as it stands right now, into a 'Backup' " & _
-        "subfolder with a datetime stamp in the file name. This workbook itself is untouched.", _
-        "Protect & Back Up"
-    Core_AddAction reg, "backup.snapshot", "Snapshot Before a Risky Step", "PkgBackup_Snapshot", _
-        "Saves a full copy of this workbook as a restore point, meant to run right before a " & _
-        "step that changes data. There is no automatic restore - open the snapshot file " & _
-        "directly to recover from it.", _
-        "Protect & Back Up"
-    Core_AddAction reg, "backup.month_end_version", "Save Month-End Version", "PkgBackup_MonthEndVersion", _
-        "Saves a full copy of this workbook named for the most recently closed calendar " & _
-        "month, for finance packs that keep one file per close.", _
-        "Protect & Back Up"
-    Core_AddAction reg, "backup.archive_output", "Archive a Generated Output", "PkgBackup_ArchiveOutput", _
-        "Moves the newest file matching the configured prefix into an 'Archive\yyyy_mm' " & _
-        "subfolder. Refuses if the file is open in Excel or a file of that name is already " & _
-        "archived there.", _
-        "Protect & Back Up"
+    ' Tasks 3-6 each insert one Core_AddAction call here, immediately
+    ' above End Sub, in the same task that adds that action's handler.
 End Sub
 ```
 
@@ -513,16 +429,44 @@ Private Function PkgBackup_Ext() As String
 End Function
 
 ' NOTE: a package-private "user-typed label reduced to something safe inside a
-' Windows file name" helper used to live here. It is gone - Task 5 now calls
+' Windows file name" helper used to live here. It is gone - the actions below call
 ' Core_SafeFileName (added to Core by 2026-07-28-w3-format-export-plan.md, Task 2,
 ' Step 2) instead, so this package does not carry a second copy of the identical
 ' job. See "Escalations to Core" above and "Unknowns and risks" below for the one
-' behavior gap that removal opens up (no length cap on the token).
+' behavior gap that removal opened up (no length cap on the token) and how each
+' call site closes it.
 
-' Deletes the oldest files matching "SNAPSHOT_*" in folderPath, keeping the newest
-' keepCount by file MODIFIED time (not by parsing the name - the label segment
-' makes lexical order unreliable). Only files this action's own naming pattern
-' would have produced are ever touched; nothing else in the folder is examined.
+' TRUE if nm matches this package's OWN file-name shape exactly:
+' "SNAPSHOT_" & yyyy-mm-dd & "_" & HHnnss & optional "_<label>" & ext. A prefix
+' match alone is NOT proof of ownership - a user's own "SNAPSHOT_notes.txt" starts
+' with the same nine characters - so every field is checked: the literal prefix, a
+' timestamp that actually parses as a real calendar date and clock time, and the
+' extension this workbook itself uses. Anything that fails any one of those checks
+' is left alone, never treated as this package's file.
+Private Function PkgBackup_IsSnapshotName(ByVal nm As String, ByVal ext As String) As Boolean
+    Const PFX As String = "SNAPSHOT_"
+    Const STAMPLEN As Long = 17                     ' "yyyy-mm-dd_HHnnss"
+    Dim stamp As String, datePart As String, timePart As String
+
+    If Len(nm) < Len(PFX) + STAMPLEN + Len(ext) Then Exit Function
+    If StrComp(Left$(nm, Len(PFX)), PFX, vbBinaryCompare) <> 0 Then Exit Function
+    If StrComp(Right$(nm, Len(ext)), ext, vbTextCompare) <> 0 Then Exit Function
+
+    stamp = Mid$(nm, Len(PFX) + 1, STAMPLEN)
+    If Mid$(stamp, 5, 1) <> "-" Or Mid$(stamp, 8, 1) <> "-" Or Mid$(stamp, 11, 1) <> "_" Then Exit Function
+    datePart = Left$(stamp, 10)                      ' "yyyy-mm-dd"
+    timePart = Mid$(stamp, 12, 2) & ":" & Mid$(stamp, 14, 2) & ":" & Mid$(stamp, 16, 2)
+    If Not IsDate(datePart) Then Exit Function        ' rejects an impossible calendar date, e.g. 2026-02-30
+    If Not IsDate(timePart) Then Exit Function         ' rejects an impossible clock time, e.g. 25:99:99
+
+    PkgBackup_IsSnapshotName = True
+End Function
+
+' Deletes the oldest files matching this package's own SNAPSHOT_ name shape in
+' folderPath (see PkgBackup_IsSnapshotName), keeping the newest keepCount by file
+' MODIFIED time (not by parsing the name - the label segment makes lexical order
+' unreliable). Only files that pass the full shape check are ever candidates for
+' deletion; a bare "SNAPSHOT_*" prefix match is never enough on its own.
 '
 ' A single locked or in-use old snapshot must not fail the run that just wrote a
 ' GOOD new one, so Kill runs under Resume Next - a prune that skips one file this
@@ -530,18 +474,22 @@ End Function
 ' already did the part that matters.
 Private Sub PkgBackup_PruneSnapshots(ByVal folderPath As String, ByVal keepCount As Long)
     Dim f As String, names() As String, times() As Date, n As Long, i As Long, j As Long
-    Dim tmpS As String, tmpD As Date
+    Dim tmpS As String, tmpD As Date, ext As String
+    Const MAXFILES As Long = 500
     If keepCount < 1 Then keepCount = 1
 
-    ReDim names(1 To 500)
-    ReDim times(1 To 500)
+    ext = PkgBackup_Ext()
+    ReDim names(1 To MAXFILES)
+    ReDim times(1 To MAXFILES)
     n = 0
     f = Dir(folderPath & "SNAPSHOT_*")
     Do While Len(f) > 0
-        n = n + 1
-        If n > UBound(names) Then Exit Do          ' hard cap: never scan without bound
-        names(n) = folderPath & f
-        times(n) = FileDateTime(folderPath & f)
+        If PkgBackup_IsSnapshotName(f, ext) Then
+            If n >= MAXFILES Then Exit Do            ' hard cap: never scan without bound
+            n = n + 1
+            names(n) = folderPath & f
+            times(n) = FileDateTime(folderPath & f)
+        End If
         f = Dir
     Loop
     If n <= keepCount Then Exit Sub
@@ -574,33 +522,51 @@ End Sub
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: **FAIL, deliberately, at this point.** `PkgBackup_Manifest` declares four actions
-whose entry points (`PkgBackup_TimestampedCopy` etc.) do not exist yet - the id gate's
-"no source declares a dispatchable handler" check should name all four. If the build instead
-reports something about a duplicate name or a prefix violation, stop and fix that before Task 4,
-since those two guards must already be clean before the entry-point gate becomes the only
-failure.
+Expected: **exit 0, no diagnostics.** `PkgBackup_Manifest` declares six fields and zero actions
+at this point, so there is nothing for the entry-point gate to flag - it only checks that a
+declared action has a handler, and nothing is declared yet. (This deliberately replaces an
+earlier revision of this plan that declared all four actions up front and expected the build to
+fail on this commit; that staged-red-build pattern is not used here - see Task 3 below for the
+first commit that adds both a `Core_AddAction` call and its handler together, and every task
+after it.) If the build instead reports a duplicate name or a prefix violation, stop and fix
+that before Task 3.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgBackup.bas
-git commit -m "feat(backup): PkgBackup module skeleton, manifest, and shared helpers"
+git commit -m "feat(backup): PkgBackup module skeleton, manifest fields, and shared helpers"
 ```
 
 ---
 
-### Task 4: `backup.timestamped_copy`
+### Task 3: `backup.timestamped_copy`
 
-**Owner: delegate to codex (sonnet).** One action, exact code below.
+**Owner: delegate to codex (sonnet).** One action, exact code below - plus the one
+`Core_AddAction` line that makes it reachable, added to `PkgBackup_Manifest` in this same task
+so the commit at the end of this task leaves the build green.
 
 **Files:** Modify `src/packages/PkgBackup.bas`.
 
-**Interfaces:** Consumes `Core_ResolveFolder`, `Core_Cfg`, `Core_Refuse`, `Core_SpeedOn`,
-`Core_SpeedOff`, `Core_Done`, `Core_Fail`, and Task 3's `PkgBackup_EnsureFolder` / `PkgBackup_Ext`.
-Produces `PkgBackup_TimestampedCopy`.
+**Interfaces:** Consumes `Core_ResolveFolder`, `Core_Cfg`, `Core_SafeFileName` (from W3,
+`2026-07-28-w3-format-export-plan.md` Task 2, Step 2), `Core_Refuse`, `Core_SpeedOn`,
+`Core_SpeedOff`, `Core_Done`, `Core_Fail`, and Task 2's `PkgBackup_EnsureFolder` /
+`PkgBackup_Ext`. Produces `PkgBackup_TimestampedCopy`; extends `PkgBackup_Manifest` with the
+`backup.timestamped_copy` action.
 
-- [ ] **Step 1: Add the action**
+- [ ] **Step 1: Declare the action**
+
+Insert into `PkgBackup_Manifest` (Task 2), immediately above the `' Tasks 3-6 each insert...`
+comment and `End Sub`:
+
+```vb
+    Core_AddAction reg, "backup.timestamped_copy", "Backup Now (Timestamped Copy)", "PkgBackup_TimestampedCopy", _
+        "Saves a full copy of this workbook, exactly as it stands right now, into a 'Backup' " & _
+        "subfolder with a datetime stamp in the file name. This workbook itself is untouched.", _
+        "Protect & Back Up"
+```
+
+- [ ] **Step 2: Add the handler**
 
 ```vb
 '================================================================
@@ -620,7 +586,12 @@ Public Sub PkgBackup_TimestampedCopy(ctx As Object)
         Exit Sub
     End If
 
-    baseName = Trim(Core_Cfg(ctx, "k_backup_base"))
+    ' 60 is this caller's cap, not a property of the helper - it bounds the one
+    ' free-typed segment of this path so an unusually long configured base name
+    ' cannot push the whole path past MAX_PATH, and so a base name containing a
+    ' path separator or ".." cannot place the copy outside the Backup folder this
+    ' action promises.
+    baseName = Core_SafeFileName(Core_Cfg(ctx, "k_backup_base"), 60)
     If Len(baseName) = 0 Then baseName = "Backup"
     destFolder = root & "Backup" & Application.PathSeparator
     destPath = destFolder & baseName & " " & Format(Now, "yyyy-mm-dd_HHnnss") & PkgBackup_Ext()
@@ -648,16 +619,19 @@ Fail:
 End Sub
 ```
 
-- [ ] **Step 2: Build and syntax-check**
+- [ ] **Step 3: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: the entry-point gate no longer names `PkgBackup_TimestampedCopy`; it should still name
-the other three (Tasks 5-7 not yet done).
+Expected: **exit 0, no diagnostics.** `backup.timestamped_copy` is now declared AND has a
+handler in the same commit, so the build stays green. The entry-point gate should not name it.
+It should also not name `backup.snapshot`, `backup.month_end_version`, or
+`backup.archive_output`, because none of the three is declared yet - they are not missing
+handlers, they simply do not exist yet as far as the manifest is concerned.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgBackup.bas
@@ -666,19 +640,34 @@ git commit -m "feat(backup): backup.timestamped_copy"
 
 ---
 
-### Task 5: `backup.snapshot` - the flagship action
+### Task 4: `backup.snapshot` - the flagship action
 
 **Owner: delegate to codex (sonnet).** The code below is complete and exact, but this is the
 action the whole wave is judged by (see Decisions 1-4 and "Why this wave matters more than its
-size suggests") - review the diff against this task more carefully than Tasks 4, 6, and 7.
+size suggests") - review the diff against this task more carefully than Tasks 3, 5, and 6. As
+in Task 3, this task's `Core_AddAction` line and its handler land in the same commit, so the
+build stays green.
 
 **Files:** Modify `src/packages/PkgBackup.bas`.
 
-**Interfaces:** Consumes the same Core helpers as Task 4, plus `Core_CfgLong`,
-`Core_SafeFileName` (from W3, `2026-07-28-w3-format-export-plan.md` Task 2), and Task 3's
-`PkgBackup_PruneSnapshots`. Produces `PkgBackup_Snapshot`.
+**Interfaces:** Consumes the same Core helpers as Task 3, plus `Core_CfgLong`, and Task 2's
+`PkgBackup_PruneSnapshots` (which itself now depends on Task 2's `PkgBackup_IsSnapshotName`).
+Produces `PkgBackup_Snapshot`; extends `PkgBackup_Manifest` with the `backup.snapshot` action.
 
-- [ ] **Step 1: Add the action**
+- [ ] **Step 1: Declare the action**
+
+Insert into `PkgBackup_Manifest`, immediately above the `' Tasks 3-6 each insert...` comment and
+`End Sub`, after the line Task 3 added:
+
+```vb
+    Core_AddAction reg, "backup.snapshot", "Snapshot Before a Risky Step", "PkgBackup_Snapshot", _
+        "Saves a full copy of this workbook as a restore point, meant to run right before a " & _
+        "step that changes data. There is no automatic restore - open the snapshot file " & _
+        "directly to recover from it.", _
+        "Protect & Back Up"
+```
+
+- [ ] **Step 2: Add the handler**
 
 ```vb
 '================================================================
@@ -737,7 +726,7 @@ Fail:
 End Sub
 ```
 
-**Why the refusal above matters more here than in Task 4's near-identical block:** this action's
+**Why the refusal above matters more here than in Task 3's near-identical block:** this action's
 entire reason to exist is running as step 1 of a chain that also runs something destructive.
 Phase 1's chain-halt rule means a refusal here - workbook never saved, a same-second collision -
 stops the chain before the destructive step runs. If this action's refusal path were weaker
@@ -745,13 +734,16 @@ stops the chain before the destructive step runs. If this action's refusal path 
 user under close-deadline pressure would say yes, and the destructive step would run with no
 restore point behind it - the exact failure this action is bought to prevent.
 
-- [ ] **Step 2: Build and syntax-check**
+- [ ] **Step 3: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-- [ ] **Step 3: Commit**
+Expected: exit 0, no diagnostics. `backup.timestamped_copy` and `backup.snapshot` both resolve;
+`backup.month_end_version` and `backup.archive_output` are still not declared yet.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgBackup.bas
@@ -760,16 +752,30 @@ git commit -m "feat(backup): backup.snapshot - restore point, no restore path (s
 
 ---
 
-### Task 6: `backup.month_end_version`
+### Task 5: `backup.month_end_version`
 
-**Owner: delegate to codex (sonnet).** One action, exact code below.
+**Owner: delegate to codex (sonnet).** One action, exact code below - plus the one
+`Core_AddAction` line, added in this same task so the build stays green at this commit too.
 
 **Files:** Modify `src/packages/PkgBackup.bas`.
 
-**Interfaces:** Consumes the same Core helpers as Task 4, plus `Core_CfgLong`. Produces
-`PkgBackup_MonthEndVersion`.
+**Interfaces:** Consumes the same Core helpers as Task 3, plus `Core_CfgLong`. Produces
+`PkgBackup_MonthEndVersion`; extends `PkgBackup_Manifest` with the `backup.month_end_version`
+action.
 
-- [ ] **Step 1: Add the action**
+- [ ] **Step 1: Declare the action**
+
+Insert into `PkgBackup_Manifest`, immediately above the `' Tasks 3-6 each insert...` comment and
+`End Sub`, after the lines Tasks 3 and 4 added:
+
+```vb
+    Core_AddAction reg, "backup.month_end_version", "Save Month-End Version", "PkgBackup_MonthEndVersion", _
+        "Saves a full copy of this workbook named for the most recently closed calendar " & _
+        "month, for finance packs that keep one file per close.", _
+        "Protect & Back Up"
+```
+
+- [ ] **Step 2: Add the handler**
 
 ```vb
 '================================================================
@@ -801,7 +807,10 @@ Public Sub PkgBackup_MonthEndVersion(ctx As Object)
     refDate = Date + Core_CfgLong(ctx, "k_backup_offset")
     priorMonthEnd = DateSerial(Year(refDate), Month(refDate), 1) - 1
 
-    baseName = Trim(Core_Cfg(ctx, "k_backup_base"))
+    ' 60 is this caller's cap, not a property of the helper - see Task 3's identical
+    ' use of Core_SafeFileName for k_backup_base for the reasoning (MAX_PATH and no
+    ' path separators/".." escaping the Backup folder).
+    baseName = Core_SafeFileName(Core_Cfg(ctx, "k_backup_base"), 60)
     If Len(baseName) = 0 Then baseName = "Backup"
     destFolder = root & "Backup" & Application.PathSeparator
     destPath = destFolder & Format(priorMonthEnd, "yyyy-mm-dd") & " " & baseName & _
@@ -827,13 +836,16 @@ Fail:
 End Sub
 ```
 
-- [ ] **Step 2: Build and syntax-check**
+- [ ] **Step 3: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-- [ ] **Step 3: Commit**
+Expected: exit 0, no diagnostics. Three of the four actions now resolve; only
+`backup.archive_output` is still not declared.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgBackup.bas
@@ -842,16 +854,40 @@ git commit -m "feat(backup): backup.month_end_version"
 
 ---
 
-### Task 7: `backup.archive_output` - the wave's one file-move
+### Task 6: `backup.archive_output` - the wave's one file-move
 
-**Owner: delegate to codex (sonnet).** One action, exact code below.
+**Owner: delegate to codex (sonnet).** One action, exact code below - plus the one
+`Core_AddAction` line, added in this same task so this final commit is the one that finishes
+turning the manifest's declared actions and their handlers into a matched set.
 
 **Files:** Modify `src/packages/PkgBackup.bas`.
 
-**Interfaces:** Consumes `Core_FindFile` (existing), `Core_AlreadyOpen` (Task 2), plus the same
-Core helpers as Task 4. Produces `PkgBackup_ArchiveOutput`.
+**Interfaces:** Consumes `Core_FindFile` (existing), `Core_AlreadyOpen` (existing in Core - see
+"Escalations to Core" above), plus the same Core helpers as Task 3. Produces
+`PkgBackup_ArchiveOutput`; extends `PkgBackup_Manifest` with the `backup.archive_output` action.
 
-- [ ] **Step 1: Add the action**
+- [ ] **Step 1: Declare the action**
+
+Insert into `PkgBackup_Manifest`, immediately above the `' Tasks 3-6 each insert...` comment and
+`End Sub`, after the lines Tasks 3-5 added:
+
+```vb
+    Core_AddAction reg, "backup.archive_output", "Archive a Generated Output", "PkgBackup_ArchiveOutput", _
+        "Moves the newest file matching the configured prefix into an 'Archive\yyyy_mm' " & _
+        "subfolder. Refuses if the file is open in Excel or a file of that name is already " & _
+        "archived there.", _
+        "Protect & Back Up"
+```
+
+- [ ] **Step 2: Add the handler**
+
+`FileSystemObject.MoveFile` is **not claimed to be atomic** here. Across two volumes it is a
+copy followed by a delete, not one operation, so a failure partway through can leave the source
+gone and the destination missing or incomplete - and the same-instance `Core_AlreadyOpen` probe
+cannot see another Excel process, or another application entirely, holding either file. Because
+of that, this handler checks what is actually on disk **after** the move, whether or not an
+error was raised, and reports exactly which of the source and destination now exist so the user
+can recover by hand rather than guessing:
 
 ```vb
 '================================================================
@@ -861,6 +897,8 @@ Public Sub PkgBackup_ArchiveOutput(ctx As Object)
     Dim prefix As String, srcPath As String
     Dim root As String, destFolder As String, destPath As String
     Dim openWb As Workbook, fso As Object
+    Dim moveErrNum As Long, moveErrDesc As String
+    Dim srcStillThere As Boolean, destNowThere As Boolean, destBytes As Long
     Const TITLE As String = "Archive a Generated Output"
     On Error GoTo Fail
 
@@ -894,7 +932,10 @@ Public Sub PkgBackup_ArchiveOutput(ctx As Object)
     ' FileSystemObject.MoveFile both fail against a locked file, and failing
     ' partway through a move can leave neither a clean source nor a clean
     ' destination. Refused here, before anything on disk changes - see
-    ' Core_AlreadyOpen's own header for why the probe is by file name.
+    ' Core_AlreadyOpen's own header for why the probe is by file name. This only
+    ' catches THIS Excel instance; a different process or a different application
+    ' holding the file is not visible to it, which is exactly why the state check
+    ' after the move below exists.
     Set openWb = Core_AlreadyOpen(srcPath)
     If Not openWb Is Nothing Then
         Core_Refuse ctx, "'" & Core_FileName(srcPath) & "' is currently open in Excel, and this " & _
@@ -921,27 +962,55 @@ Public Sub PkgBackup_ArchiveOutput(ctx As Object)
     Core_SpeedOn
     PkgBackup_EnsureFolder destFolder
     Set fso = CreateObject("Scripting.FileSystemObject")
-    fso.MoveFile srcPath, destPath                ' not the Name statement: MoveFile works
-                                                    ' across drives, Name does not
+
+    ' NOT atomic: across volumes this is copy-then-delete, not one step, so a
+    ' failure partway through can leave a deleted source and an incomplete or
+    ' absent destination. The error (if any) is captured here rather than left to
+    ' jump straight to Fail, because the state check right after this needs to run
+    ' either way - "no error raised" is not by itself proof the move went cleanly.
+    On Error Resume Next
+    fso.MoveFile srcPath, destPath                 ' not the Name statement: MoveFile
+                                                     ' works across drives, Name does not
+    moveErrNum = Err.Number
+    moveErrDesc = Err.Description
+    Err.Clear
+    On Error GoTo Fail
     Core_SpeedOff
 
-    Core_Done ctx, "Archived:" & vbCrLf & vbCrLf & "   " & srcPath & vbCrLf & "to" & vbCrLf & _
-           "   " & destPath, TITLE
+    srcStillThere = (Len(Dir(srcPath)) > 0)
+    destNowThere = (Len(Dir(destPath)) > 0)
+    If destNowThere Then destBytes = FileLen(destPath)
+
+    If moveErrNum = 0 And Not srcStillThere And destNowThere And destBytes > 0 Then
+        Core_Done ctx, "Archived:" & vbCrLf & vbCrLf & "   " & srcPath & vbCrLf & "to" & vbCrLf & _
+               "   " & destPath, TITLE
+        Exit Sub
+    End If
+
+    Err.Raise vbObjectError + 1030, "PkgBackup_ArchiveOutput", _
+        "The move did not finish cleanly (this is a copy-then-delete across drives, not one " & _
+        "atomic step, so a partial result is possible)." & _
+        IIf(moveErrNum <> 0, " Underlying error: " & moveErrDesc & ".", "") & _
+        " Source (" & srcPath & "): " & IIf(srcStillThere, "still present.", "gone.") & _
+        " Destination (" & destPath & "): " & _
+        IIf(destNowThere, IIf(destBytes > 0, "present, " & destBytes & " bytes.", "present but 0 bytes."), "not created.") & _
+        " Check both locations by hand before running this again."
     Exit Sub
 Fail:
     Core_Fail ctx, "backup.archive_output", Err
 End Sub
 ```
 
-- [ ] **Step 2: Prove every entry point now resolves**
+- [ ] **Step 3: Prove every entry point now resolves**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: exit 0, no diagnostics, no entry-point-gate failures naming any `PkgBackup_*`.
+Expected: exit 0, no diagnostics, no entry-point-gate failures naming any `PkgBackup_*`. All
+four actions now resolve.
 
-- [ ] **Step 3: Two deliberate injections**
+- [ ] **Step 4: Two deliberate injections**
 
 First, prove the phase-2 prefix guard fires against this module specifically:
 
@@ -968,7 +1037,7 @@ pwsh build/build.ps1; echo "exit=$?"
 Expected: `exit=1` the first time, naming the malformed id (camelCase / uppercase segment);
 `exit=0` after the revert. **Record both injections in the PR body.**
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/packages/PkgBackup.bas
@@ -977,11 +1046,11 @@ git commit -m "feat(backup): backup.archive_output"
 
 ---
 
-### Task 8: Register `Backup` in `CoreCandidates`
+### Task 7: Register `Backup` in `CoreCandidates`
 
 **Owner: Opus.** Core edit; this is the step the plan-of-record names as the single easiest way
 to ship a dead wave, so it gets its own task and its own verification rather than riding along
-inside Task 2 or 7.
+inside Task 2 (the manifest skeleton) or Task 6 (the last action, `archive_output`).
 
 **Files:** Modify `src/core/Core.bas` (`CoreCandidates`, grep `docs/code-map.md` for the anchor).
 
@@ -1015,7 +1084,7 @@ git commit -m "feat(core): register Backup in CoreCandidates"
 
 ---
 
-### Task 9: Version, changelog, code map, deferred-validation log, and the PR
+### Task 8: Version, changelog, code map, deferred-validation log, and the PR
 
 **Owner: Opus.**
 
@@ -1037,7 +1106,7 @@ one-line header (`# Deferred validation log`) before appending - it is meant to 
 ```markdown
 ## W5 - Protect & Back Up
 
-- **`CoreCandidates` actually reaching `backup.*`:** confirmed statically (Task 8's grep) that
+- **`CoreCandidates` actually reaching `backup.*`:** confirmed statically (Task 7's grep) that
   the line was added and the build still passes, but whether the four actions actually appear
   on a rendered Setup/button page, and actually dispatch through `Core_Run`, is unverifiable by
   `build.ps1` - a missing entry here "builds, bundles, passes every gate, and never runs"
@@ -1050,10 +1119,13 @@ one-line header (`# Deferred validation log`) before appending - it is meant to 
   behaviour has more edge cases than a local disk.
 - **`PkgBackup_PruneSnapshots` deletes exactly the files it should and no others** - run against
   a real folder with more than `k_backup_snapshot_keep` snapshots in it, including one snapshot
-  that happens to be open or locked at prune time (the `Resume Next` path around `Kill`).
+  that happens to be open or locked at prune time (the `Resume Next` path around `Kill`), and
+  including at least one file that starts with `SNAPSHOT_` but does NOT match the full name
+  shape `PkgBackup_IsSnapshotName` checks for, to confirm it survives the prune untouched.
 - **`fso.MoveFile` in `backup.archive_output` actually moves a file across drives** (the reason
   `MoveFile` was chosen over the `Name` statement) - untested against a real second drive or
-  mapped network location.
+  mapped network location - and that the post-move existence/size check correctly tells apart a
+  clean move from a partial one when run against a real interrupted transfer.
 - **The prior-month-end date arithmetic (`backup.month_end_version`) on 1 January**, and on the
   1st of any month generally - the formula is argued correct in this plan's Decision 8, but has
   not run inside Excel.
@@ -1097,10 +1169,15 @@ this plan), so a reviewer does not have to re-derive that from the diff.
 - **`backup.archive_output`'s reliance on `Core_FindFile` inherits that function's existing
   blind spot for an unsaved workbook** (`folder = ThisWorkbook.Path`, empty when never saved,
   degrading to a root-of-drive search rather than a clean error). This plan's own precondition
-  check (Task 7, Step 1) catches the unsaved case before `Core_FindFile` is ever called, so the
+  check (Task 6, Step 2) catches the unsaved case before `Core_FindFile` is ever called, so the
   blind spot is not reachable through this action - but `Core_FindFile` itself is unchanged and
   the same latent issue exists for its other caller (`PkgImportExport_SuggestTypes`), unfixed
   here as out of scope.
+- **`fso.MoveFile` across volumes is not atomic, and this plan does not pretend otherwise.**
+  Task 6's handler checks what is actually on disk after the call and reports the state of both
+  the source and the destination rather than assuming success from the absence of a raised
+  error - but it still cannot repair a partial result automatically, only describe it. A user
+  who hits this has to reconcile the two locations by hand.
 - **Snapshot pruning assumes `FileDateTime` is trustworthy for ordering.** On most filesystems it
   is, but a snapshot folder synced through a cloud-backed drive (OneDrive) can rewrite modified
   timestamps on sync in ways that are not fully within this plan's control. Flagged, not solved -
@@ -1121,12 +1198,17 @@ this plan), so a reviewer does not have to re-derive that from the diff.
   helper left alone, and the two agree on `Trim` and on treating every other bad character
   identically), so on that axis W3's helper fully covers this wave's need. The one thing it
   does not do - and says so in its own doc comment ("Does NOT make the name unique or check
-  length") - is truncate. `backup.snapshot`'s `k_backup_snapshot_label` is free-typed on
-  Setup, so an unusually long label now produces an unusually long snapshot file name with
-  nothing in this wave's own code stopping it, where before the 40-character cap kept it
-  bounded. **This gap was found here and closed in W3 rather than carried.** `Core_SafeFileName`
-  now takes `Optional ByVal maxLen As Long = 0`, `0` meaning no cap, so W3's own two call sites
-  keep their unbounded behaviour and `backup.snapshot` passes `40` — the same bound the removed
-  helper had. See `2026-07-28-w3-format-export-plan.md` Task 2 Step 2 for the current signature.
-  **W5 therefore depends on W3's version of that helper, not merely on its existence**; if W3
-  ships without `maxLen`, this call does not compile, which is the failure mode to want.
+  length") - is truncate. Three fields are free-typed on Setup and reach a file name through
+  this package - `k_backup_snapshot_label` (Task 4), and `k_backup_base` at its two other call
+  sites (Task 3's `backup.timestamped_copy`, Task 5's `backup.month_end_version`) - so an
+  unusually long value in any of the three would produce an unusually long file name (or, for
+  `k_backup_base` specifically, one containing a path separator or `..` that could place the
+  copy outside the promised folder) with nothing in this wave's own code stopping it, unless
+  each call site caps it itself. **This gap was found here and closed in W3 rather than
+  carried.** `Core_SafeFileName` now takes `Optional ByVal maxLen As Long = 0`, `0` meaning no
+  cap, so W3's own two call sites keep their unbounded behaviour and every one of this
+  package's three call sites passes a cap: `40` for `k_backup_snapshot_label` (Task 4, the same
+  bound the removed helper had) and `60` for `k_backup_base` (Tasks 3 and 5). See
+  `2026-07-28-w3-format-export-plan.md` Task 2 Step 2 for the current signature. **W5 therefore
+  depends on W3's version of that helper, not merely on its existence**; if W3 ships without
+  `maxLen`, none of these three calls compile, which is the failure mode to want.

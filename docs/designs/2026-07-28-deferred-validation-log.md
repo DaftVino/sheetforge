@@ -136,3 +136,22 @@ a chain halt.
 - **`format.report_title` asks before inserting rows, and a formula using `ROW()` below the
   title reflects its new position afterwards.** *Why:* this is the action that admits it
   changes values; the item exists to confirm the admission is the true one.
+
+---
+
+## W4 — Summarize & Enrich (v0.15.0, contract v2.7.0)
+
+- **`enrich.join` does not merge two distinct keys.** Put `AB  CD` (two internal spaces) and
+  `AB CD` (one) in the reference table as separate keys, and both in the target. Expected: they
+  match their own rows, independently. *Failure looks like:* both target rows getting the same
+  reference values. *Why:* an earlier version normalised keys with a function that collapses
+  internal whitespace. **This is the wrong-numbers-in-a-finance-deliverable case for W4.**
+- **The duplicate-key count is distinct keys, not occurrences.** Put one key in the reference
+  table **four** times. Expected: the report says **1** duplicated key, not 3.
+- **`summarize.refresh_pivots` reports a pivot it could not refresh.** Delete a pivot's source
+  range, then run it. Expected: that pivot is named as failed and is **not** counted as
+  refreshed. *Failure looks like:* a clean "all refreshed" message.
+- **`summarize.build_pivot` refuses a source with a duplicate or blank header**, before
+  building anything.
+- **A failed `build_pivot` leaves no half-built sheet behind**, and reports the original error
+  rather than a cleanup error.

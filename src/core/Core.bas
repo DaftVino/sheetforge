@@ -1568,6 +1568,8 @@ Private Function CoreCandidates() As Collection
     c.Add "Validate"                ' probes PkgValidate_Manifest
     c.Add "Format"                  ' probes PkgFormat_Manifest
     c.Add "Export"                  ' probes PkgExport_Manifest
+    c.Add "Summarize"               ' probes PkgSummarize_Manifest
+    c.Add "Enrich"                  ' probes PkgEnrich_Manifest
     Set CoreCandidates = c
 End Function
 
