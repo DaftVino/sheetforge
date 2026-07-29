@@ -8,9 +8,9 @@ Option Explicit
 ' list. All plumbing (speed, errors, completion dialogs) is Core_*.
 '
 ' From v0.5.0 to v2.2.0 this package declared NO config fields and rendered
-' no band on Setup at all. v2.3.0 adds exactly one - k_clean_formats, a
-' deployment-level number-format map - so the band exists again, holding
-' that one table and nothing else. The point it used to prove still holds:
+' no band on Setup at all. v2.3.0 added k_clean_formats, a deployment-level
+' number-format map. Split Column later added two deployment-level settings
+' for its delimiter and destination. The point it used to prove still holds:
 ' a package asks for Setup surface only where the answer describes the
 ' DEPLOYMENT, never where it describes the range the caller just picked.
 ' Everything else it needs describes the range the user picks, so it is
@@ -25,8 +25,8 @@ Option Explicit
 Public Sub PkgClean_Manifest(reg As Object)
     Core_DeclarePackage reg, "clean", "Clean & Standardize", "1.0.0"
 
-    ' This package declares exactly ONE field - k_clean_formats, below - and from
-    ' v0.5.0 to v2.2.0 it declared none at all and rendered no band on Setup.
+    ' From v0.5.0 to v2.2.0 this package declared no fields and rendered no band
+    ' on Setup. k_clean_formats, below, was the first deployment-level setting.
     ' Both of its former settings - the key column(s) and whether the first row is a
     ' header - describe THE RANGE THE USER JUST PICKED, not the deployment, so they
     ' are asked for at run time instead. The key columns are the clearer case: they
@@ -57,6 +57,16 @@ Public Sub PkgClean_Manifest(reg As Object)
         "One row per column you want formatted. Left cell: a column letter like C, or the column's header text - a one-to-three-letter entry is always read as a letter, so a column headed exactly A or ID must be addressed by its letter. Right cell: the format, e.g. mm/dd/yyyy or $#,##0.00. Nothing happens until you fill this in.", _
         "clean.standardize_formats"
 
+    Core_AddSection reg, "Split Column"
+    Core_AddField reg, "k_clean_split_delimiter", "Split-column delimiter", "text", _
+        "COMMA", "simple", _
+        "Enter one delimiter character, or use COMMA, TAB, SEMICOLON, PIPE, or SPACE.", _
+        "clean.split_column"
+    Core_AddField reg, "k_clean_split_destination", "Split-column destination", "text", _
+        "SOURCE", "simple", _
+        "Use SOURCE to replace the picked column, or enter an absolute worksheet column letter such as D. A separate destination leaves the source column unchanged.", _
+        "clean.split_column"
+
     Core_AddAction reg, "clean.dupes", "Remove Duplicates", "PkgClean_RemoveDupes", "Pick a range, then answer two questions about it: whether its first row is a header, and which column(s) decide a duplicate."
     Core_AddAction reg, "clean.trim", "Trim & Clean Text", "PkgClean_TrimClean", "Pick a range; strips leading/trailing spaces, collapses double spaces, and removes non-printing characters."
     Core_AddAction reg, "clean.filldown", "Fill Blanks Down", "PkgClean_FillDown", "Pick a range; fills each blank cell with the value from the cell above it."
@@ -64,6 +74,8 @@ Public Sub PkgClean_Manifest(reg As Object)
     Core_AddAction reg, "clean.unmerge_fill", "Unmerge & Fill Down", "PkgClean_UnmergeFill", "Pick a range; unmerges every merged block and puts the block's value into every cell it covered, so the data can be sorted and filtered."
     Core_AddAction reg, "clean.standardize_formats", "Standardize Formats", "PkgClean_StandardizeFormats", "Pick a range; applies the number formats listed in the Column formats table on Setup. Changes how values look, never the values themselves."
     Core_AddAction reg, "clean.text_to_numbers", "Convert Text to Numbers", "PkgClean_TextToNumbers", "Pick a range; turns text that represents a number into a real number, stripping $ and thousands separators. Formulas are never touched. Note that 12% becomes 12, not 0.12."
+    Core_AddAction reg, "clean.split_column", "Split One Column Into Many", "PkgClean_SplitColumn", "For exports that land everything in column A"
+    Core_AddAction reg, "clean.change_case", "Change Case", "PkgClean_ChangeCase", "Normalize text casing across a range. In a chain, this one stops and waits for your answer before it does anything."
 End Sub
 
 '================================================================
@@ -521,3 +533,327 @@ Public Sub PkgClean_TextToNumbers(ctx As Object)
 Fail:
     Core_Fail ctx, "clean.text_to_numbers", Err
 End Sub
+
+'================================================================
+' ACTION - Split one selected column into text fields
+'================================================================
+Public Sub PkgClean_SplitColumn(ctx As Object)
+    Dim src As Range, ws As Worksheet, destCell As Range, target As Range
+    Dim scanRange As Range, c As Range
+    Dim delimiter As String, destSpec As String, firstOccupied As String
+    Dim sourceRef As String, destNote As String
+    Dim destCol As Long, maxFields As Long, fields As Long, i As Long
+    Dim formulaState As Variant, fieldInfo() As Variant
+    Const TITLE As String = "Split One Column Into Many"
+    On Error GoTo Fail
+
+    Set src = Core_AskRange(TITLE)
+    If src Is Nothing Then Exit Sub
+    If src.Columns.Count <> 1 Then
+        Core_Refuse ctx, "This action accepts exactly one selected column." & vbCrLf & vbCrLf & _
+               "No Setup change is needed; run it again and pick one column only." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    Set src = Core_NarrowToUsed(src)
+    If src Is Nothing Then
+        Core_Refuse ctx, "The range you picked is entirely outside the used area of the " & _
+               "sheet, so there is nothing in it to split." & vbCrLf & vbCrLf & _
+               "No Setup change is needed; run it again and pick a populated column." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+    Set ws = src.Parent
+    sourceRef = Core_RangeRef(src)
+
+    delimiter = PkgClean_Delimiter(Core_Cfg(ctx, "k_clean_split_delimiter"))
+    If Len(delimiter) = 0 Then
+        Core_Refuse ctx, "The split-column delimiter is not valid." & vbCrLf & vbCrLf & _
+               "Set 'Split-column delimiter' on the Setup tab to one character, or to " & _
+               "COMMA, TAB, SEMICOLON, PIPE, or SPACE, Finalize, and run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    destSpec = Trim$(Core_Cfg(ctx, "k_clean_split_destination"))
+    destCol = PkgClean_DestinationColumn(ws, destSpec, src.Column)
+    If destCol = 0 Then
+        Core_Refuse ctx, "The split-column destination is not valid." & vbCrLf & vbCrLf & _
+               "Set 'Split-column destination' on the Setup tab to SOURCE or an absolute " & _
+               "worksheet column letter, Finalize, and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    formulaState = src.HasFormula
+    If IsNull(formulaState) Or (formulaState = True) Then
+        Core_Refuse ctx, "The selected column contains one or more formulas. Splitting it " & _
+               "would replace those formulas with text values." & vbCrLf & vbCrLf & _
+               "No Setup change is needed; pick a values-only export column and run this " & _
+               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    For Each c In src.Cells
+        fields = PkgClean_FieldCount(c.Value2, delimiter)
+        If fields > maxFields Then maxFields = fields
+    Next c
+    If maxFields <= 1 Then
+        Core_Refuse ctx, "The configured delimiter was not found in the selected column." & _
+               vbCrLf & vbCrLf & "Check 'Split-column delimiter' on the Setup tab, " & _
+               "Finalize, and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If destCol + maxFields - 1 > ws.Columns.Count Then
+        Core_Refuse ctx, "The split needs " & maxFields & " destination columns, but they " & _
+               "would run past the last column on the worksheet." & vbCrLf & vbCrLf & _
+               "Set 'Split-column destination' to an earlier column on the Setup tab, " & _
+               "Finalize, and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    Set destCell = ws.Cells(src.Row, destCol)
+    Set target = ws.Range(destCell, _
+        ws.Cells(src.Row + src.Rows.Count - 1, destCol + maxFields - 1))
+    If destCol = src.Column Then
+        Set scanRange = ws.Range(ws.Cells(src.Row, src.Column + 1), _
+            ws.Cells(src.Row + src.Rows.Count - 1, src.Column + maxFields - 1))
+    Else
+        Set scanRange = target
+    End If
+
+    If Application.CountA(scanRange) > 0 Then
+        For Each c In scanRange.Cells
+            If Not IsEmpty(c.Value2) Or c.HasFormula Then
+                firstOccupied = c.Address(False, False)
+                Exit For
+            End If
+        Next c
+    End If
+
+    If Len(firstOccupied) > 0 Then
+        Core_Refuse ctx, "Splitting would overwrite existing content or a formula at " & _
+               firstOccupied & "." & vbCrLf & vbCrLf & _
+               "Clear the intended output area, or change 'Split-column destination' on " & _
+               "the Setup tab, Finalize, and run this again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    ReDim fieldInfo(0 To maxFields - 1)
+    For i = 0 To maxFields - 1
+        fieldInfo(i) = Array(i + 1, xlTextFormat)
+    Next i
+
+    Core_SpeedOn
+    src.TextToColumns Destination:=destCell, DataType:=xlDelimited, _
+        TextQualifier:=xlTextQualifierDoubleQuote, ConsecutiveDelimiter:=False, _
+        Tab:=False, Semicolon:=False, Comma:=False, Space:=False, _
+        Other:=True, OtherChar:=delimiter, FieldInfo:=fieldInfo
+    Core_SpeedOff
+
+    If destCol = src.Column Then
+        destNote = "The selected source column was replaced by the split fields."
+    Else
+        destNote = "The source column was left unchanged."
+    End If
+    Core_Done ctx, "Split " & src.Rows.Count & " row(s) from " & sourceRef & _
+           " into as many as " & maxFields & " text column(s), starting at " & _
+           destCell.Address(False, False) & "." & vbCrLf & vbCrLf & destNote, TITLE
+    Exit Sub
+Fail:
+    Core_Fail ctx, "clean.split_column", Err
+End Sub
+
+Private Function PkgClean_Delimiter(ByVal raw As String) As String
+    Dim token As String
+    token = UCase$(Trim$(raw))
+
+    Select Case token
+        Case "COMMA"
+            PkgClean_Delimiter = ","
+        Case "TAB"
+            PkgClean_Delimiter = vbTab
+        Case "SEMICOLON"
+            PkgClean_Delimiter = ";"
+        Case "PIPE"
+            PkgClean_Delimiter = "|"
+        Case "SPACE"
+            PkgClean_Delimiter = " "
+        Case Else
+            If Len(raw) = 1 Then PkgClean_Delimiter = raw
+    End Select
+End Function
+
+Private Function PkgClean_DestinationColumn(ws As Worksheet, ByVal spec As String, _
+                                            ByVal sourceColumn As Long) As Long
+    Dim token As String, i As Long, colNum As Long
+    token = UCase$(Trim$(spec))
+
+    If token = "SOURCE" Then
+        PkgClean_DestinationColumn = sourceColumn
+        Exit Function
+    End If
+    If Len(token) = 0 Then Exit Function
+    If Len(token) > 3 Then Exit Function
+    If Not Core_IsAlpha(token) Then Exit Function
+
+    For i = 1 To Len(token)
+        colNum = colNum * 26 + Asc(Mid$(token, i, 1)) - Asc("A") + 1
+    Next i
+    If colNum <= ws.Columns.Count Then PkgClean_DestinationColumn = colNum
+End Function
+
+Private Function PkgClean_FieldCount(ByVal rawValue As Variant, _
+                                     ByVal delimiter As String) As Long
+    Dim s As String, ch As String, i As Long, n As Long
+    Dim inQuotes As Boolean
+    n = 1
+    PkgClean_FieldCount = n
+
+    If IsError(rawValue) Then Exit Function
+    If IsEmpty(rawValue) Then Exit Function
+    s = CStr(rawValue)
+
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If ch = """" Then
+            If inQuotes Then
+                If i < Len(s) Then
+                    If Mid$(s, i + 1, 1) = """" Then
+                        i = i + 1
+                    Else
+                        inQuotes = False
+                    End If
+                Else
+                    inQuotes = False
+                End If
+            Else
+                inQuotes = True
+            End If
+        Else
+            If Not inQuotes Then
+                If ch = delimiter Then n = n + 1
+            End If
+        End If
+    Next i
+
+    PkgClean_FieldCount = n
+End Function
+
+'================================================================
+' ACTION - Change the case of constant text cells
+'================================================================
+Public Sub PkgClean_ChangeCase(ctx As Object)
+    Dim rng As Range, arr As Variant, converted As String, caseMode As String
+    Dim r As Long, c As Long, textCount As Long, changed As Long
+    Dim formulaCount As Long
+    Const TITLE As String = "Change Case"
+    On Error GoTo Fail
+
+    Set rng = Core_AskRange(TITLE)
+    If rng Is Nothing Then Exit Sub
+    Set rng = Core_NarrowToUsed(rng)
+    If rng Is Nothing Then
+        Core_Refuse ctx, "The range you picked is entirely outside the used area of the " & _
+               "sheet, so there is no text in it to change." & vbCrLf & vbCrLf & _
+               "No Setup change is needed; run it again and pick a populated range." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If Not PkgClean_AskCase(caseMode, TITLE) Then Exit Sub
+
+    Core_SpeedOn
+    arr = rng.Value2
+    If IsArray(arr) Then
+        For r = 1 To UBound(arr, 1)
+            For c = 1 To UBound(arr, 2)
+                If rng.Cells(r, c).HasFormula Then
+                    formulaCount = formulaCount + 1
+                ElseIf VarType(arr(r, c)) = vbString Then
+                    textCount = textCount + 1
+                    Select Case caseMode
+                        Case "UPPER"
+                            converted = UCase$(CStr(arr(r, c)))
+                        Case "lower"
+                            converted = LCase$(CStr(arr(r, c)))
+                        Case "Proper"
+                            converted = StrConv(CStr(arr(r, c)), vbProperCase)
+                    End Select
+                    If converted <> CStr(arr(r, c)) Then
+                        rng.Cells(r, c).Value = converted
+                        changed = changed + 1
+                    End If
+                End If
+            Next c
+        Next r
+    Else
+        If rng.HasFormula Then
+            formulaCount = 1
+        ElseIf VarType(arr) = vbString Then
+            textCount = 1
+            Select Case caseMode
+                Case "UPPER"
+                    converted = UCase$(CStr(arr))
+                Case "lower"
+                    converted = LCase$(CStr(arr))
+                Case "Proper"
+                    converted = StrConv(CStr(arr), vbProperCase)
+            End Select
+            If converted <> CStr(arr) Then
+                rng.Value = converted
+                changed = 1
+            End If
+        End If
+    End If
+    Core_SpeedOff
+
+    Core_Done ctx, "Applied " & caseMode & " case to " & textCount & _
+           " constant text cell(s) in " & Core_RangeRef(rng) & "; " & changed & _
+           " cell(s) changed." & vbCrLf & vbCrLf & _
+           "Text already in that case was not rewritten. Numbers, errors, blanks, and " & _
+           formulaCount & " formula cell(s) were left exactly as they were.", TITLE
+    Exit Sub
+Fail:
+    Core_Fail ctx, "clean.change_case", Err
+End Sub
+
+Private Function PkgClean_AskCase(ByRef caseMode As String, _
+                                  ByVal title As String) As Boolean
+    Dim answer As Variant, token As String
+
+    Do
+        answer = Application.InputBox( _
+            Prompt:="Enter UPPER, lower, or Proper." & vbCrLf & vbCrLf & _
+                    "Only constant text cells will be changed.", _
+            title:=title, Default:="Proper", Type:=2)
+
+        If VarType(answer) = vbBoolean Then
+            If answer = False Then Exit Function
+        End If
+
+        token = LCase$(Trim$(CStr(answer)))
+        Select Case token
+            Case "upper"
+                caseMode = "UPPER"
+                PkgClean_AskCase = True
+                Exit Function
+            Case "lower"
+                caseMode = "lower"
+                PkgClean_AskCase = True
+                Exit Function
+            Case "proper"
+                caseMode = "Proper"
+                PkgClean_AskCase = True
+                Exit Function
+            Case Else
+                MsgBox "Enter UPPER, lower, or Proper, or click Cancel to stop.", _
+                       vbInformation, title
+        End Select
+    Loop
+End Function
