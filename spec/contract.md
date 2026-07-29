@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.8.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.9.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -688,6 +688,17 @@ manifest-assembly time.
   and the engine removes controls by that prefix alone on every rebuild — so anything
   else in the workbook using the prefix is deleted without warning. A platform
   reserves its own equivalent namespace for the same purpose.
+- **Reserved (v2.9.0, normative):** an implementation creating a NEW destination sheet from a
+  `text`-kind config field MUST refuse a value naming a sheet in this section's reserved family,
+  or a sheet the platform's own generated-page naming rule claims (the Excel reference
+  implementation: `Core_IsEngineSheet`), and MUST NOT check only for an EXISTING sheet of that
+  name. Discovered by `workbook.build_toc` (§8): a value like `"Macros 3"` names no sheet today,
+  so an exists-only check lets it through, and the sheet it creates is destroyed unconditionally
+  by the very next rebuild (the `Macros`/`Macros <n>` rule above) - a data-loss trap that would
+  not surface until the rebuild AFTER the one that hid it. This closes the same gap for every
+  existing `text`-kind destination field (`k_import_dest` and any added by W2-W5), not only this
+  wave's field, because the underlying check is one shared engine function in the reference
+  implementation.
 - Reference-implementation binding names (`Pkg<Name>_<Verb>` entry points,
   `Pkg<Name>_Manifest`, `Core_*` API) are an Excel/VBA detail, not part of the
   portable contract.
@@ -989,6 +1000,24 @@ its first field.
 | `backup.snapshot` | Snapshot Before a Risky Step | As `backup.timestamped_copy`, into `<root>\Backup\Snapshots\`, named with a full timestamp and an optional configured label. After a successful save, prune that folder to the configured keep-count by file modified time, oldest first, touching only files this action's own naming pattern produced. **This action provides no restore.** A conforming implementation MUST NOT claim or imply an automatic restore capability for the file it writes. |
 | `backup.month_end_version` | Save Month-End Version | As `backup.timestamped_copy`, named for the last day of the calendar month before the reference date's month (`k_backup_offset` days from today), independent of which day of that month the action runs on. |
 | `backup.archive_output` | Archive a Generated Output | Locate the newest file matching `k_backup_archive_prefix` (the `file` kind rule). MUST refuse if that file is currently open in this Excel instance rather than attempting to move it. Move it into `<root>\Archive\yyyy_mm\` (the current date's year and month), creating that folder if it does not exist. MUST refuse rather than overwrite if a file of that name already exists at the destination. |
+### Package `workbook` - "Workbook Housekeeping" (v1.0.0, contract v2.9.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_workbook_toc_name` | text | simple | `Contents` | Name of the Table of Contents sheet. A conforming implementation MUST create this sheet on first run and MUST refuse on any later run where a sheet by that name already exists, WITHOUT exception for a sheet the implementation itself built on a prior run - a plain cell value cannot prove that provenance without adding new engine state, so this field is create-only by design, not merely by omission. Rebuilding after adding, removing, or renaming a tab requires deleting the previous sheet by hand first, then running the action again. Kind is `text`, not `sheet`, for the same reason as `k_import_dest` (§8): a `sheet` field is validated to already exist, and this one must not. |
+| `k_workbook_password` | text | advanced | *(blank)* | Password used by `workbook.protect_sheets` and `workbook.unprotect_sheets`. Blank means protect with no password. **Not a secret** - stored as plain text in the config store, like every other field; it deters accidental edits, the same as Excel's own Protect Sheet, and provides no confidentiality. |
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `workbook.unhide_sheets` | Unhide All Worksheets | Set every hidden or very-hidden worksheet to visible, EXCLUDING every sheet the implementation's engine owns (the Setup surface, the config store and its staging sheet, the package-enable sheet, every generated button page). The engine-owned config store MUST NOT be unhidden by this action under any configuration. |
+| `workbook.protect_sheets` | Protect All Sheets | Protect every sheet NOT owned by the engine, with `k_workbook_password` (or no password if blank). An implementation MUST choose protection parameters that do not block its own future ability to remove and replace its own placed controls on a protected surface (Excel reference: `DrawingObjects:=False`) - protecting with the platform's own default MUST NOT be assumed safe. Engine-owned sheets MUST NOT be protected by this action, so a later rebuild retains its own access to them. |
+| `workbook.unprotect_sheets` | Unprotect All Sheets | Unprotect every protected sheet NOT owned by the engine, using `k_workbook_password`. A sheet whose protection does not accept that password MUST be reported by name as not unprotected; the action MUST NOT stop partway and MUST attempt every remaining sheet regardless of one sheet's failure. |
+| `workbook.build_toc` | Build Table of Contents | Create (§8 field semantics above) a sheet named `k_workbook_toc_name` listing every VISIBLE sheet not owned by the engine and not the Table of Contents sheet itself, each as a same-workbook hyperlink to that sheet, with an embedded apostrophe in a sheet name DOUBLED per the anchored-placement quoting rule (§6). A hidden sheet MUST NOT be listed (a link to it cannot be navigated to). The destination-name check MUST be performed unconditionally, before any other branch, and MUST refuse per the reserved-name rule (§7) and per any existing sheet of that name - including the implementation's own prior output - exactly as any other engine-created destination sheet. |
+| `workbook.unhide_rows_cols` | Unhide All Rows & Columns | On the ACTIVE sheet only, set every row and every column to visible. MUST refuse if the active sheet is engine-owned (an engine-owned surface may hide rows/columns as part of its own generated layout). Because a filter-hidden row and a manually hidden row are not distinguishable, an implementation MUST warn, and obtain confirmation, before unhiding on a sheet with an active AutoFilter; outside that case no confirmation is required. |
 ---
 
 ## 9. Platform-abstraction appendix
@@ -1053,6 +1082,14 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.9.0 (additive):** the `workbook` domain's package, fields, and five actions (§8); one
+  new reserved-name normative rule for `text`-kind destination fields (§7). The reserved-name
+  rule reclassifies one previously-succeeding configuration (a destination name inside the
+  reserved family, e.g. `"Macros 3"`, on a field that had no prior existing-name collision) as a
+  refusal. Classed additive on the same reasoning v2.4.0 used for the chain-halt rule: the
+  configuration being refused was never actually usable - it produced a sheet the very next
+  rebuild destroyed unconditionally - so refusing it prevents a data-loss trap rather than
+  withdrawing behaviour a deployment could rely on. `SCHEMA_VER` does not move.
 - **v2.8.0 (additive):** a new package `backup` with six fields and four actions (§8). The
   `backup` domain itself is not new - section 7 already listed it `active` ahead of any package
   using it - so this bullet adds only the package, not the domain. **Additive by the two-axes

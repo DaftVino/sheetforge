@@ -175,3 +175,30 @@ a chain halt.
   month. *Why:* prior-month-end on 1 Jan is 31 Dec of the previous year.
 - **`backup.snapshot` as step 1 of a destructive chain runs quietly** and the later steps still
   run. *Why:* this is the intended flagship usage.
+
+---
+
+## W6 — Workbook housekeeping (v0.17.0, contract v2.9.0)
+
+- **`workbook.unhide_sheets` leaves `_Config` hidden.** Run it on a workbook with `_Config`
+  present and a user sheet hidden. Expected: the user sheet is visible, **`_Config` and
+  `_Config_staged` are still hidden**, and the count reports how many were left alone.
+  *Failure looks like:* `_Config` visible. **This is the most important item in W6** — it is
+  the one that exposes engine internals to a finance user.
+- **`workbook.protect_sheets` does not strand the toolkit's buttons.** Protect everything, then
+  run Finalize / rebuild the button pages. Expected: the rebuild completes and the buttons are
+  replaced normally. *Failure looks like:* an error about removing controls, or duplicated
+  buttons stacking up. *Why:* Excel's `Protect` defaults to protecting DrawingObjects, and the
+  contract forbids the engine unprotecting a sheet to work around it — so `DrawingObjects:=False`
+  is the only thing preventing a permanent stranding.
+- **`workbook.unprotect_sheets` with a wrong password names the sheets that refused** and does
+  not stop halfway leaving some unprotected.
+- **`workbook.build_toc` refuses a reserved name.** Set the TOC name to `Macros 1` and run it.
+  Expected: a refusal naming the reason. *Failure looks like:* a sheet created that the next
+  Finalize deletes without warning.
+- **`workbook.build_toc` refuses rather than clearing an existing sheet of that name**, even
+  one it created itself on a previous run.
+- **A TOC link works for a sheet whose name contains an apostrophe.** *Why:* the sheet name is
+  embedded in a quoted `SubAddress` and the apostrophe has to be doubled.
+- **`workbook.unhide_rows_cols` refuses on an active chart sheet** rather than raising a type
+  mismatch, and states what an active AutoFilter means for the result.
