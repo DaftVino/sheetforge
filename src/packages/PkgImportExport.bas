@@ -93,7 +93,7 @@ Public Sub PkgImportExport_Clear(ctx As Object)
     On Error GoTo Fail
 
     If Not Core_CfgTable(ctx, "k_import", tabNames, prefixes, typeMaps) Then
-        MsgBox "No input tabs are configured.", vbExclamation, "Clear Input Tabs"
+        Core_Refuse ctx, "No input tabs are configured.", "Clear Input Tabs"
         Exit Sub
     End If
 
@@ -120,10 +120,11 @@ Public Sub PkgImportExport_Import(ctx As Object)
     Dim r As Long, cc As Long, sLastRow As Long, sLastCol As Long
     Dim logTxt As String
     Dim sh As Worksheet, pt As PivotTable
+    Dim srcWasOpen As Boolean, alreadyOpenCount As Long, openNote As String
     On Error GoTo Fail
 
     If Not Core_CfgTable(ctx, "k_import", tabNames, prefixes, typeMaps) Then
-        MsgBox "No import files are configured.", vbExclamation, "Import Source Data"
+        Core_Refuse ctx, "No import files are configured.", "Import Source Data"
         Exit Sub
     End If
 
@@ -145,7 +146,17 @@ Public Sub PkgImportExport_Import(ctx As Object)
         If srcPath = "" Then
             logTxt = logTxt & "X   " & tabNames(i) & "   <- NO FILE matching """ & prefixes(i) & "*""" & vbCrLf
         Else
-            Set wbSrc = Application.Workbooks.Open(fileName:=srcPath, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, CorruptLoad:=xlRepairFile)
+            ' Probe BEFORE opening: a source already open on screen must be read in
+            ' place and left alone, not reopened and later discarded (Core_AlreadyOpen).
+            ' Recomputed every loop pass - this action opens a different file per input
+            ' tab, so each one needs its own already-open answer.
+            Set wbSrc = Core_AlreadyOpen(srcPath)
+            srcWasOpen = Not wbSrc Is Nothing
+            If Not srcWasOpen Then
+                Set wbSrc = Application.Workbooks.Open(fileName:=srcPath, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, CorruptLoad:=xlRepairFile)
+            Else
+                alreadyOpenCount = alreadyOpenCount + 1
+            End If
             Set wsSrc = wbSrc.Worksheets(1)
             sLastRow = Core_LastRowUp(wsSrc, 1)   ' bare End(xlUp): match legacy source read
             sLastCol = Core_LastCol(wsSrc, 1)
@@ -169,7 +180,7 @@ Public Sub PkgImportExport_Import(ctx As Object)
             Else
                 logTxt = logTxt & "!   " & tabNames(i) & "   <- " & Core_FileName(srcPath) & "   (no data rows)" & vbCrLf
             End If
-            wbSrc.Close SaveChanges:=False
+            If Not srcWasOpen Then wbSrc.Close SaveChanges:=False
             Set wbSrc = Nothing
         End If
 NextTab:
@@ -189,13 +200,27 @@ NextTab:
 
     Application.AskToUpdateLinks = True
     Core_SpeedOff
-    Core_Done ctx, "Import complete (input tabs were cleared first):" & vbCrLf & vbCrLf & logTxt, _
-           "Import Source Data"
+
+    ' The "opened read-only and closed without saving" story is only true of files
+    ' this run actually opened. A source that was ALREADY open was read in its
+    ' unsaved on-screen state and left alone - that changes whether the imported
+    ' numbers are the ones on disk, so it is stated rather than glossed.
+    If alreadyOpenCount <= 0 Then
+        openNote = "Every source file was opened read-only and closed without saving."
+    Else
+        openNote = alreadyOpenCount & " of these file(s) were already open, so what was " & _
+            "imported is their CURRENT on-screen contents, including any edits not yet " & _
+            "saved. They were left open and untouched. The rest were opened read-only and " & _
+            "closed without saving."
+    End If
+
+    Core_Done ctx, "Import complete (input tabs were cleared first):" & vbCrLf & vbCrLf & logTxt & vbCrLf & _
+           openNote, "Import Source Data"
     Exit Sub
 Fail:
     Core_Fail ctx, "importexport.import", Err
     On Error Resume Next
-    If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+    If Not srcWasOpen And Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
     Application.AskToUpdateLinks = True
 End Sub
 
@@ -207,7 +232,8 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
     Dim hdr As Variant, lastRow As Long, lastCol As Long, dLast As Long
     Dim j As Long, outR As Long, n As Long, k As Long
     Dim cols As Collection, nCols As Long, srcCol() As Long, missing As String
-    Dim mPrefix As String, mSheet As String, mDest As String
+    Dim mPrefix As String, mSheet As String, mDest As String, nMissing As Long
+    Dim srcWasOpen As Boolean, openNote As String
     On Error GoTo Fail
 
     mPrefix = Core_Cfg(ctx, "k_master_prefix")
@@ -216,20 +242,20 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
 
     srcPath = Core_FindFile(mPrefix)
     If srcPath = "" Then
-        MsgBox "No file matching """ & mPrefix & "*"" was found in this folder.", _
-               vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "No file matching """ & mPrefix & "*"" was found in this folder.", _
+               "Update Ref_Master"
         Exit Sub
     End If
     If Not Core_SheetExists(mDest) Then
-        MsgBox "Destination tab '" & mDest & "' was not found in this workbook.", _
-               vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "Destination tab '" & mDest & "' was not found in this workbook.", _
+               "Update Ref_Master"
         Exit Sub
     End If
     Set wsDst = ThisWorkbook.Worksheets(mDest)
     Set cols = Core_CfgList(ctx, "k_master_cols")
     nCols = cols.Count
     If nCols = 0 Then
-        MsgBox "No Ref_Master columns are configured.", vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "No Ref_Master columns are configured.", "Update Ref_Master"
         Exit Sub
     End If
     ReDim srcCol(1 To nCols)
@@ -237,16 +263,22 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
     Core_SpeedOn
     Application.AskToUpdateLinks = False
 
-    Set wbSrc = Application.Workbooks.Open(fileName:=srcPath, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, CorruptLoad:=xlRepairFile)
+    ' Probe BEFORE opening: a master file already open on screen must be read in
+    ' place and left alone, not reopened and later discarded (Core_AlreadyOpen).
+    Set wbSrc = Core_AlreadyOpen(srcPath)
+    srcWasOpen = Not wbSrc Is Nothing
+    If Not srcWasOpen Then
+        Set wbSrc = Application.Workbooks.Open(fileName:=srcPath, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, CorruptLoad:=xlRepairFile)
+    End If
     On Error Resume Next
     Set wsSrc = wbSrc.Worksheets(mSheet)
     On Error GoTo Fail
     If wsSrc Is Nothing Then
-        wbSrc.Close SaveChanges:=False
+        If Not srcWasOpen Then wbSrc.Close SaveChanges:=False
         Application.AskToUpdateLinks = True
         Core_SpeedOff
-        MsgBox "Sheet '" & mSheet & "' not found in the master file.", _
-               vbExclamation, "Update Ref_Master"
+        Core_Refuse ctx, "Sheet '" & mSheet & "' not found in the master file.", _
+               "Update Ref_Master"
         Exit Sub
     End If
 
@@ -255,14 +287,22 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
 
     For k = 1 To nCols
         srcCol(k) = Core_FindCol(hdr, CStr(cols(k)))
-        If srcCol(k) = 0 Then missing = missing & vbCrLf & "   - " & cols(k)
+        If srcCol(k) = 0 Then
+            missing = missing & vbCrLf & "   - " & cols(k)
+            nMissing = nMissing + 1
+        End If
     Next k
     If Len(missing) > 0 Then
-        wbSrc.Close SaveChanges:=False
+        If Not srcWasOpen Then wbSrc.Close SaveChanges:=False
         Application.AskToUpdateLinks = True
         Core_SpeedOff
-        MsgBox "Could not find these column header(s) on sheet '" & mSheet & "':" & missing, _
-               vbExclamation, "Update Ref_Master"
+        ' The COUNT goes on the first line, because that line is all a chain summary
+        ' shows. "Could not find these column header(s) on sheet 'X':" with every name
+        ' below the break reports that something is missing without saying how much,
+        ' which is the one fact this message exists to carry.
+        Core_Refuse ctx, "Could not find " & nMissing & " column header(s) on sheet '" & _
+               mSheet & "'." & missing & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", "Update Ref_Master"
         Exit Sub
     End If
 
@@ -287,18 +327,31 @@ Public Sub PkgImportExport_UpdateMaster(ctx As Object)
     Next j
     n = outR - 2
 
-    wbSrc.Close SaveChanges:=False
+    If Not srcWasOpen Then wbSrc.Close SaveChanges:=False
     Application.Calculation = xlCalculationAutomatic
     Application.Calculate
     Application.AskToUpdateLinks = True
     Core_SpeedOff
+
+    ' Same rule as the import action: the "opened read-only and closed without
+    ' saving" story is only true when this run actually opened the file. A master
+    ' file that was already open was read in its unsaved on-screen state and left
+    ' alone - that changes whether the numbers written are the ones on disk.
+    If srcWasOpen Then
+        openNote = "The master file was already open, so what was read is its CURRENT " & _
+            "on-screen contents, including any edits not yet saved. It was left open and " & _
+            "untouched, not closed."
+    Else
+        openNote = "The master file was opened read-only and closed without saving."
+    End If
+
     Core_Done ctx, mDest & " updated from """ & Core_FileName(srcPath) & """ (sheet '" & mSheet & "')." & vbCrLf & _
-           n & " rows written.", "Update Ref_Master"
+           n & " rows written." & vbCrLf & vbCrLf & openNote, "Update Ref_Master"
     Exit Sub
 Fail:
     Core_Fail ctx, "importexport.updateMaster", Err
     On Error Resume Next
-    If Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+    If Not srcWasOpen And Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
     Application.AskToUpdateLinks = True
 End Sub
 
@@ -318,7 +371,7 @@ Public Sub PkgImportExport_Export(ctx As Object)
 
     Set expTabs = Core_CfgList(ctx, "k_export_tabs")
     If expTabs.Count = 0 Then
-        MsgBox "No export tabs are configured.", vbExclamation, "Export Dashboard"
+        Core_Refuse ctx, "No export tabs are configured.", "Export Dashboard"
         Exit Sub
     End If
     mainTabs = CollectionToArray(expTabs)
@@ -327,14 +380,17 @@ Public Sub PkgImportExport_Export(ctx As Object)
     ' every visible main tab must exist
     For Each t In mainTabs
         If Not Core_SheetExists(CStr(t)) Then
-            MsgBox "Missing tab: " & t & vbCrLf & "Export cancelled.", vbExclamation, "Export Dashboard"
+            Core_Refuse ctx, "Missing tab: " & t & vbCrLf & "Export cancelled.", "Export Dashboard"
             Exit Sub
         End If
     Next t
     If Not Core_SheetExists(setSh) Then
-        MsgBox "Settings sheet '" & setSh & "' not found. It must stay in" & vbCrLf & _
-               "the export (hidden) for the conditional-formatting thresholds.", _
-               vbExclamation, "Export Dashboard"
+        ' The line break moved to after the first SENTENCE, not into the middle of the
+        ' second one. A chain summary quotes only the first line, and "It must stay in"
+        ' cut off there reads as a truncated message rather than a reason.
+        Core_Refuse ctx, "Settings sheet '" & setSh & "' not found." & vbCrLf & _
+               "It must stay in the export (hidden) for the conditional-formatting " & _
+               "thresholds.", "Export Dashboard"
         Exit Sub
     End If
 
@@ -457,9 +513,9 @@ Public Sub PkgImportExport_SuggestTypes(ctx As Object)
     On Error GoTo Fail
 
     If Not Core_SetupTable("k_import", tabs, prefixes, typeMaps) Then
-        MsgBox "No import rows on the Setup tab yet." & vbCrLf & _
+        Core_Refuse ctx, "No import rows on the Setup tab yet." & vbCrLf & _
                "Run 'Create Setup Tab', fill each input tab + source-file prefix, then try again.", _
-               vbExclamation, "Suggest Import Types"
+               "Suggest Import Types"
         Exit Sub
     End If
 
