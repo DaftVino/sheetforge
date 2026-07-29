@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.3.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.4.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -324,6 +324,40 @@ their **completion** dialogs: a handler reports completion through the engine's
 done-sink, which suppresses the dialog when the context is quiet. Suppression is
 guaranteed only for completion dialogs routed through that sink; interactive
 prompts (e.g. a range picker) and error dialogs are not suppressible.
+
+**Three outcomes, not two (v2.4.0).** An action invocation ends in exactly one of:
+
+| outcome | meaning | what the caller sees |
+|---|---|---|
+| **done** | The action did its work. | A completion message. |
+| **refused** | A precondition was not met, so the action deliberately did nothing. The destination already exists; the folder is missing; nothing is configured yet. | A plain-language reason. **No error number** — there is no error. |
+| **failed** | Something went wrong while the action was working. | An error number and description. |
+
+**A refusal is not an error, and the difference is load-bearing.** A refusal is the action
+working correctly: it checked, found the world not ready, and stopped having changed
+nothing. An implementation MUST be able to tell the two apart, because the chain rule below
+treats them differently, and because a refusal reported with a fabricated error number reads
+to the user as a malfunction.
+
+**Normative:** an implementation MUST expose a single call that records a refusal and
+presents its reason, and that call MUST suppress its own presentation when the invocation is
+quiet (a chain step), exactly as the completion sink does. Two separate steps — record the
+outcome, then show a dialog — are non-conforming: an action that does one and forgets the
+other reports a success it did not achieve, which is the defect this rule exists to prevent.
+
+**Chains stop at a refusal (v2.4.0, normative).** When a chain step **refuses**, the chain
+MUST stop at that step and MUST NOT run the remaining steps. It MUST report which step
+refused, its reason, and how many steps did not run.
+
+When a chain step **fails**, the prior behavior is unchanged: the implementation asks
+whether to continue.
+
+The asymmetry is deliberate. A failure may be incidental to one step, and the user is placed
+to judge. A refusal means the step's *output does not exist* — so every later step would run
+against whatever was there before, silently producing a plausible, wrong result. The
+reference implementation's own combine action refuses on every run after the first (its
+destination sheet now exists), so under the old ask-and-continue rule a daily chain cleaned
+last period's data and reported success.
 
 **Grouping / layout (v1.1.0):** each button (action or chain) may carry a
 **placement code** `<page-number><column-letters>` (e.g. `1A` = page 1, column A;
@@ -852,6 +886,18 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.4.0 (additive):** a refusal becomes a distinct action outcome from a failure (§6); an
+  implementation MUST expose a single record-and-present call for it; a chain now stops at a
+  refused step instead of asking. `SCHEMA_VER` does **not** move — it stays `"v2.0"` and
+  every existing configuration keeps its meaning.
+  **The judgement call in classing this additive.** By the letter, a chain that used to ask
+  "continue?" and now stops is a behavior change to an existing valid configuration. It is
+  classed additive because no *stored value* is reinterpreted — the chain, its steps and
+  their order all still mean exactly what they meant — and because the behavior being
+  removed could not be relied on for a correct result: continuing past a step that produced
+  no output ran the remainder against stale data and reported success. A platform
+  implementing v2.3.0 will ask where a v2.4.0 platform stops; that is expected and is not a
+  compatibility break.
 - **v2.3.0 (additive):** the action-id domain vocabulary becomes a normative, marked table
   in §7 and the enforcement it always described becomes real; a new package `import` with
   four fields and three actions (§8); one new `clean` field and four new `clean` actions
