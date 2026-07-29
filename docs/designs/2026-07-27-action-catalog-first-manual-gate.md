@@ -102,11 +102,19 @@ entries. **Always remove the old module first:** in the Project Explorer, right-
 
       **First build the v0.6.0 bundle.** It is not in `dist/` — that directory is
       gitignored and currently holds only v0.3.0, v0.4.0 and v0.5.0. The repo has no tags,
-      so the commit is named directly: `812d88c` is the last commit with `VERSION` at
-      0.6.0. In PowerShell from the repo root:
+      so you have to find the commit. **Find it by content, not by hash** — the history was
+      rewritten to strip client jargon before this repo went public, so every hash this
+      document used to quote is dead:
 
       ```powershell
-      git worktree add ../wt-v060 812d88c
+      # the LAST hit is the commit that set VERSION to 0.6.0
+      git log --all --format='%h %s' -S'0.6.0' -- VERSION
+      ```
+
+      Then, with that hash, in PowerShell from the repo root:
+
+      ```powershell
+      git worktree add ../wt-v060 <that hash>
       pwsh ../wt-v060/build/build.ps1
       Copy-Item ../wt-v060/dist/MacrosBundle.bas dist/MacrosBundle-v0.6.0.bas
       git worktree remove ../wt-v060 --force
