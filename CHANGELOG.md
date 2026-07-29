@@ -6,6 +6,42 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-28
+
+### Changed
+
+- **Almost nothing changes for you in this release, and that is the point.** It moves fifteen
+  helpers that were trapped inside one package each into the shared engine, so the next five
+  waves of actions build on one copy instead of writing a sixth.
+
+  The bundle is a single module, so a helper sitting privately inside `PkgClean` did not
+  merely fail to be reusable - it *reserved that name* against every other package. The
+  second package wanting a range picker could neither copy it nor declare its own.
+
+- **One dialog stops lying about which action it belongs to.** The "does this range include a
+  header row?" question was captioned **Remove Duplicates** no matter what was running. It had
+  exactly one caller, so it had never shown; the next wave gives it three.
+
+### Fixed
+
+- **Creating a sheet no longer half-succeeds.** Two cases that used to slip through:
+
+  A destination name already taken by a **chart sheet** passed validation, because the check
+  only looked at worksheets. The rename then failed *after* an empty sheet had already been
+  added - an engine error and a stray `Sheet1` from an action whose whole promise is that it
+  changes nothing when it refuses.
+
+  A destination named `Macros 3`, or any other name the toolkit reserves for itself, also
+  passed - because no such sheet existed *yet*. It would build, fill with a month of combined
+  data, and be deleted without a prompt by the next Finalize. Both are refused now, by name,
+  with the reason.
+
+### Added
+
+- **The build now fails an unprefixed package helper.** Same reasoning as the ids gate: the
+  cheapest time to catch a name that will collide is before it exists. Verified by deliberately
+  injecting one and watching the build reject it.
+
 ## [0.11.0] - 2026-07-28
 
 ### Fixed
