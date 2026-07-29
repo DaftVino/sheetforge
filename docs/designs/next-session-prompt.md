@@ -1,133 +1,105 @@
 # Next session — paste this into a fresh chat
 
-> Delete this file once the Macros Home phase is underway; it is a launch pad, not a document.
+> Delete this file once Tasks 9–12 are underway; it is a launch pad, not a document.
 
 ## Start here
 
-Run `/orient` before anything else, including clarifying questions. Then **land the stranded
-track-2 stack onto `main`**, and after that plan and implement three things the owner
-identified as missing on 2026-07-29: **`Macros Home`**, the **8 catalog items marked
-*Later***, and a **Finalize reminder**. Plan every step first, review each plan before writing
-any code, then implement step by step with each step reviewed — the same shape as track 2.
+Run `/orient` before anything else, including clarifying questions. Then finish the Macros Home
+phase: Tasks 9 to 12 of the implementation plan — reconcile the validation checklist and
+dry-run it blind, sweep the documentation, write the non-technical setup guide, then sanitize
+the repo and hand the owner a public release. All eight code tasks are already done and
+committed; **do not write more VBA unless a defect forces it**.
 
 ## Read first
 
 Read nothing else until you have these, in order:
 
-1. `docs/designs/2026-07-28-track2-completion-plan-of-record.md` (20K) — the phase contract
-   for *how* this is done: §3.5 the no-per-wave-gates policy, §4 the constraints every phase
-   inherits, §4.1 the do-not-revert list. Read whole. There is no plan for the new work yet;
-   writing one in this shape is the first task.
-2. `docs/designs/2026-07-24-finish-excel-design.md` (40K) — **over the slice threshold, do not
-   read front to back.** Read **§2.2** (lines 49–73), which specifies `Macros Home` and is the
-   only spec for it; and the **top entry of `## 5. Handoff log`** (from line 302), which is the
-   do-not-revert list and the account of what track 2 did and did not deliver.
-3. `docs/macro-catalog-plug-and-play.md` (20K) — the authoritative build queue. The **8 items
-   marked `**Later**`** (lines 48, 79, 139, 161, 183, 186, 208, 214) are this phase's new
-   actions. Each needs a frozen `<domain>.<operation>` id invented and added here.
-4. `spec/contract.md` (108K) — **far over the threshold; read it only in slices, from grep
-   anchors, never front to back.** Grep `## 6.` for the availability model and the withdrawn-index clause, `## 7.` for the
-   vocabulary table the build gate parses and the reserved sheet names, `## 8.` for the frozen
-   registry each package extends. Currently v2.9.0.
-5. `src/core/Core.bas` (264K) — **never read whole.** Grep `docs/code-map.md` (48K) for an
-   anchor and read only that slice. This phase touches `Core_BuildControlPanel` (:3815),
-   `DeleteHomePanel` (:3943), `RenderPage` (:4212) and `AvailFor` (:2906).
-6. `docs/designs/2026-07-28-end-to-end-validation.md` (20K) — the 41-item checklist this phase
-   appends to, and the pattern for writing an item the owner can actually run.
+1. `docs/designs/2026-07-29-macros-home-phase-plan.md` (141K) — **over the slice threshold, do
+   not read front to back.** The four remaining tasks are lines **2741–3088**; that slice is
+   your complete specification, including the exact `reading-level.mjs` invocation, the release
+   commands, and the blind-dry-run instructions. Tasks 1–8 above line 2741 are done — read them
+   only if you need to know why something is the way it is.
+2. `docs/designs/2026-07-28-end-to-end-validation.md` (33K) — **over the slice threshold: read
+   it in slices, one section at a time, from the `^## ` anchors.** The 79-item owner-facing
+   checklist Task 9 reconciles and Task 11's guide must not contradict. Sections are ordered by
+   consequence; the slices Task 9 changes most are section 1 (Setup) and section 2 (Can it
+   destroy your work?).
+3. `scripts/reading-level.mjs` (2.9K) — read whole. The executable gate binding Task 11: it
+   exits 1 above Flesch-Kincaid grade 6.0, so the owner's hard rule fails the step rather than
+   being asserted. Already validated in both directions.
+4. `docs/designs/2026-07-24-finish-excel-design.md` (46K) — **over the slice threshold: read
+   one slice only, from the anchor `## 5. Handoff log` at line 300**, and within it only the
+   **top entry**. That slice is the do-not-revert list and the account of what the plan got
+   wrong during execution. Do not read the rest of the file.
 
 ## Branch
 
-`feat/w6-workbook` — the complete track-2 tree: 43 actions, ten packages, version 0.17.0,
-contract v2.9.0. **This branch, not `main`.**
+`feat/macros-home` — 20 commits, all eight code tasks, 51 actions, contract v2.10.0, build
+green. **Stay on it.** Nothing is merged and no PR is open; Tasks 9-12 finish here and land as
+one PR against `main`.
 
-**`main` is stale at v0.11.0 with three packages.** PRs #20–#27 all read MERGED, but each was
-based on the previous feature branch and only #20 targeted `main`, so phases 2–8 merged into
-each other and stopped. Nothing is lost; the work is here and pushed.
-
-**Land this branch on `main` first — one PR, `feat/w6-workbook` into `main` — and do not cut
-any new branch until it has merged.** Branching the new phase from `main` before then loses 28
-actions. Do not branch from `docs/end-to-end-validation` (its content is already in this
-branch), and do not branch from `feat/core-refuse-pass`, `feat/core-helper-promotion`,
-`feat/w2-validate`, `feat/w3-format-export`, `feat/w4-summarize-enrich` or `feat/w5-backup` —
-all are stale intermediate points in the same stack.
+`main` is at v0.17.0 with 10 packages — that is track 2, landed earlier today as PR #28. Do
+**not** branch from it for this work; you would lose all eight code tasks. Do not cut any new
+branch at all.
 
 ## Constraints
 
-- **`PkgFixture` is dropped.** Design §2.5 specifies it; the owner said on 2026-07-29 they do
-  not want it. Do not build it and do not re-propose it.
-- **`Macros Home` must explain what each macro is for, with an example** — that is the owner's
-  requirement, not just an index of links. Design §2.2 describes a card per category with a
-  count and a link; this phase goes further, and §2.2's version alone does not satisfy it.
-  The contract currently records the index as **withdrawn** (§6) while reserving the name
-  (§7). Restoring it is a contract change, so §6's withdrawal text must be rewritten rather
-  than contradicted.
-- **The Finalize reminder is not specified anywhere.** The owner's words: if any action is
-  turned on, tell the user they need to click Finalize and then Setup on the Setup Menu to
-  complete the options for any buttons that require them. Design it; do not assume it exists.
-- **Action ids are immutable, two-segment `<domain>.<operation>`, lowercase, never camelCase,
-  no alias table.** `build.ps1` parses the vocabulary table out of contract §7 and fails on an
-  unknown domain, so **a new domain must be added to that table in the same commit or
-  earlier**. The 8 *Later* items will need ids invented — they have none yet.
-- **`SCHEMA_VER` stays `"v2.0"`.** If a build reports `v3.0`, something is wrong.
-- **Shared helpers live ONLY in Core; cross-package calls are forbidden.** Every package
-  private must be prefixed `Pkg<Name>_` — `build.ps1` fails the build otherwise.
-- **A new package must be registered in TWO places**: the file in `src/packages/`, and
-  `c.Add "<Name>"` in `CoreCandidates()` (`src/core/Core.bas`, grep for it). Without the
-  second it builds, passes every gate, and never runs.
-- **Pure ASCII in every `.bas`**; `Option Explicit`; max 25 line continuations; no module-level
-  declaration after the first procedure; **no VBA reserved word as an identifier** — `eNum`
-  lower-cases to `enum` and the build rejects it, which it did once already this track.
-- **VBA `And`/`Or` do not short-circuit**, and `On Error GoTo 0` inside a procedure with a
-  `Fail:` handler disables that handler — both caused review findings across four wave plans.
-- **TDD is off.** No headless VBA runner, Excel cannot run on CI. Do not propose a test suite.
-  Verification is `pwsh build/build.ps1`, `node scripts/vba-syntax-check.mjs`, and deliberate
-  injections for anything meant to fail.
-- **No per-wave manual gate documents.** Run-time-only claims append to
-  `docs/designs/2026-07-28-end-to-end-validation.md`. Dry-run it blind before it reaches the
-  owner — that pass found five buttons the last checklist named that do not exist.
-- **`dist/` is gitignored** — never `git add -f` the bundle. **`.vscode/` stays untracked**,
-  deliberately.
-- **No attribution footer, `Co-Authored-By`, or session URL** in any commit or PR body.
+- **The do-not-revert list is the top entry of the handoff log (manifest entry 4). Read it
+  before touching `src/`.** Seven items, each a defect corrected during execution that the plan
+  still describes the old way.
+- **`VERSION` is still `0.17.0`. Task 10 bumps it to `0.18.0`** — that bump is what the release
+  depends on, and no earlier task did it.
+- **Contract v2.10.0 is frozen and complete.** Tasks 9-12 change no action id and no contract
+  semantics. If you find yourself editing `spec/contract.md`, stop and ask why.
+- **TDD is off.** VBA has no headless runner and Excel cannot run on CI. Do not propose a test
+  suite. Verification is the build, the syntax check, deliberate injections, and the owner's
+  manual run.
+- **Neither the build nor the syntax checker resolves symbols.** A call to a helper that does
+  not exist passes both gates and fails only at Compile in Excel. Any new call site must be
+  checked by hand.
+- **codex is `gpt-5.6-sol` at high effort already.** Invoke it as plain
+  `codex exec --sandbox workspace-write "<prompt>" < /dev/null`. Passing `--model` or `-c` made
+  a run hang at "Reading additional input from stdin" and produce nothing. Its Windows sandbox
+  cannot spawn shell children, so never ask it to run a build.
+- **The owner performs Task 12 step 3 (making the repo public). An agent must not.** It is
+  irreversible — clones and forks survive a revert.
+- **`dist/` is gitignored — never `git add -f` the bundle.** `.vscode/` stays untracked. No
+  attribution footer, `Co-Authored-By`, or session URL in any commit or PR body.
 
 ## Exit criteria
 
-- `pwsh build/build.ps1` exits 0, reporting `Core + 10 package(s)` or more with balanced
-  `Sub` and `Function` counts
+- `pwsh build/build.ps1` exits 0, reporting `Core + 10 package(s)` with balanced Sub and
+  Function counts
 - `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` reports no diagnostics
-- `git show origin/main:VERSION` prints 0.18.0 or higher, proving the track-2 tree landed
-- `grep -c 'SCHEMA_VER *As String = "v2.0"' dist/MacrosBundle.bas` prints 1
-- `grep -ohE 'Core_AddAction reg, "[a-zA-Z_.0-9]+"' src/packages/*.bas | wc -l` prints 51
-- `spec/contract.md` records v2.10.0 or higher, with §6's withdrawn-index text rewritten and
-  the 8 new ids in §8
-- `docs/designs/2026-07-28-end-to-end-validation.md` contains new items for `Macros Home`, the
-  Finalize reminder, and each new action, and every button caption it names exists in
-  `dist/MacrosBundle.bas`
+- `node scripts/reading-level.mjs docs/setup-guide.md` exits 0 — grade at or under 6.00
+- `git show origin/main:VERSION` prints 0.18.0
+- `docs/setup-guide.md` and its PDF exist, and every button caption, sheet name and procedure
+  name the guide types is greppable in `dist/MacrosBundle.bas`
+- The blind dry-run of both the checklist and the guide is recorded in the PR body, with what
+  it found
+- A GitHub release v0.18.0 exists carrying `MacrosBundle-v0.18.0.bas` as an asset
 
 ## Unknowns and risks
 
-- **`main` is 28 actions behind and every PR says MERGED.** The single most likely mistake next
-  session is trusting the PR list, branching from `main`, and rebuilding work that already
-  exists. Verify with `git ls-tree --name-only origin/main src/packages/` — three files means
-  it has not landed.
-- **Nothing in track 2 has ever run in Excel.** 41 unrun checklist items, the oldest being the
-  `bafb905` used-range fix, which is now eight phases deep and still unconfirmed. A defect
-  found there may reopen a wave rather than only adding to this phase.
-- **Every action arrives switched `Off`** (contract §6, v2.1.0; `Core.bas:2906` returns
-  `AVAIL_OFF` when `_Config` is absent). A fresh import shows 43 catalog rows and no working
-  buttons. This is intended, and it is also exactly what makes the Finalize reminder
-  necessary — but confirm with the owner whether the *default* should also change, because
-  that is a separate decision from reminding them.
-- **The 8 *Later* items have no ids, no wave, and no design.** Two may not be buildable as
-  specified: *Email a sheet as an attachment* needs a defined behaviour when Outlook is absent
-  or blocked by policy, and the catalog says so; *Add a "Back to TOC" link on every sheet*
-  writes into every user sheet, which no existing action does. Decide both before planning
-  them, and expect the owner to want a say.
-- **Restoring `Macros Home` reverses a decision already recorded in the contract.** §6 says the
-  reference implementation built an index and withdrew it because "at the scale a real
-  deployment runs — a handful of actions and one or two chains — an index is clutter." At 51
-  actions that reasoning no longer holds, and saying so in §10 is part of the work.
-- **Layout at 51 actions is unverified.** Auto-layout packs three columns of six per page, so
-  51 actions plus chains is roughly four pages. `PkgFixture` was the design's mechanism for
-  proving this and has been dropped, so the only remaining proof is the owner looking at it.
-- **Nothing is uncommitted.** `git status --porcelain` shows only the untracked `.vscode/`,
-  which is deliberate and long-standing.
+- **`.vscode/` is untracked and stays that way.** Deliberate and long-standing across sessions;
+  do not commit it and do not delete it. It is the only path `git status --porcelain` reports.
+- **Nothing in this phase has ever run in Excel.** 79 unrun checklist items, up from 41. The
+  oldest — the `bafb905` used-range fix — is nine phases deep and still unconfirmed. A defect
+  found during Task 9's dry-run may reopen a completed task rather than only adding to this
+  one.
+- **Two run-time claims are marked as assumptions and neither gate can reach them:** that a
+  macro can delete the sheet hosting the button that invoked it (Complete Macro Setup), and
+  that an AddComment note anchors correctly on a header row that is later AutoFit. Both are on
+  the checklist; if either fails the fix is in `src/core/Core.bas` and this phase reopens.
+- **Layout at 51 actions is unproven.** Auto-layout packs 18 buttons per page, so 51 actions
+  plus chains is roughly four pages. PkgFixture was the design's mechanism for proving it and
+  the owner dropped it — the only remaining proof is the owner looking at the sheet.
+- **Task 12 needs the owner twice**: to make the repository public, and to choose a LICENSE if
+  none exists. Steps 1 and 2 (history scan, public-facing basics) can be done first and
+  reported; then stop.
+- **The guide's audience cannot be tested here.** It is written for someone who has never
+  opened the VBA editor. The reading-level gate measures prose difficulty, not whether the
+  steps work; only the blind dry-run approximates the real reader.
+- Three issues are filed and deliberately not built — **#29** Finalize auto-running Setup,
+  **#30** a worked example per action, **#31** stripping code for Off actions. Do not implement
+  any of them in this phase.
