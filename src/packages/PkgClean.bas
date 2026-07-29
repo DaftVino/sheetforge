@@ -72,17 +72,19 @@ End Sub
 Public Sub PkgClean_RemoveDupes(ctx As Object)
     Dim rng As Range, keys As String, hasHeader As Boolean
     On Error GoTo Fail
-    Set rng = AskRange("Remove Duplicates")
+    Set rng = Core_AskRange("Remove Duplicates")
     If rng Is Nothing Then Exit Sub                 ' user cancelled
 
     ' Both questions are asked AFTER the range, and both name it, because both are
     ' about that selection. Each returns False on Cancel and the action then stops
     ' having changed nothing - the range picker's own contract, extended.
-    If Not AskHasHeader(rng, hasHeader) Then Exit Sub
-    If Not AskKeyCols(rng, keys) Then Exit Sub
+    If Not Core_AskHasHeader(rng, hasHeader, "Remove Duplicates") Then Exit Sub
+    If Not Core_AskCols(rng, keys, _
+            "Which column(s) decide whether two rows are duplicates?", _
+            "Remove Duplicates") Then Exit Sub
 
     Core_SpeedOn
-    rng.RemoveDuplicates Columns:=ParseCols(keys), _
+    rng.RemoveDuplicates Columns:=Core_ParseCols(keys), _
                          Header:=IIf(hasHeader, xlYes, xlNo)
     Core_SpeedOff
 
@@ -105,7 +107,7 @@ End Sub
 Public Sub PkgClean_TrimClean(ctx As Object)
     Dim rng As Range, arr As Variant, r As Long, c As Long
     On Error GoTo Fail
-    Set rng = AskRange("Trim & Clean Text")
+    Set rng = Core_AskRange("Trim & Clean Text")
     If rng Is Nothing Then Exit Sub
 
     Dim cleaned As String
@@ -115,7 +117,7 @@ Public Sub PkgClean_TrimClean(ctx As Object)
         For r = 1 To UBound(arr, 1)
             For c = 1 To UBound(arr, 2)
                 If VarType(arr(r, c)) = vbString Then
-                    cleaned = CleanText(CStr(arr(r, c)))
+                    cleaned = Core_CleanText(CStr(arr(r, c)))
                     ' write only changed, non-formula cells - never flatten a formula
                     If cleaned <> CStr(arr(r, c)) Then
                         If Not rng.Cells(r, c).HasFormula Then rng.Cells(r, c).Value = cleaned
@@ -124,7 +126,7 @@ Public Sub PkgClean_TrimClean(ctx As Object)
             Next c
         Next r
     ElseIf VarType(arr) = vbString Then              ' single-cell range
-        If Not rng.HasFormula Then rng.Value = CleanText(CStr(arr))
+        If Not rng.HasFormula Then rng.Value = Core_CleanText(CStr(arr))
     End If
     Core_SpeedOff
 
@@ -141,7 +143,7 @@ End Sub
 Public Sub PkgClean_FillDown(ctx As Object)
     Dim rng As Range, arr As Variant, r As Long, c As Long
     On Error GoTo Fail
-    Set rng = AskRange("Fill Blanks Down")
+    Set rng = Core_AskRange("Fill Blanks Down")
     If rng Is Nothing Then Exit Sub
 
     Core_SpeedOn
@@ -149,7 +151,7 @@ Public Sub PkgClean_FillDown(ctx As Object)
     If IsArray(arr) Then
         For c = 1 To UBound(arr, 2)
             For r = 2 To UBound(arr, 1)
-                If IsBlankVal(arr(r, c)) Then
+                If Core_IsBlank(arr(r, c)) Then
                     ' fill real blank cells only; leave formula cells untouched
                     If Not rng.Cells(r, c).HasFormula Then rng.Cells(r, c).Value = arr(r - 1, c)
                     arr(r, c) = arr(r - 1, c)          ' propagate so consecutive blanks cascade
@@ -183,9 +185,9 @@ Public Sub PkgClean_RemoveBlanks(ctx As Object)
     Const TITLE As String = "Remove Blank Rows & Columns"
     On Error GoTo Fail
 
-    Set rng = AskRange(TITLE)
+    Set rng = Core_AskRange(TITLE)
     If rng Is Nothing Then Exit Sub                  ' user cancelled
-    Set rng = PkgClean_NarrowToUsed(rng)
+    Set rng = Core_NarrowToUsed(rng)
     If rng Is Nothing Then
         MsgBox "The range you picked is entirely outside the used area of the sheet, so " & _
                "there is nothing in it to examine." & vbCrLf & vbCrLf & _
@@ -334,9 +336,9 @@ Public Sub PkgClean_UnmergeFill(ctx As Object)
     Const TITLE As String = "Unmerge & Fill Down"
     On Error GoTo Fail
 
-    Set rng = AskRange(TITLE)
+    Set rng = Core_AskRange(TITLE)
     If rng Is Nothing Then Exit Sub
-    Set rng = PkgClean_NarrowToUsed(rng)
+    Set rng = Core_NarrowToUsed(rng)
     If rng Is Nothing Then
         MsgBox "The range you picked is entirely outside the used area of the sheet, so " & _
                "there are no merged cells in it." & vbCrLf & vbCrLf & _
@@ -419,11 +421,11 @@ End Function
 '================================================================
 Public Sub PkgClean_StandardizeFormats(ctx As Object)
     Dim rng As Range, cols() As String, fmts() As String, spare() As String
-    Dim i As Long, tgt As Range, applied As Long, missed As String
+    Dim i As Long, idx As Long, tgt As Range, applied As Long, missed As String
     Const TITLE As String = "Standardize Formats"
     On Error GoTo Fail
 
-    Set rng = AskRange(TITLE)
+    Set rng = Core_AskRange(TITLE)
     If rng Is Nothing Then Exit Sub
 
     If Not Core_CfgTable(ctx, "k_clean_formats", cols, fmts, spare) Then
@@ -435,7 +437,12 @@ Public Sub PkgClean_StandardizeFormats(ctx As Object)
 
     Core_SpeedOn
     For i = LBound(cols) To UBound(cols)
-        Set tgt = PkgClean_ResolveFormatCol(rng, cols(i))
+        idx = Core_ResolveColumn(rng, cols(i))
+        If idx = 0 Then
+            Set tgt = Nothing
+        Else
+            Set tgt = rng.Columns(idx)
+        End If
         If tgt Is Nothing Then
             missed = missed & vbCrLf & "   " & cols(i)
         ElseIf Len(Trim(fmts(i))) > 0 Then
@@ -457,51 +464,6 @@ Fail:
     Core_Fail ctx, "clean.standardize_formats", Err
 End Sub
 
-' Resolve one "Column" cell against the picked range. A value of one to three
-' letters is read as a COLUMN LETTER; anything else is matched against the text
-' in the range's first row. Never a position counted from the left of the
-' selection - see the manifest comment on k_clean_formats for why.
-'
-' The letter reading wins a tie, so a range whose header literally reads "A"
-' cannot be addressed by name. That is documented in the field's help text
-' rather than resolved, because a heuristic that guessed would be worse.
-' Returns Nothing when the column falls outside the picked range.
-Private Function PkgClean_ResolveFormatCol(rng As Range, ByVal spec As String) As Range
-    Dim s As String, absCol As Long, i As Long, hdr As String
-    s = Trim(spec)
-    If Len(s) = 0 Then Exit Function
-
-    If Len(s) <= 3 And PkgClean_IsAlpha(s) Then
-        On Error Resume Next
-        absCol = rng.Parent.Range(s & "1").Column
-        On Error GoTo 0
-        If absCol > 0 Then
-            If absCol >= rng.Column And absCol <= rng.Column + rng.Columns.Count - 1 Then
-                Set PkgClean_ResolveFormatCol = Application.Intersect(rng.Parent.Columns(absCol), rng)
-            End If
-            Exit Function
-        End If
-    End If
-
-    For i = 1 To rng.Columns.Count
-        hdr = Trim(CStr(rng.Cells(1, i).Value))
-        If StrComp(hdr, s, vbTextCompare) = 0 Then
-            Set PkgClean_ResolveFormatCol = rng.Columns(i)
-            Exit Function
-        End If
-    Next i
-End Function
-
-Private Function PkgClean_IsAlpha(ByVal s As String) As Boolean
-    Dim i As Long, ch As String
-    If Len(s) = 0 Then Exit Function
-    For i = 1 To Len(s)
-        ch = UCase(Mid$(s, i, 1))
-        If ch < "A" Or ch > "Z" Then Exit Function
-    Next i
-    PkgClean_IsAlpha = True
-End Function
-
 '================================================================
 ' ACTION - Convert text that represents a number into a real number
 '
@@ -516,7 +478,7 @@ Public Sub PkgClean_TextToNumbers(ctx As Object)
     Const TITLE As String = "Convert Text to Numbers"
     On Error GoTo Fail
 
-    Set rng = AskRange(TITLE)
+    Set rng = Core_AskRange(TITLE)
     If rng Is Nothing Then Exit Sub
 
     Core_SpeedOn
@@ -559,129 +521,3 @@ Public Sub PkgClean_TextToNumbers(ctx As Object)
 Fail:
     Core_Fail ctx, "clean.text_to_numbers", Err
 End Sub
-
-'================================================================
-' Package-private helpers
-'================================================================
-
-' Narrow a picked range to the part of the sheet that actually holds anything.
-' Returns Nothing when the pick lies entirely outside the used area - the caller
-' reports that and stops, having changed nothing.
-'
-' Selecting whole columns is how people pick "this table" - A:D is one click on the
-' column headers - and it hands these two actions roughly four million cells. Both
-' do COM work PER CELL or per row (an Intersect and a CountA each, a MergeArea read
-' each), so the screen freezes for minutes, and clean.remove_blanks then asks Excel
-' to delete about a million rows one at a time inside its destructive block. Nothing
-' outside UsedRange can hold a value, a formula or a merge, so the intersection
-' examines the same data and finishes in seconds.
-'
-' Everything downstream uses the NARROWED range, including the range named in the
-' messages, so what the user is told matches what was actually looked at.
-Private Function PkgClean_NarrowToUsed(rng As Range) As Range
-    If rng Is Nothing Then Exit Function
-    Set PkgClean_NarrowToUsed = Application.Intersect(rng, rng.Parent.UsedRange)
-End Function
-
-' Prompt the user to select a range. Returns Nothing if they cancel
-' (InputBox Type:=8 returns Boolean False on cancel, which fails the Set).
-Private Function AskRange(ByVal title As String) As Range
-    Dim rng As Range
-    On Error Resume Next
-    Set rng = Application.InputBox( _
-        Prompt:="Select the range for '" & title & "':", _
-        title:=title, Type:=8)
-    On Error GoTo 0
-    If Not rng Is Nothing Then
-        If rng.Areas.Count > 1 Then
-            MsgBox "Please select a single, continuous block (not several separate areas).", _
-                   vbExclamation, title
-            Set rng = Nothing
-        End If
-    End If
-    Set AskRange = rng
-End Function
-
-' Ask whether the picked range's first row is a header. Returns False on Cancel,
-' leaving hasHeader untouched and the caller responsible for stopping.
-'
-' vbYesNoCancel, not vbYesNo: a two-button dialog has no way out, and the title-bar
-' X on a vbYesNo MsgBox returns vbNo - which here would silently choose "compare
-' every row" and delete a header row. Cancel has to be reachable and distinct.
-Private Function AskHasHeader(rng As Range, ByRef hasHeader As Boolean) As Boolean
-    Dim ans As VbMsgBoxResult
-    ans = MsgBox("Does " & Core_RangeRef(rng) & " include a header row?" & vbCrLf & vbCrLf & _
-                 "Yes  -  the first row is a title row: it is kept, and never " & _
-                 "compared against the data." & vbCrLf & _
-                 "No  -  every row is data: all of them are compared, including " & _
-                 "the first one.", _
-                 vbQuestion + vbYesNoCancel + vbDefaultButton1, "Remove Duplicates")
-    If ans = vbCancel Then Exit Function
-    hasHeader = (ans = vbYes)
-    AskHasHeader = True
-End Function
-
-' Ask which column(s) decide a duplicate, numbered from the LEFT of the picked
-' range. Returns False on Cancel.
-'
-' Application.InputBox, not VBA's InputBox: the latter returns "" for BOTH Cancel
-' and an empty OK, and those must not mean the same thing. Application.InputBox
-' returns Boolean False on Cancel, which VarType can tell apart from any string.
-Private Function AskKeyCols(rng As Range, ByRef keys As String) As Boolean
-    Dim v As Variant, cols As Variant, i As Long, nCols As Long
-    nCols = rng.Columns.Count
-    v = Application.InputBox( _
-        Prompt:="Which column(s) decide whether two rows are duplicates?" & vbCrLf & vbCrLf & _
-                "Numbered from the LEFT of " & Core_RangeRef(rng) & ", which is " & _
-                nCols & " column(s) wide. One number, or several like 1,2,4.", _
-        title:="Remove Duplicates", Default:="1", Type:=2)
-    If VarType(v) = vbBoolean Then Exit Function     ' Cancel
-    keys = Trim(CStr(v))
-    If Len(keys) = 0 Then keys = "1"                 ' empty OK means the default
-
-    ' Validate against the picked range's width. A column number past the right
-    ' edge raises 1004 inside RemoveDuplicates, which surfaces through Core_Fail
-    ' as an engine error - it reads as a broken macro rather than as the typo it
-    ' is. ParseCols already drops non-numeric entries and falls back to column 1.
-    cols = ParseCols(keys)
-    For i = LBound(cols) To UBound(cols)
-        If cols(i) < 1 Or cols(i) > nCols Then
-            MsgBox "Column " & cols(i) & " is outside " & Core_RangeRef(rng) & _
-                   ", which is " & nCols & " column(s) wide." & vbCrLf & vbCrLf & _
-                   "Nothing has been changed. Run Remove Duplicates again.", _
-                   vbExclamation, "Remove Duplicates"
-            Exit Function
-        End If
-    Next i
-    AskKeyCols = True
-End Function
-
-' "1,2,4" -> Variant array of Longs for Range.RemoveDuplicates Columns.
-' Non-numeric entries are ignored; an empty result defaults to column 1.
-Private Function ParseCols(ByVal s As String) As Variant
-    Dim parts() As String, i As Long, c As Collection, out() As Variant, k As Long
-    Set c = New Collection
-    parts = Split(s, ",")
-    For i = 0 To UBound(parts)
-        If IsNumeric(Trim(parts(i))) Then c.Add CLng(Trim(parts(i)))
-    Next i
-    If c.Count = 0 Then c.Add CLng(1)
-    ReDim out(0 To c.Count - 1)
-    For k = 1 To c.Count
-        out(k - 1) = c(k)
-    Next k
-    ParseCols = out
-End Function
-
-' Excel TRIM (collapse spaces) + CLEAN (strip non-printing chars).
-Private Function CleanText(ByVal s As String) As String
-    CleanText = Application.WorksheetFunction.Clean(Application.WorksheetFunction.Trim(s))
-End Function
-
-Private Function IsBlankVal(ByVal v As Variant) As Boolean
-    If IsEmpty(v) Then
-        IsBlankVal = True
-    ElseIf VarType(v) = vbString Then
-        IsBlankVal = (v = "")
-    End If
-End Function

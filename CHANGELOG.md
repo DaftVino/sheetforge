@@ -6,6 +6,227 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-28
+
+### Added
+
+- **Five housekeeping actions**: unhide every worksheet, protect and unprotect every sheet
+  (two separate buttons, not one toggle), build a table of contents, and reset hidden rows and
+  columns.
+
+- **Unhide All Worksheets leaves the toolkit's own sheets hidden.** `_Config` holds your
+  settings and is hidden on purpose; unhiding it puts engine internals in front of you and
+  invites an edit that breaks the Setup tab. The most-downloaded version of this macro on the
+  internet unhides everything.
+
+- **Protect and Unprotect are two buttons because one toggle hides which way it will go.** A
+  single button on a workbook you have not looked at in a month is a guess.
+
+  **Protecting deliberately leaves drawing objects unprotected.** Excel's default protects
+  them, and the toolkit's buttons are drawing objects - so the default would leave the engine
+  unable to remove its own buttons on the next rebuild, permanently, with no way back that
+  does not involve changing protection you set. Unprotect reports which sheets refused the
+  password rather than stopping halfway with some sheets left open.
+
+- **The Table of Contents is create-only.** If a sheet by that name exists it stops and says
+  so, rather than clearing it and rebuilding. An earlier design recognised its own output by a
+  sentence written in A1 - but a sentence you could type yourself is not proof the toolkit
+  wrote the sheet, and the price of getting that wrong is a cleared sheet. Rebuilding means
+  deleting the old one yourself, which is the trade.
+
+### Changed
+
+- **Contract v2.9.0.** Adds the `workbook` package, and a normative rule that an
+  implementation creating a new destination sheet must refuse a name the engine reserves - not
+  only one that already exists.
+
+## [0.16.0] - 2026-07-28
+
+### Added
+
+- **Four ways to keep a copy before something goes wrong.** A timestamped copy into a Backup
+  folder, a snapshot taken before a risky run, a month-end named version for finance packs, and
+  moving a finished output into a dated archive folder.
+
+- **Snapshot is the one to know about, and it is worth being precise about what it does.** It
+  saves a full copy of the workbook, named and dated, into a Snapshots folder. **It does not
+  restore.** There is no undo button in this release, and the catalog items that are waiting on
+  one are still waiting - only "hide all sheets except the active one" was ever blocked on
+  undo; the other two are blocked on not having a preview. Saying otherwise would be selling
+  you a safety net that is not there.
+
+- **Old snapshots are pruned, and the pruning checks its own handwriting.** It keeps the newest
+  few and deletes the rest - but only files matching the complete name this action writes:
+  the prefix, a real timestamp, and the workbook's own extension. **A file merely starting
+  `SNAPSHOT_` is left alone.** Matching the prefix and deleting the result would have made your
+  own `SNAPSHOT_notes.txt` collateral.
+
+- **Archiving a file moves it, which is the only thing in this toolkit that does.** It refuses
+  if the destination exists, and refuses if the file is open in this Excel. Across drives,
+  Windows implements a move as copy-then-delete, so it can half-fail - **so it checks
+  afterwards which of the two files exist and tells you**, rather than reporting a generic
+  error and leaving you to work out whether your file still exists.
+
+### Changed
+
+- **Contract v2.8.0.** Adds the `backup` package. Additive: `SCHEMA_VER` stays `"v2.0"`.
+
+## [0.15.0] - 2026-07-28
+
+### Added
+
+- **A join done in code, not with lookup formulas.** Point it at a target range and a
+  reference sheet, name the key column in each, list the columns to pull across, and it
+  writes them in. It builds an index of the reference table once and looks each key up
+  directly, so it does not slow down as the data grows the way a sheet full of VLOOKUPs does.
+
+  **Two things it does deliberately, because both are how a join quietly produces wrong
+  numbers.** Keys are compared after trimming outside whitespace and nothing else - an
+  earlier version also collapsed spaces *inside* the key, which can map two genuinely
+  different identifiers onto one another. And when the reference table has the same key more
+  than once, it reports **how many distinct keys were duplicated**, not how many extra rows it
+  saw; it takes the first and tells you, rather than picking one silently.
+
+- **Add mapped columns from a reference sheet** shares that same engine, driven from Setup
+  rather than asked each run.
+
+- **Refresh all pivots and Force full recalculation are now their own buttons.** Both were
+  locked inside the import action, so the only way to refresh a pivot was to re-import
+  everything. As standalone actions they can also be chain steps.
+
+  **Refresh reports a pivot it could not refresh rather than counting it as done.** A pivot
+  whose source has gone raises, and the old inline version could not tell you which one.
+
+- **Build a summary pivot** from a range, and **Freeze a pivot to values** for distribution.
+  Both refuse a source range with a blank or duplicated header, because a pivot built on one
+  fails later with an error that points nowhere near the cause. If either fails partway, it
+  removes the half-built sheet rather than leaving it behind, and still reports the original
+  error rather than the cleanup.
+
+### Changed
+
+- **Contract v2.7.0.** Adds the `summarize` and `enrich` packages. Additive: `SCHEMA_VER`
+  stays `"v2.0"`.
+
+## [0.14.0] - 2026-07-28
+
+### Added
+
+- **Eight actions that make a finished thing presentable and then get it out of Excel.**
+  Five formatting: rules-driven highlighting, header styling with autofit, a report title
+  block, a house table style, and print layout for board packs. Three exporting: freeze
+  formulas to values, PDF a range or sheet or workbook, and explode a workbook into one file
+  per tab.
+
+- **Convert Formulas to Values is now its own button.** It was buried inside Export Dashboard,
+  where you could only get it by exporting the whole thing. It handles dynamic-array spills
+  and legacy CSE arrays, not just ordinary formulas.
+
+  **The export and the new action now run the same code**, rather than a second copy of the
+  same thirty lines drifting apart from the original. It reports how many formulas it actually
+  converted, and says so when some could not be - the version inside the export swallowed
+  those silently.
+
+- **Exporting refuses rather than overwrites.** Neither PDF action will write over a file that
+  already exists; it stops and names the file. **Save each sheet as its own file checks the
+  whole batch before writing anything**, including whether two of your sheet names would
+  produce the same file name after illegal characters are replaced - two sheets called `A"B`
+  and `A<B` both become `A-B`, and the second would have silently overwritten the first.
+
+  It also skips the toolkit's own tabs, so you do not get `Setup.pdf` and `_Config.pdf`.
+
+### Changed
+
+- **Contract v2.6.0.** Adds the `format` and `export` packages. Additive: `SCHEMA_VER` stays
+  `"v2.0"`.
+
+- **Add a Report Title inserts rows, and the contract now says so.** The `format` domain
+  promises to change no value, and this action writes a title string and pushes everything
+  down - which can change what `ROW()` and `INDIRECT()` return. That was previously claimed to
+  be no change at all. It is a change, it is stated, and the action asks before doing it.
+
+## [0.13.0] - 2026-07-28
+
+### Added
+
+- **Five actions that check your data and tell you what is wrong with it, without changing
+  any of it.** This is the highest-value group in the catalog for a multi-entity close, and
+  it consumes the previous wave's output directly: combine, then clean, then reconcile is one
+  continuous chain.
+
+  **Reconcile Two Datasets** is the flagship. Pick range A, pick range B, name the key column
+  in each, and it reports every key that is in one and not the other, and every column that
+  differs on a key present in both. It matches on the key, never on position.
+
+  **It refuses rather than guesses in three places, and each one is a wrong number it
+  declines to produce.** A key that appears more than once on either side is reported as a
+  duplicate with both counts, and its rows are never paired up - pairing same-key rows by
+  position is how a reconciliation invents a difference that does not exist. A row whose key
+  is entirely blank is reported on its own, and two blank keys are never treated as matching
+  each other. And a column header that appears twice in either range stops the whole run
+  before anything is compared, naming the header - silently comparing the first one and
+  dropping the rest would produce a report that looks complete and is not.
+
+- **Scan for Data Issues** sweeps a range against rules you configure - blank, number, date,
+  or a numeric range - and writes what failed to an exceptions sheet.
+
+- **Three actions that mark problems in place**: duplicates, values outside a bound, and
+  blanks in columns you have marked mandatory.
+
+  **They colour cells, and colouring is the whole safety story, so it is worth being precise
+  about.** A cell that already has a fill of its own is left alone and counted separately -
+  never overwritten. So every cell these actions touch is guaranteed to have had no fill
+  beforehand, which makes "clear the fill on those cells" a complete undo that disturbs
+  nothing else. Afterwards the marked cells are left selected, so the undo is one click and
+  applies to exactly what changed rather than to the whole range you picked.
+
+  **Each shows you the count and waits for a yes** before colouring anything.
+
+- **Neither of the two new rule tables ships with example rows**, deliberately. A demo row
+  would mean a deployment's first run colours real cells against a bound nobody set, before
+  anyone has opened Setup. The worked examples live in the field help text instead.
+
+### Changed
+
+- **Contract v2.5.0.** Adds the `validate` package - four fields and five actions. Additive:
+  no existing stored value changes meaning, and `SCHEMA_VER` stays `"v2.0"`.
+
+## [0.12.0] - 2026-07-28
+
+### Changed
+
+- **Almost nothing changes for you in this release, and that is the point.** It moves fifteen
+  helpers that were trapped inside one package each into the shared engine, so the next five
+  waves of actions build on one copy instead of writing a sixth.
+
+  The bundle is a single module, so a helper sitting privately inside `PkgClean` did not
+  merely fail to be reusable - it *reserved that name* against every other package. The
+  second package wanting a range picker could neither copy it nor declare its own.
+
+- **One dialog stops lying about which action it belongs to.** The "does this range include a
+  header row?" question was captioned **Remove Duplicates** no matter what was running. It had
+  exactly one caller, so it had never shown; the next wave gives it three.
+
+### Fixed
+
+- **Creating a sheet no longer half-succeeds.** Two cases that used to slip through:
+
+  A destination name already taken by a **chart sheet** passed validation, because the check
+  only looked at worksheets. The rename then failed *after* an empty sheet had already been
+  added - an engine error and a stray `Sheet1` from an action whose whole promise is that it
+  changes nothing when it refuses.
+
+  A destination named `Macros 3`, or any other name the toolkit reserves for itself, also
+  passed - because no such sheet existed *yet*. It would build, fill with a month of combined
+  data, and be deleted without a prompt by the next Finalize. Both are refused now, by name,
+  with the reason.
+
+### Added
+
+- **The build now fails an unprefixed package helper.** Same reasoning as the ids gate: the
+  cheapest time to catch a name that will collide is before it exists. Verified by deliberately
+  injecting one and watching the build reject it.
+
 ## [0.11.0] - 2026-07-28
 
 ### Fixed

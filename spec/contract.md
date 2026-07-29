@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.4.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.9.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -688,6 +688,17 @@ manifest-assembly time.
   and the engine removes controls by that prefix alone on every rebuild — so anything
   else in the workbook using the prefix is deleted without warning. A platform
   reserves its own equivalent namespace for the same purpose.
+- **Reserved (v2.9.0, normative):** an implementation creating a NEW destination sheet from a
+  `text`-kind config field MUST refuse a value naming a sheet in this section's reserved family,
+  or a sheet the platform's own generated-page naming rule claims (the Excel reference
+  implementation: `Core_IsEngineSheet`), and MUST NOT check only for an EXISTING sheet of that
+  name. Discovered by `workbook.build_toc` (§8): a value like `"Macros 3"` names no sheet today,
+  so an exists-only check lets it through, and the sheet it creates is destroyed unconditionally
+  by the very next rebuild (the `Macros`/`Macros <n>` rule above) - a data-loss trap that would
+  not surface until the rebuild AFTER the one that hid it. This closes the same gap for every
+  existing `text`-kind destination field (`k_import_dest` and any added by W2-W5), not only this
+  wave's field, because the underlying check is one shared engine function in the reference
+  implementation.
 - Reference-implementation binding names (`Pkg<Name>_<Verb>` entry points,
   `Pkg<Name>_Manifest`, `Core_*` API) are an Excel/VBA detail, not part of the
   portable contract.
@@ -829,6 +840,184 @@ time (see §3, `range` note).
 | `clean.standardize_formats` | Standardize Formats | Prompt for a range; apply each `k_clean_formats` row's number format to that row's column **within the picked range only**. Changes formatting, never a stored value. A mapping row that resolves to no column in the picked range MUST be reported by name, not silently dropped. With no rows configured, the action MUST stop and say where to configure them (see the field's no-defaults rule above, which is what makes this state observable). |
 | `clean.text_to_numbers` | Convert Text to Numbers | Prompt for a range; convert text that represents a number into a real number, using **the same coercion the import action uses** (§8, column-type code `N`) rather than a second implementation. Formula cells are never touched. Text the coercion cannot parse is left exactly as it is. The completion report MUST state how many cells changed. **Known limitation, stated because it is visible to the user:** the `N` coercion strips a trailing `%`, so `12%` becomes the number `12`, not `0.12`. |
 
+### Package `validate` — "Validate & Reconcile" (v1.0.0, contract v2.5.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_validate_recon_dest` | text | simple | `Reconcile Exceptions` | Name of the **new** sheet `validate.reconcile` writes its exceptions report to. Created only when the run finds at least one exception; a perfect match creates no sheet. `usedBy` `validate.reconcile`. |
+| `k_validate_scan_dest` | text | simple | `Scan Exceptions` | Name of the **new** sheet `validate.scan` writes its exceptions report to. Created only when a configured rule finds at least one failing cell. `usedBy` `validate.scan`. |
+| `k_validate_scan_rules` | table | simple | **none** | Data-quality rules for `validate.scan`. Three columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks — a one-to-three-letter entry is always read as a letter), **Rule** (`blank`, `number`, `date`, or `range`), **Bound** (read only for `range`, as `min,max`; either side may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name, not silently skipped. A Rule value other than `blank`/`number`/`date`/`range`, a non-blank Bound component that does not parse as a number, or a `range` rule whose Bound is wholly blank, MUST cause `validate.scan` to refuse before scanning anything, naming the offending row - never silently treated as unbounded or as a rule that never fails. `usedBy` `validate.scan`. |
+| `k_validate_outliers` | table | simple | **none** | Numeric bounds for `validate.highlight_outliers`. Three columns: **Column** (letter or header name, same resolution rule as above), **Min**, **Max** (either may be blank for an open-ended bound). A row whose Column resolves to nothing inside the picked range MUST be reported by name. A non-blank Min or Max that does not parse as a number MUST cause `validate.highlight_outliers` to refuse before checking anything, naming the offending row - never silently treated as unbounded on that side. `usedBy` `validate.highlight_outliers`. |
+
+`k_validate_scan_rules` header: `Column (letter or header name)|Rule (blank, number, date, range)|Bound (range rule only: min,max)`.
+`k_validate_outliers` header: `Column (letter or header name)|Min (blank = no floor)|Max (blank = no ceiling)`.
+
+**Both table fields declare NO default rows, deliberately — extending the `k_clean_formats`
+rule (§8, package `clean`) to two more fields, for a sharper reason.** `k_clean_formats` with a
+demo row risks an invisible number-format change; these two, with a demo row, risk *colouring
+real cells* — `validate.scan` writes an exceptions sheet named from a rule nobody configured,
+and `validate.highlight_outliers` colours cells against a bound nobody set, on a deployment's
+very first run, before anyone has looked at Setup. A conforming implementation MUST NOT ship
+default rows for either field. Worked examples live in each field's help text instead.
+
+**`validate.reconcile` needs no config field beyond its destination name.** Its two ranges, and
+the key column(s) within each, describe the SELECTION the caller is about to make — not the
+deployment — so per §5's rule (established for `clean`, §8) they are run-time inputs, asked at
+the moment the action runs, never stored on Setup.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `validate.reconcile` | Reconcile Two Datasets | Prompt for two ranges (Dataset A, Dataset B); row 1 of each is always its header, not asked. Prompt for the key column(s) of each, numbered from the LEFT of that range. A row whose key column(s) are ALL blank MUST be reported as its own status, `Empty key`, one row at a time, and MUST NEVER be entered into the match index - an empty key on each side MUST NOT be treated as a match. Build a key index per side from every remaining row (composite key -> the row(s) carrying it); a key present on only one side is reported `In A only` / `In B only`. A key whose count is greater than one on EITHER side MUST be reported as `Duplicate key`, with both sides' counts (zero for a side that lacks the key entirely), and its rows MUST NOT be compared column-by-column — an implementation MUST NOT pair same-key rows across sides by position or any other guess, and duplication MUST be evaluated on each side independently of whether the other side has the key at all. A non-key header name that occurs more than once in either range's header row MUST cause the action to refuse before comparing anything, naming the repeated header(s) and which side repeats them - an implementation MUST NOT silently compare only the first occurrence and drop the rest. A key matched exactly once on each side is compared across every header common to both ranges (excluding each side's own key column(s)); a numeric comparison MUST tolerate formatting differences (e.g. `100` vs `100.00`); a differing column is reported as `Differs`, one row per differing column. When there is at least one exception, the action MUST show the exception count and require an explicit confirmation before writing it to a new sheet named `k_validate_recon_dest`; declining or cancelling MUST change nothing. Neither input range is changed. |
+| `validate.scan` | Scan for Data Issues | Prompt for a range and whether its first row is a header. Before any cell is read, every `k_validate_scan_rules` row MUST be validated: an unrecognised Rule value, a non-blank Bound component that does not parse as a number, or a `range` rule whose Bound is wholly blank, MUST cause the action to refuse, naming the offending row(s), rather than silently treating the row as unbounded or as never failing. Apply every remaining `k_validate_scan_rules` row to its resolved column; a cell failing its rule is written to a new sheet named `k_validate_scan_dest`, only when at least one exception exists and only after the action shows the exception count and the user explicitly confirms; declining or cancelling MUST change nothing. A rule row whose Column resolves to nothing in the picked range MUST be reported by name. The picked range is not changed. |
+| `validate.highlight_duplicates` | Highlight Duplicates | Prompt for a range, whether its first row is a header, and the key column(s), numbered from the LEFT of that range. Colour every key-column cell belonging to a row whose key is shared with at least one other row in the range. A cell that already carries a fill colour of its own MUST be left alone and counted separately, never overwritten. Candidate cells MUST be deduplicated by address before the preview count is computed, so a repeated column selection cannot inflate the count. Before colouring anything, show a count of exactly what will be marked and require an explicit confirmation; declining or cancelling MUST change nothing. No value, formula, or existing formatting is changed. The undo instruction given afterward MUST refer only to the cells actually coloured, never to the whole picked range. |
+| `validate.highlight_outliers` | Highlight Outliers | Prompt for a range and whether its first row is a header. Before any cell is read, every `k_validate_outliers` row MUST be validated: a non-blank Min or Max that does not parse as a number MUST cause the action to refuse, naming the offending row(s), rather than silently treating that side as unbounded. For every remaining `k_validate_outliers` row, colour every numeric, non-blank cell in its resolved column that falls outside `Min`/`Max`. Same already-filled-cell carve-out, same deduplicated preview count, same confirm-before-colouring gate, same "nothing else changes" guarantee, and same scoped undo instruction as `validate.highlight_duplicates`. A configured column that resolves to nothing in the picked range MUST be reported by name. |
+| `validate.missing_fields` | Flag Missing Required Fields | Prompt for a range, whether its first row is a header, and which column(s), numbered from the LEFT of that range, are mandatory. Colour every blank cell in those columns. Same already-filled-cell carve-out, same confirm-before-colouring gate, same "nothing else changes" guarantee as the other two highlight actions. |
+
+**Colouring is reporting, not repair.** §7 classes `validate` as "checking data against a rule
+and reporting what fails; never repairs silently." The three actions above that write a fill
+colour change no value, no formula, and no shape of the data — they mark, in place, exactly
+what a written exceptions list marks on a separate sheet, using the sheet the data already
+lives on as the report surface instead of a new one. A conforming implementation MUST make
+this reversible without disturbing any other formatting: a cell that already carried a fill
+colour of its own MUST NOT be recoloured, and a cell this touches is guaranteed to have carried
+no fill immediately beforehand — so "clear the fill on the affected cells" always, and only,
+undoes what the action did. **No action in this package may delete, move, or overwrite a value
+or formula.**
+
+### Package `format` - "Format & Present" (v1.0.0, contract v2.6.0)
+
+Presentation only (§7): every action changes how a report looks and never a stored value.
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_format_highlight_rules` | table | simple | **none** | Rules for `format.conditional_highlight`. Three columns: **Column** (a column letter, or a header name matched against the first row of the picked range - same resolution rule as `k_clean_formats`) - **Condition** (`greater_than <value>`, `less_than <value>`, `equal_to <value>`, `contains <value>`, or `blank`, one operator plus its comparison value in one cell) - **Fill color** (one of `red`, `yellow`, `green`, `orange`, `blue`, `gray`). A row whose Column resolves to nothing inside the picked range MUST be reported, not silently skipped. Rules are evaluated top to bottom; a cell matching more than one rule takes the LAST match. `usedBy` `format.conditional_highlight`. |
+
+`k_format_highlight_rules` header: `Column (letter or header)|Condition|Fill color`.
+
+**This field ships with NO default rows, for the same reason `k_clean_formats` does not
+(§8, package `clean`).** §5 resolves an empty stored table to the field's declared defaults,
+so demo rows would make `format.conditional_highlight`'s required "nothing configured"
+refusal unreachable, and would risk coloring a first-time user's own data by a rule they
+never wrote.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `format.conditional_highlight` | Highlight by Rule | Prompt for a range, then whether its first row is a header. Read `k_format_highlight_rules`; if empty, refuse naming where to configure it. Otherwise, before changing anything, show the range and the rule count and ask to proceed. On yes: clear any existing native conditional formatting in the picked range, then for each rule, resolve its Column against the range and set a static fill color (§ above - not a live conditional-formatting rule) on every data-row cell in that column matching the rule's condition. A rule whose Column resolves to nothing MUST be reported by name, not silently dropped. Changes cell fill only; no value changes. |
+| `format.style_headers` | Style Header Row | Prompt for a range. Bold and fill the range's first row, then autofit every column in the range. Overwrites any formatting already on that row. No confirmation - this is unambiguously what the action is for. |
+| `format.report_title` | Add Report Title | Refuse if the active sheet is engine-owned. Prompt for title text (run-time input, not stored config - §3's "range is not a kind" precedent extended to free text); refuse if left blank. Show the row count that will be inserted and ask to proceed, noting that formulas and defined names on that sheet follow the shift automatically (native host behavior, §9) and that a formula whose result depends on its own row (`ROW()`, an `INDIRECT()` built from a row number) can return a different result after the shift. On yes: insert that many rows at row 1, merge and center the title text across the sheet's used width, and style it. This DOES write one new stored value - the title text, into the merged title cell; every value that already existed on the sheet keeps its own value and only its row position moves. |
+| `format.table_style` | Apply House Table Style | Prompt for a range. Show what will happen (existing fill/border formatting in the range is replaced with a fixed banded-row + thin-border house style) and ask to proceed. On yes: apply it. No value changes. |
+| `format.print_layout` | Prep for Print | Refuse if the active sheet is engine-owned. Set that sheet to landscape orientation, fit-to-one-page-wide, a fixed narrow-margin preset, and a repeating first print row. Fixed preset, no configuration. No confirmation - touches print setup only, no cell. |
+
+### Package `export` - "Export" (v1.0.0, contract v2.6.0)
+
+A second package in the `export` domain alongside the grandfathered `importexport.export`
+(§7). Declares its own fields under new keys; it does **not** read `k_export_base`,
+`k_export_offset` or `k_export_tabs` from `importexport`'s manifest - those are a different
+package's declared defaults, and the reference implementation's config-read fallback is
+scoped per owning package (see this wave's plan, Decision 5), so borrowing another package's
+key is not just a naming collision but a live default-resolution bug waiting for an
+unconfigured deployment.
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_export_folder` | text | simple | *(blank)* | Folder exported files are written to. **Blank means the deployment's data location** (§9), same convention as `k_import_folder`. `usedBy` `export.pdf, export.per_sheet`. |
+| `k_export_date_offset` | int | advanced | `-1` | Days to shift the date placed in front of an exported file's name. Same semantics as `importexport`'s `k_export_offset`, under its own key (§ above). `usedBy` `export.pdf, export.per_sheet`. |
+| `k_export_pdf_base` | text | simple | `Report` | Base name for `export.pdf`'s single dated PDF -> `<date> <base>.pdf`. `usedBy` `export.pdf`. |
+| `k_export_persheet_format` | text | simple | `pdf` | File type `export.per_sheet` writes: `pdf` or `xlsx`. Any other stored value MUST be refused at run time, naming the two accepted tokens. `usedBy` `export.per_sheet`. |
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `export.freeze_values` | Freeze Formulas to Values | Prompt for a range. Count its formula cells (including dynamic-array spill anchors); refuse if none. Show the count and ask to proceed, stating this cannot be undone. On yes: convert every formula in the range - including spills and legacy CSE arrays - to a static value, using the same flattening behavior `importexport.export` already applies per sheet (§ Core_FreezeValues). Promoted from being embedded inside `importexport.export` to a standalone, range-scoped action; `importexport.export`'s own behavior is unchanged. |
+| `export.pdf` | Export to PDF | Resolve the export folder; refuse if the workbook has never been saved and no folder is configured, or if the configured folder does not exist. Ask whether to export the whole workbook, one sheet, or a range (workbook / sheet / range); an unrecognised answer is refused, naming the three accepted tokens. Build the dated output path (`k_export_date_offset` + `k_export_pdf_base`); refuse rather than overwrite if a file already exists at that path. For "sheet", refuse if the named sheet does not exist or is engine-owned. For "range", the picked range temporarily becomes the target sheet's print area for the export and is restored to its prior value immediately after, whether the export succeeds or fails. Writes one PDF. |
+| `export.per_sheet` | Export Each Tab Separately | Validate `k_export_persheet_format` is `pdf` or `xlsx`; refuse otherwise. Resolve and validate the export folder as `export.pdf` does. Build the list of every VISIBLE, non-engine-owned sheet (§ Decision 6 - hidden sheets are excluded too, on top of the required engine-sheet exclusion); refuse if none. Check every target file path for an existing collision, AND every target path against every other target path for a collision WITHIN this batch (sanitizing is many-to-one - two different, both-legal sheet names can produce the identical file name); refuse the WHOLE batch, naming every collision, if even one exists - no file is written until every target is clear. That refusal is all-or-nothing; the write itself is not transactional - it proceeds file by file, and a failure partway through leaves the files already written in place, with the failure message stating how many succeeded before the error. Otherwise show the full file list and ask to proceed. On yes: write one file per sheet, named `<date> <sheet name>.<ext>`. The `xlsx` path flattens every formula in a full workbook copy (via `Core_FreezeValues`, same technique `importexport.export` already relies on) before isolating each sheet, so a sheet with a cross-sheet formula does not export with a broken reference. |
+### Package `summarize` - "Summarize & Analyze" (v1.0.0)
+
+**Fields**
+
+None. Every action either takes no input (`summarize.recalculate`), operates on every sheet
+(`summarize.refresh_pivots`), or prompts for its range and columns at run time
+(`summarize.build_pivot`, `summarize.freeze_pivot`) - none of the four describes a fact about
+the deployment, so none is a config field. Same precedent `clean` set before v2.3.0 gave it
+its first field.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `summarize.refresh_pivots` | Refresh All PivotTables | Refresh every PivotTable on every sheet in the workbook, skipping engine-owned sheets (§7's `Core_IsEngineSheet` test). Success MUST be read from `RefreshTable`'s own documented Boolean return value, not merely inferred from the absence of a raised error. A PivotTable whose refresh raises or returns `False` MUST NOT stop the others; it MUST be counted and named (sheet, pivot, error) in the completion report rather than silently skipped or aborting the run. With no PivotTables anywhere in the workbook the action MUST refuse rather than report a vacuous success. |
+| `summarize.recalculate` | Recalculate Workbook | Force a full recalculation of every formula in the workbook. This action MUST NOT refuse under any condition: it changes no stored value, so no precondition can be unmet. |
+| `summarize.build_pivot` | Build a Summary Table | Prompt for a range whose first row MUST be treated as its header, then which column(s) to group by and which to sum. Write the result as a new PivotTable on a new sheet. Every value column is aggregated by SUM; a per-column aggregation choice is out of scope for this version. The destination sheet MUST NOT overwrite an existing sheet - same refusal rule as `import.combine_worksheets`. |
+| `summarize.freeze_pivot` | Freeze a Pivot to Values | Prompt for a cell; resolve the PivotTable that cell belongs to, refusing by name if it belongs to none. Copy that pivot's current output - values, number formats, and column widths - to a new sheet. The action MUST NOT modify the source PivotTable (no refresh, no write to its cells). Same destination-sheet refusal rule as `summarize.build_pivot`. |
+
+### Package `enrich` - "Match & Enrich" (v1.0.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_enrich_lookup_sheet` | sheet | simple | `Ref_Master` | The reference sheet `enrich.mapped_columns` reads from. Unlike a destination-sheet field (e.g. `k_import_dest`), this one MUST already exist - a conforming implementation MUST refuse rather than create it. `usedBy` `enrich.mapped_columns`. |
+| `k_enrich_lookup_key` | text | simple | `Store ID` | A column letter or header-text spec, resolved the same way as `k_clean_formats`' Column cell (§8, package `clean`): a one-to-three-letter value is read as a letter, anything else is matched against the target's own first row. Used against BOTH the reference sheet and whatever range the caller selects - the matching column has one name for both sides. `usedBy` `enrich.mapped_columns`. |
+| `k_enrich_mapped` | table | simple | none | One row per column to add. Two columns: **Reference column** (letter or header text in the reference sheet) and **New column header** (the header given to the added column). Declares NO default rows, for the same reason `k_clean_formats` does not (§8, package `clean`): §5 resolves an empty stored table to the field's declared defaults, so demo rows would make `enrich.mapped_columns`' required "nothing configured" refusal unreachable. `usedBy` `enrich.mapped_columns`. |
+
+`k_enrich_mapped` header: `Reference column (letter or header)|New column header`.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `enrich.join` | Join / Enrich Columns | Prompt for a target range and a reference range, each with its header row included and treated as such - there is no "does this have a header" branch. Prompt for the ONE matching column on each side (a multi-column answer MUST be refused, not narrowed to its first entry) and which reference column(s) to copy in. Match by building an in-memory dictionary keyed on the reference's matching column, then scanning the target once - an implementation MUST NOT re-scan the reference table per target row (dictionary lookup, not nested iteration). Key comparison MUST be exact aside from leading/trailing whitespace and case; an implementation MUST NOT normalize keys in any way that could make two distinct source values compare equal (e.g. collapsing internal whitespace or stripping characters). A reference key seen more than once MUST resolve to its FIRST occurrence; the number of DISTINCT reference keys that had at least one duplicate MUST be counted and reported, never silently overwritten and never a reason to refuse the whole action. A target row matching no reference key, or whose own key is blank, MUST be left blank in the new columns and counted as unmatched, not treated as an error. New columns are written immediately to the right of the target range, headed with the reference table's own header text, and only after the implementation confirms every cell in that exact destination block is empty and the user has confirmed the write; if any cell there is already occupied, the action MUST refuse rather than overwrite it. |
+| `enrich.mapped_columns` | Add Mapped Columns | Prompt only for the target range; the reference sheet, its matching column, and which columns to add come from `k_enrich_lookup_sheet` / `k_enrich_lookup_key` / `k_enrich_mapped`. MUST share the match implementation with `enrich.join` - same first-wins-and-counted-by-distinct-key duplicate-key rule, same key normalization policy, same unmatched-row rule, same append-to-the-right placement guarded by the same empty-destination check - differing only in where its five inputs come from. MUST refuse if the configured reference sheet does not exist, if the configured key does not resolve on the reference sheet, or if `k_enrich_mapped` is empty or none of its rows resolve to a real reference column. |
+### Package `backup` — "Protect & Back Up" (v1.0.0, contract v2.8.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_backup_folder` | text | simple | *(blank)* | Root folder for every action in this package. **Blank means the deployment's data location** (section 9), which is the common case. Backups land in a `Backup` subfolder here, snapshots in `Backup\Snapshots`, and archived files in `Archive\yyyy_mm`. `usedBy` all four actions. |
+| `k_backup_base` | text | simple | `Backup` | Base name used inside a timestamped or month-end file name. `usedBy` `backup.timestamped_copy`, `backup.month_end_version`. |
+| `k_backup_offset` | int | advanced | `0` | Days to shift today's date before computing the prior month end. Same convention as `k_export_offset` (package `importexport`): a negative value looks back further than today. `usedBy` `backup.month_end_version`. |
+| `k_backup_snapshot_label` | text | simple | *(blank)* | Short tag appended to a snapshot's file name, e.g. `before Import`. Blank means no tag. `usedBy` `backup.snapshot`. |
+| `k_backup_snapshot_keep` | int | advanced | `20` | How many of the most recent snapshots to keep. On each new snapshot, older ones past this count are deleted automatically; nothing else in the folder is touched. `usedBy` `backup.snapshot`. |
+| `k_backup_archive_prefix` | file | simple | *(blank)* | Name-prefix of the generated file this action relocates, resolved the same way every `file` field is (section 3): the newest file in the deployment's data location whose name starts with this text. `usedBy` `backup.archive_output`. |
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `backup.timestamped_copy` | Backup Now (Timestamped Copy) | Save a full copy of this workbook, exactly as it stands at the moment the action runs (including any edits not yet saved to the main file), into `<root>\Backup\` with a datetime-stamped name. This workbook's own name, path, and unsaved-changes state MUST be unaffected. MUST refuse rather than overwrite if the computed destination name already exists. |
+| `backup.snapshot` | Snapshot Before a Risky Step | As `backup.timestamped_copy`, into `<root>\Backup\Snapshots\`, named with a full timestamp and an optional configured label. After a successful save, prune that folder to the configured keep-count by file modified time, oldest first, touching only files this action's own naming pattern produced. **This action provides no restore.** A conforming implementation MUST NOT claim or imply an automatic restore capability for the file it writes. |
+| `backup.month_end_version` | Save Month-End Version | As `backup.timestamped_copy`, named for the last day of the calendar month before the reference date's month (`k_backup_offset` days from today), independent of which day of that month the action runs on. |
+| `backup.archive_output` | Archive a Generated Output | Locate the newest file matching `k_backup_archive_prefix` (the `file` kind rule). MUST refuse if that file is currently open in this Excel instance rather than attempting to move it. Move it into `<root>\Archive\yyyy_mm\` (the current date's year and month), creating that folder if it does not exist. MUST refuse rather than overwrite if a file of that name already exists at the destination. |
+### Package `workbook` - "Workbook Housekeeping" (v1.0.0, contract v2.9.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_workbook_toc_name` | text | simple | `Contents` | Name of the Table of Contents sheet. A conforming implementation MUST create this sheet on first run and MUST refuse on any later run where a sheet by that name already exists, WITHOUT exception for a sheet the implementation itself built on a prior run - a plain cell value cannot prove that provenance without adding new engine state, so this field is create-only by design, not merely by omission. Rebuilding after adding, removing, or renaming a tab requires deleting the previous sheet by hand first, then running the action again. Kind is `text`, not `sheet`, for the same reason as `k_import_dest` (§8): a `sheet` field is validated to already exist, and this one must not. |
+| `k_workbook_password` | text | advanced | *(blank)* | Password used by `workbook.protect_sheets` and `workbook.unprotect_sheets`. Blank means protect with no password. **Not a secret** - stored as plain text in the config store, like every other field; it deters accidental edits, the same as Excel's own Protect Sheet, and provides no confidentiality. |
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `workbook.unhide_sheets` | Unhide All Worksheets | Set every hidden or very-hidden worksheet to visible, EXCLUDING every sheet the implementation's engine owns (the Setup surface, the config store and its staging sheet, the package-enable sheet, every generated button page). The engine-owned config store MUST NOT be unhidden by this action under any configuration. |
+| `workbook.protect_sheets` | Protect All Sheets | Protect every sheet NOT owned by the engine, with `k_workbook_password` (or no password if blank). An implementation MUST choose protection parameters that do not block its own future ability to remove and replace its own placed controls on a protected surface (Excel reference: `DrawingObjects:=False`) - protecting with the platform's own default MUST NOT be assumed safe. Engine-owned sheets MUST NOT be protected by this action, so a later rebuild retains its own access to them. |
+| `workbook.unprotect_sheets` | Unprotect All Sheets | Unprotect every protected sheet NOT owned by the engine, using `k_workbook_password`. A sheet whose protection does not accept that password MUST be reported by name as not unprotected; the action MUST NOT stop partway and MUST attempt every remaining sheet regardless of one sheet's failure. |
+| `workbook.build_toc` | Build Table of Contents | Create (§8 field semantics above) a sheet named `k_workbook_toc_name` listing every VISIBLE sheet not owned by the engine and not the Table of Contents sheet itself, each as a same-workbook hyperlink to that sheet, with an embedded apostrophe in a sheet name DOUBLED per the anchored-placement quoting rule (§6). A hidden sheet MUST NOT be listed (a link to it cannot be navigated to). The destination-name check MUST be performed unconditionally, before any other branch, and MUST refuse per the reserved-name rule (§7) and per any existing sheet of that name - including the implementation's own prior output - exactly as any other engine-created destination sheet. |
+| `workbook.unhide_rows_cols` | Unhide All Rows & Columns | On the ACTIVE sheet only, set every row and every column to visible. MUST refuse if the active sheet is engine-owned (an engine-owned surface may hide rows/columns as part of its own generated layout). Because a filter-hidden row and a manually hidden row are not distinguishable, an implementation MUST warn, and obtain confirmation, before unhiding on a sheet with an active AutoFilter; outside that case no confirmation is required. |
 ---
 
 ## 9. Platform-abstraction appendix
@@ -857,6 +1046,13 @@ port realizes them per platform rather than re-deriving them:
   ScreenUpdating/Calculation/EnableEvents; other platforms use their nearest
   equivalent or omit if not applicable.)
 
+- **Range-scoped PDF export (`export.pdf`, range mode)** - a temporary print-area override on
+  the target sheet, restored immediately after export. Neutral: render exactly the picked
+  cells to the platform's page-description format, without permanently changing the sheet's
+  own print setup.
+- **Per-tab explode (`export.per_sheet`)** - one output file per visible, non-engine sheet,
+  named `<date+offset> <sheet name>.<ext>`. Neutral: the platform's nearest equivalent to "one
+  file per tab, skip the toolkit's own surfaces."
 ---
 
 ## 10. Change control
@@ -886,6 +1082,51 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.9.0 (additive):** the `workbook` domain's package, fields, and five actions (§8); one
+  new reserved-name normative rule for `text`-kind destination fields (§7). The reserved-name
+  rule reclassifies one previously-succeeding configuration (a destination name inside the
+  reserved family, e.g. `"Macros 3"`, on a field that had no prior existing-name collision) as a
+  refusal. Classed additive on the same reasoning v2.4.0 used for the chain-halt rule: the
+  configuration being refused was never actually usable - it produced a sheet the very next
+  rebuild destroyed unconditionally - so refusing it prevents a data-loss trap rather than
+  withdrawing behaviour a deployment could rely on. `SCHEMA_VER` does not move.
+- **v2.8.0 (additive):** a new package `backup` with six fields and four actions (§8). The
+  `backup` domain itself is not new - section 7 already listed it `active` ahead of any package
+  using it - so this bullet adds only the package, not the domain. **Additive by the two-axes
+  rule:** no existing `key`, action `id`, `kind`, or encoding changes meaning; every prior stored
+  configuration keeps working exactly as it did. `SCHEMA_VER` does **not** move.
+- **v2.7.0 (additive):** two new packages, `summarize` (four actions, no fields) and `enrich`
+  (three fields, two actions). Both domains were already listed `active` in §7's vocabulary
+  table before this version - this bullet backs that listing with a shipping package, and
+  changes no vocabulary. `SCHEMA_VER` does **not** move - it stays `"v2.0"` and every existing
+  configuration keeps its meaning. No `key`, action `id`, or field `kind` from any earlier
+  version is renamed, removed, or reinterpreted.
+- **v2.6.0 (additive):** two new packages, `format` (one field, five actions) and `export`
+  (four fields, three actions) - §8. `export.freeze_values` promotes logic that already
+  shipped embedded inside `importexport.export`; that action's own id, fields and behavior
+  are unchanged. **Additive by the two-axes rule:** no existing `key`, action `id`, `kind` or
+  encoding is touched or reinterpreted; every new field and action is new surface on an
+  already-`active` domain (§7, v2.3.0). `SCHEMA_VER` does **not** move - it stays `"v2.0"`.
+  **One judgement call worth stating, honestly rather than softened:** `format.report_title`
+  DOES write a stored value - the title text goes into the newly inserted, merged title cell
+  - and it moves every value that already existed on the sheet below the insert point to a
+  new row address. A formula whose RESULT depends on its own row (`ROW()`, or an
+  `INDIRECT()` string built from a row number) can therefore return a different result after
+  the shift, even though the formula's own stored text is untouched. This still belongs
+  under the `format` domain, not `export`/`clean`, because every value that existed on the
+  sheet before the action ran keeps its own value - the ONE new value is the title text
+  itself, which is the entire declared purpose of the action, disclosed in its own confirm
+  prompt and completion message, not a side effect discovered later. A platform whose
+  row-insert does not auto-adjust formulas and defined names the way Excel's does MUST
+  perform the equivalent adjustment itself, or refuse the action - silently breaking a
+  reference is not a conforming realization of this semantics.
+- **v2.5.0 (additive):** a new package `validate` with four fields and five actions (§8):
+  `validate.reconcile`, `validate.scan`, `validate.highlight_duplicates`,
+  `validate.highlight_outliers`, `validate.missing_fields`. The `validate` domain has been
+  listed `active` in §7's vocabulary table since v2.3.0, before any package implemented it;
+  this version is the first to populate it. **Additive by the two-axes rule:** every existing
+  stored value keeps its meaning, no existing `key`, `id`, `kind` or encoding changes.
+  `SCHEMA_VER` does **not** move — it stays `"v2.0"`.
 - **v2.4.0 (additive):** a refusal becomes a distinct action outcome from a failure (§6); an
   implementation MUST expose a single record-and-present call for it; a chain now stops at a
   refused step instead of asking. `SCHEMA_VER` does **not** move — it stays `"v2.0"` and

@@ -813,18 +813,19 @@ Public Function Core_IsEngineSheet(ByVal nm As String) As Boolean
     End Select
     If LCase(Left$(nm, Len(PANEL_BASE))) = LCase(PANEL_BASE) Then
         tail = Mid$(nm, Len(PANEL_BASE) + 1)
-        If Len(tail) > 0 Then Core_IsEngineSheet = IsAllDigits(tail)
+        If Len(tail) > 0 Then Core_IsEngineSheet = Core_IsDigits(tail)
     End If
 End Function
 
-Private Function IsAllDigits(ByVal s As String) As Boolean
+' Every character is 0-9. Empty is False.
+Public Function Core_IsDigits(ByVal s As String) As Boolean
     Dim i As Long, ch As String
     If Len(s) = 0 Then Exit Function
     For i = 1 To Len(s)
         ch = Mid$(s, i, 1)
         If ch < "0" Or ch > "9" Then Exit Function
     Next i
-    IsAllDigits = True
+    Core_IsDigits = True
 End Function
 
 ' The workbook at this path IF it is already open in this Excel instance, else
@@ -889,6 +890,115 @@ Public Function Core_RangeRef(rng As Range) As String
     Core_RangeRef = nm & "!" & rng.Address(False, False)
 End Function
 
+'---- user prompts ----
+' These live in Core because a package that asks the user for a range is not doing
+' anything package-specific, and because the bundle is ONE module: an unprefixed
+' Private AskRange in PkgClean reserves that name against every other package
+' (build.ps1's duplicate-procedure guard), so the second package to want one cannot
+' copy it and cannot re-declare it. Promoting is the only move that is not a
+' standards deviation.
+
+' Prompt the user to select a range. Returns Nothing if they cancel
+' (InputBox Type:=8 returns Boolean False on cancel, which fails the Set).
+Public Function Core_AskRange(ByVal title As String) As Range
+    Dim rng As Range
+    On Error Resume Next
+    Set rng = Application.InputBox( _
+        Prompt:="Select the range for '" & title & "':", _
+        title:=title, Type:=8)
+    On Error GoTo 0
+    If Not rng Is Nothing Then
+        If rng.Areas.Count > 1 Then
+            MsgBox "Please select a single, continuous block (not several separate areas).", _
+                   vbExclamation, title
+            Set rng = Nothing
+        End If
+    End If
+    Set Core_AskRange = rng
+End Function
+
+' Ask whether the picked range's first row is a header. Returns False on Cancel,
+' leaving hasHeader untouched and the caller responsible for stopping.
+'
+' vbYesNoCancel, not vbYesNo: a two-button dialog has no way out, and the title-bar
+' X on a vbYesNo MsgBox returns vbNo - which for a caller that deletes rows would
+' silently choose "compare every row" and delete a header row. Cancel has to be
+' reachable and distinct.
+'
+' title is a parameter because this used to hardcode "Remove Duplicates" while it
+' had exactly one caller. Every other caller would have shown a dialog captioned
+' with an action it was not running.
+Public Function Core_AskHasHeader(rng As Range, ByRef hasHeader As Boolean, _
+                                  Optional ByVal title As String = "Header row") As Boolean
+    Dim ans As VbMsgBoxResult
+    ans = MsgBox("Does " & Core_RangeRef(rng) & " include a header row?" & vbCrLf & vbCrLf & _
+                 "Yes  -  the first row is a title row: it is kept, and never " & _
+                 "compared against the data." & vbCrLf & _
+                 "No  -  every row is data: all of them are compared, including " & _
+                 "the first one.", _
+                 vbQuestion + vbYesNoCancel + vbDefaultButton1, title)
+    If ans = vbCancel Then Exit Function
+    hasHeader = (ans = vbYes)
+    Core_AskHasHeader = True
+End Function
+
+' Ask for one or more column numbers, counted from the LEFT of rng. Returns False
+' on Cancel or on a number outside the range's width; keys comes back as the raw
+' "1,2,4" string, which Core_ParseCols turns into numbers.
+'
+' Application.InputBox, not VBA's InputBox: the latter returns "" for BOTH Cancel
+' and an empty OK, and those must not mean the same thing. Application.InputBox
+' returns Boolean False on Cancel, which VarType can tell apart from any string.
+'
+' question and title are parameters for the same reason Core_AskHasHeader's title
+' is: this was written for Remove Duplicates and said so in both.
+Public Function Core_AskCols(rng As Range, ByRef keys As String, _
+                             ByVal question As String, ByVal title As String) As Boolean
+    Dim v As Variant, cols As Variant, i As Long, nCols As Long
+    nCols = rng.Columns.Count
+    v = Application.InputBox( _
+        Prompt:=question & vbCrLf & vbCrLf & _
+                "Numbered from the LEFT of " & Core_RangeRef(rng) & ", which is " & _
+                nCols & " column(s) wide. One number, or several like 1,2,4.", _
+        title:=title, Default:="1", Type:=2)
+    If VarType(v) = vbBoolean Then Exit Function     ' Cancel
+    keys = Trim(CStr(v))
+    If Len(keys) = 0 Then keys = "1"                 ' empty OK means the default
+
+    ' Validate against the picked range's width. A column number past the right edge
+    ' raises 1004 deep inside whatever the caller does with it, which surfaces through
+    ' Core_Fail as an engine error - it reads as a broken macro rather than as the typo
+    ' it is. Core_ParseCols already drops non-numeric entries and falls back to 1.
+    cols = Core_ParseCols(keys)
+    For i = LBound(cols) To UBound(cols)
+        If cols(i) < 1 Or cols(i) > nCols Then
+            MsgBox "Column " & cols(i) & " is outside " & Core_RangeRef(rng) & _
+                   ", which is " & nCols & " column(s) wide." & vbCrLf & vbCrLf & _
+                   "Nothing has been changed. Run " & title & " again.", _
+                   vbExclamation, title
+            Exit Function
+        End If
+    Next i
+    Core_AskCols = True
+End Function
+
+' "1,2,4" -> Variant array of Longs, 0-based. Non-numeric entries are ignored;
+' an empty result defaults to column 1.
+Public Function Core_ParseCols(ByVal s As String) As Variant
+    Dim parts() As String, i As Long, c As Collection, out() As Variant, k As Long
+    Set c = New Collection
+    parts = Split(s, ",")
+    For i = 0 To UBound(parts)
+        If IsNumeric(Trim(parts(i))) Then c.Add CLng(Trim(parts(i)))
+    Next i
+    If c.Count = 0 Then c.Add CLng(1)
+    ReDim out(0 To c.Count - 1)
+    For k = 1 To c.Count
+        out(k - 1) = c(k)
+    Next k
+    Core_ParseCols = out
+End Function
+
 ' Excel's own rule: a sheet name is written bare only when it is entirely
 ' A-Z / a-z / 0-9 / "_" and does not begin with a digit. Anything else is
 ' quoted, and an embedded apostrophe is doubled inside the quotes.
@@ -932,6 +1042,96 @@ End Function
 Public Function Core_LastCol(ws As Worksheet, Optional ByVal row As Long = 1) As Long
     If ws Is Nothing Then Exit Function
     Core_LastCol = ws.Cells(row, ws.Columns.Count).End(xlToLeft).Column
+End Function
+
+' Every character is A-Z (case-insensitively). Empty is False. Used to tell a
+' column LETTER spec apart from a header NAME spec.
+Public Function Core_IsAlpha(ByVal s As String) As Boolean
+    Dim i As Long, ch As String
+    If Len(s) = 0 Then Exit Function
+    For i = 1 To Len(s)
+        ch = UCase(Mid$(s, i, 1))
+        If ch < "A" Or ch > "Z" Then Exit Function
+    Next i
+    Core_IsAlpha = True
+End Function
+
+' A column inside rng, named either by its SPREADSHEET LETTER ("C") or by its
+' HEADER TEXT ("Amount"). Returns the column's position WITHIN rng, counting from
+' 1 at rng's left edge - or 0 when the spec does not resolve inside rng, so the
+' caller reports a bad column rather than acting on the wrong one.
+'
+' Returns an INDEX, not a Range, even though the PkgClean function it is promoted
+' from returned a Range. The index is the primitive: a caller wanting the column
+' itself writes rng.Columns(idx), and a caller reading a bulk .Value2 array - which
+' is how every engine here reads a real dataset - needs the number and would only
+' convert a Range straight back into one. Going the other way is not symmetrical,
+' and 0-means-no beats testing Is Nothing on a function that also has a "found it
+' but it is outside your range" answer.
+'
+' The letter reading wins a tie, so a range whose header literally reads "A"
+' cannot be addressed by name. That is documented in the consuming field's help
+' text rather than resolved, because a heuristic that guessed would be worse.
+'
+' Header comparison is case- and space-insensitive via StrComp vbTextCompare:
+' a user typing "amount" for a column headed "Amount " must not be told their
+' column does not exist.
+Public Function Core_ResolveColumn(rng As Range, ByVal spec As String) As Long
+    Dim s As String, absCol As Long, i As Long, hdr As String
+    s = Trim(spec)
+    If Len(s) = 0 Then Exit Function
+
+    If Len(s) <= 3 And Core_IsAlpha(s) Then
+        On Error Resume Next
+        absCol = rng.Parent.Range(s & "1").Column
+        On Error GoTo 0
+        If absCol > 0 Then
+            If absCol >= rng.Column And absCol <= rng.Column + rng.Columns.Count - 1 Then
+                Core_ResolveColumn = absCol - rng.Column + 1
+            End If
+            Exit Function
+        End If
+    End If
+
+    For i = 1 To rng.Columns.Count
+        hdr = Trim(CStr(rng.Cells(1, i).Value))
+        If StrComp(hdr, s, vbTextCompare) = 0 Then
+            Core_ResolveColumn = i
+            Exit Function
+        End If
+    Next i
+End Function
+
+' Excel TRIM (collapse runs of spaces) + CLEAN (strip non-printing characters).
+Public Function Core_CleanText(ByVal s As String) As String
+    Core_CleanText = Application.WorksheetFunction.Clean(Application.WorksheetFunction.Trim(s))
+End Function
+
+' Empty, or the empty string. NOT the same as IsEmpty: a cell holding "" is blank
+' to a user and is not Empty to VBA.
+Public Function Core_IsBlank(ByVal v As Variant) As Boolean
+    If IsEmpty(v) Then
+        Core_IsBlank = True
+    ElseIf VarType(v) = vbString Then
+        Core_IsBlank = (v = "")
+    End If
+End Function
+
+' Narrow a picked range to the part of the sheet that actually holds anything.
+' Returns Nothing when the pick lies entirely outside the used area - the caller
+' reports that and stops, having changed nothing.
+'
+' Selecting whole columns is how people pick "this table" - A:D is one click on the
+' column headers - and it hands an action roughly four million cells. Anything doing
+' COM work per cell or per row then freezes the screen for minutes. Nothing outside
+' UsedRange can hold a value, a formula or a merge, so the intersection examines the
+' same data and finishes in seconds.
+'
+' Callers must use the NARROWED range everywhere downstream, including in the range
+' they name in their messages, so what the user is told matches what was looked at.
+Public Function Core_NarrowToUsed(rng As Range) As Range
+    If rng Is Nothing Then Exit Function
+    Set Core_NarrowToUsed = Application.Intersect(rng, rng.Parent.UsedRange)
 End Function
 
 Public Function Core_FindCol(ByVal hdr As Variant, ByVal name As String) As Long
@@ -993,6 +1193,331 @@ Public Function Core_FileName(ByVal p As String) As String
     End If
 End Function
 
+' Characters Excel forbids in a sheet name. Declared once, here, because it was
+' written out twice inside PkgImport alone - once to reject a name and once to
+' repair one - and the two copies could drift apart silently.
+Public Function Core_BadSheetChars() As String
+    Core_BadSheetChars = ":\/?*[]"
+End Function
+
+' A destination name this deployment may create. It REFUSES rather than overwrites:
+' the library snippet this replaces opened with Worksheets("Master").Delete under
+' On Error Resume Next, which silently destroys whatever the user had there.
+' Nothing in this toolkit deletes a sheet it did not create in the same run.
+'
+' Refuses via Core_Refuse, so a chain STOPS here rather than running its remaining
+' steps against a sheet this one did not produce (contract section 6).
+' fieldLabel is the Setup field the caller reads its name from, quoted back to the
+' user verbatim. It is a parameter and not generic text because the message it
+' appears in is the one that has to be actionable: "fill in the destination name"
+' sends a user hunting down a Setup tab, and "fill in 'Name for the combined sheet
+' this creates'" does not. The version this replaces hardcoded one caller's label.
+Public Function Core_DestUsable(ctx As Object, ByVal destName As String, _
+                                ByVal title As String, _
+                                Optional ByVal fieldLabel As String = "") As Boolean
+    Dim bad As String, i As Long, whichField As String, s As Object
+    whichField = fieldLabel
+    If Len(whichField) = 0 Then whichField = "the destination sheet name"
+    If Len(destName) = 0 Then
+        Core_Refuse ctx, "No name is set for the sheet this creates." & vbCrLf & vbCrLf & _
+               "Fill in '" & whichField & "' on the Setup tab, Finalize, and run this " & _
+               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", title
+        Exit Function
+    End If
+    If Len(destName) > 31 Then
+        Core_Refuse ctx, "'" & destName & "' is " & Len(destName) & " characters. Excel " & _
+               "sheet names stop at 31." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", title
+        Exit Function
+    End If
+    bad = Core_BadSheetChars()
+    For i = 1 To Len(bad)
+        If InStr(destName, Mid$(bad, i, 1)) > 0 Then
+            Core_Refuse ctx, "'" & destName & "' contains " & Mid$(bad, i, 1) & ", which " & _
+                   "Excel does not allow in a sheet name." & vbCrLf & vbCrLf & _
+                   "None of these are allowed:  : \ / ? * [ ]" & vbCrLf & vbCrLf & _
+                   "Nothing has been changed.", title
+            Exit Function
+        End If
+    Next i
+    ' A name the ENGINE owns is refused even though no such sheet exists yet.
+    ' Contract section 7 reserves "Macros", every "Macros <n>", "Macros Home",
+    ' "_Config" and "_Config_staged", and the engine DELETES those names
+    ' unconditionally with alerts suppressed on every rebuild. So a user who sets
+    ' the destination to "Macros 3" gets a sheet that builds, fills with a month of
+    ' combined data, and is destroyed without a prompt by the next Finalize. The
+    ' exists-check above cannot catch it: the name is free right up until the moment
+    ' it matters. Core_IsEngineSheet already knows the whole list.
+    If Core_IsEngineSheet(destName) Then
+        Core_Refuse ctx, "'" & destName & "' is a name the macro toolkit uses for its own " & _
+               "sheets, so it cannot be used for your data." & vbCrLf & vbCrLf & _
+               "A sheet by this name would be deleted without warning the next time the " & _
+               "Setup tab is finalized. Pick a different name." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", title
+        Exit Function
+    End If
+
+    ' ThisWorkbook.Sheets, NOT Core_SheetExists. Core_SheetExists looks only at
+    ' Worksheets, so a CHART sheet holding this name passes the check and then
+    ' Core_NewSheet's rename raises 1004 - after Worksheets.Add has already put an
+    ' empty sheet in the workbook. The user gets an engine error and a stray "Sheet1"
+    ' from an action whose entire promise is that it changes nothing when it refuses.
+    ' Sheets covers every sheet type; a name is taken or it is not.
+    On Error Resume Next
+    Set s = ThisWorkbook.Sheets(destName)
+    On Error GoTo 0
+    If Not s Is Nothing Then
+        Core_Refuse ctx, "A sheet named '" & destName & "' already exists in this workbook, " & _
+               "and this action will not overwrite it." & vbCrLf & vbCrLf & _
+               "Rename or delete that sheet, then run " & title & " again." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", title
+        Exit Function
+    End If
+    Core_DestUsable = True
+End Function
+
+' Add a new sheet at the END of the workbook and name it. Call Core_DestUsable
+' FIRST - this does no validating, deliberately, so that the refusal and the
+' creation are not tangled into one call whose failure mode is ambiguous.
+'
+' Written once here because the same two lines were repeated verbatim at two
+' places inside PkgImport, and four more waves each need a destination sheet.
+'
+' The rename is trapped and rolled back. Add-then-rename is two operations, and
+' the rename is the one that can fail on a name Core_DestUsable approved - a sheet
+' created by another macro in the same second, a name Excel rejects for a reason
+' the validator does not model. Without the rollback the failure leaves a stray
+' empty "Sheet1" behind and the error surfaces from an action that reported nothing.
+' The original error is re-raised, so the caller's Core_Fail still reports the real
+' cause rather than a swallowed one.
+Public Function Core_NewSheet(ByVal destName As String) As Worksheet
+    ' errNum, not eNum: "eNum" lower-cases to the VBA reserved word "enum", which
+    ' Excel refuses to compile and build.ps1's reserved-word guard rejects.
+    Dim ws As Worksheet, errNum As Long, errDesc As String
+    Set ws = ThisWorkbook.Worksheets.Add( _
+        After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+
+    On Error Resume Next
+    ws.name = destName
+    errNum = Err.Number
+    errDesc = Err.Description
+    On Error GoTo 0
+
+    If errNum <> 0 Then
+        Application.DisplayAlerts = False
+        On Error Resume Next
+        ws.Delete
+        On Error GoTo 0
+        Application.DisplayAlerts = True
+        Err.Raise errNum, "Core_NewSheet", _
+            "Could not name the new sheet '" & destName & "': " & errDesc
+        Exit Function
+    End If
+    Set Core_NewSheet = ws
+End Function
+
+' Any string reduced to something Excel will accept as a sheet name: forbidden
+' characters replaced with "-", trimmed, cut to 31. It does NOT make the name
+' unique - a clash is Core_DestUsable's job, and is refused rather than resolved.
+Public Function Core_SafeSheetName(ByVal raw As String) As String
+    Dim nm As String, bad As String, i As Long
+    nm = raw
+    bad = Core_BadSheetChars()
+    For i = 1 To Len(bad)
+        nm = Replace(nm, Mid$(bad, i, 1), "-")
+    Next i
+    nm = Trim(nm)
+    If Len(nm) > 31 Then nm = Left$(nm, 31)
+    Core_SafeSheetName = nm
+End Function
+
+' Blank means the folder this workbook is saved in - contract section 9's "data
+' location", and the answer in the overwhelming majority of cases. Returns a path
+' ending in a separator, or "" when the workbook has never been saved and no folder
+' was configured (the caller reports that case by name).
+Public Function Core_ResolveFolder(ByVal raw As String) As String
+    Dim p As String
+    p = Trim(raw)
+    If Len(p) = 0 Then p = ThisWorkbook.Path
+    If Len(p) = 0 Then Exit Function                 ' workbook never saved
+    If Right$(p, 1) <> Application.PathSeparator Then p = p & Application.PathSeparator
+    Core_ResolveFolder = p
+End Function
+
+' Folder existence, via FileSystemObject rather than Dir(path, vbDirectory).
+' Dir's behaviour with a trailing separator is not something to bet a refusal dialog
+' on, and it also returns a non-empty result for a FILE, so a path pointing at a
+' workbook would read as a valid folder. Late-bound: no reference to add, and no
+' VBIDE trust dependency (CLAUDE.md rule 3).
+Public Function Core_FolderExists(ByVal folderPath As String) As Boolean
+    Dim fso As Object, p As String
+    p = folderPath
+    If Len(p) > 3 Then
+        If Right$(p, 1) = Application.PathSeparator Then p = Left$(p, Len(p) - 1)
+    End If
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso Is Nothing Then Core_FolderExists = fso.FolderExists(p)
+    On Error GoTo 0
+End Function
+
+'---- export engine: freeze formulas (incl. spills) to values ----
+' Flatten dynamic-array SPILLS and legacy CSE ARRAYS in rng to static values,
+' then freeze every ordinary formula left. Two passes, in this order: a
+' spill's anchor cell is itself one of the "formula" cells the second pass
+' would try to freeze while it is still spilling, so flattening the spill
+' first turns it into an ordinary value block the second pass can walk past
+' safely.
+'
+' Extracted from importexport.export (2026-07-28 W3 plan) - NOT moved
+' unchanged. Three deliberate differences from that shipped loop, called
+' out explicitly because this is a shipped action used for a finance
+' deliverable:
+'
+'   1. This function returns the number of formula cells it ACTUALLY
+'      converted (counted area by area, in pass 2), and reports any area
+'      whose conversion raised an error via the `failedCount` out-param
+'      instead of silently swallowing it. The original loop had no caller
+'      that needed a count; export.freeze_values does (Task 10), so this
+'      is new surface, not a behavior-preserving copy of what already ran.
+'
+'   2. Pass 2 searches the exact `rng` the caller passed in, UNLESS
+'      `reevalUsedRange` is True, in which case it re-reads
+'      rng.Worksheet.UsedRange fresh before pass 2. The original always
+'      called ws.UsedRange fresh before EACH of its two passes
+'      (PkgImportExport.bas, pre-refactor :373 and :392) - two separate
+'      property reads - so if pass 1 changed the sheet's used bounds, pass
+'      2 saw the new bounds. A caller that hands this function a whole
+'      sheet's used range (importexport.export's own refactor below, and
+'      export.per_sheet's xlsx path, Task 12) passes
+'      reevalUsedRange:=True to keep that exact original behavior.
+'      export.freeze_values (Task 10) hands this function a user-PICKED,
+'      already-confirmed range and must NOT have pass 2 silently widen
+'      that to the sheet's current UsedRange - it leaves reevalUsedRange
+'      at its default, False.
+'
+'   3. The error handling around the one risky statement (`ar.Value =
+'      ar.Value`) is `On Error Resume Next` / `On Error GoTo 0`, scoped to
+'      THIS function - it is not the calling Sub's `On Error GoTo Fail`.
+'      This is safe and behaviorally equivalent for every caller: VBA
+'      error handling is scoped per procedure, so a callee's own `On
+'      Error` statements never alter or disable a caller's error handler.
+'      (This is a different situation from the bug fixed in
+'      PkgExport_FreezeValues and PkgFormat_PrintLayout below, where a Sub
+'      disabled its OWN `Fail:` routing - this function never had a
+'      `Fail:` label to disable.)
+'
+' Everything else - the two-pass order, the spill/array flatten logic
+' itself - is copied verbatim.
+'
+' PRECONDITION: Application.Calculation must be xlCalculationAutomatic when
+' this runs - it reads live formula results via .Value. This was written and
+' tested that way inside importexport.export; Core_SpeedOn sets Manual, so a
+' caller inside that wrapper must restore Automatic first, exactly as
+' importexport.export always has. This function does not manage Calculation
+' itself, so two callers running back to back never fight over restoring it.
+'
+' reevalUsedRange: when True, pass 2 searches the CURRENT
+' rng.Worksheet.UsedRange instead of the exact `rng` passed in - see
+' difference #2 above. Only the whole-sheet callers pass True.
+'
+' failedCount: ByRef out-parameter. On return, the number of formula cells
+' whose conversion to a static value raised an error and were left as live
+' formulas. A caller that reports a completion count MUST check this and
+' say so when it is nonzero - see export.freeze_values (Task 10).
+Public Function Core_FreezeValues(rng As Range, _
+                                  Optional ByVal reevalUsedRange As Boolean = False, _
+                                  Optional ByRef failedCount As Long = 0) As Long
+    Dim fRange As Range, ar As Range, cel As Range, sp As Range, sv As Variant
+    Dim target As Range, converted As Long, failed As Long
+    If rng Is Nothing Then Exit Function
+    Set target = rng
+
+    On Error Resume Next
+    Set fRange = target.SpecialCells(xlCellTypeFormulas)
+    On Error GoTo 0
+    If Not fRange Is Nothing Then
+        For Each cel In fRange.Cells
+            If cel.HasSpill Then
+                Set sp = cel.SpillingToRange
+                sv = sp.Value
+                cel.ClearContents
+                sp.Value = sv
+            ElseIf cel.HasArray Then
+                Set sp = cel.CurrentArray
+                sv = sp.Value
+                sp.ClearContents
+                sp.Value = sv
+            End If
+        Next cel
+    End If
+
+    If reevalUsedRange Then
+        On Error Resume Next
+        Set target = rng.Worksheet.UsedRange
+        On Error GoTo 0
+        If target Is Nothing Then Set target = rng
+    End If
+
+    Set fRange = Nothing
+    On Error Resume Next
+    Set fRange = target.SpecialCells(xlCellTypeFormulas)
+    On Error GoTo 0
+    If Not fRange Is Nothing Then
+        For Each ar In fRange.Areas
+            On Error Resume Next
+            Err.Clear
+            ar.Value = ar.Value
+            If Err.Number = 0 Then
+                converted = converted + ar.Cells.Count
+            Else
+                failed = failed + ar.Cells.Count
+                Err.Clear
+            End If
+            On Error GoTo 0
+        Next ar
+    End If
+
+    failedCount = failed
+    Core_FreezeValues = converted
+End Function
+
+' Any string reduced to something Windows will accept as a FILE NAME - not a
+' sheet name. Core_SafeSheetName's forbidden-character list is narrower than
+' the filesystem's: Windows additionally forbids  " < > |  on top of Excel's
+' own  : \ / ? * [ ]  - so a sheet name that is perfectly legal in Excel (one
+' containing a quote, say) can still be an illegal file name. That is why
+' this does not simply call Core_SafeSheetName and stop.
+'
+' Added in the W3 plan (2026-07-28) alongside export.pdf and
+' export.per_sheet, and flagged there for W5: backup.timestamped_copy will
+' need the identical logic. Promote-on-second-use already happened here, by
+' writing it once in Core rather than in export.pdf's own package.
+'
+' Does NOT make the name unique - a caller writing to disk still checks for an
+' existing file itself (Core_DestUsable's sheet precedent: refuse rather than
+' resolve a collision by guessing).
+'
+' maxLen caps the result; 0 means no cap. It is a parameter rather than a fixed
+' number because the right cap depends on what the caller is building. A whole
+' path is bounded by MAX_PATH, but a caller assembling
+' "<folder><date> <label> <timestamp>.xlsx" needs to bound its own middle
+' segment, and only it knows how much room the rest takes. W5's
+' backup.snapshot passes 40 for exactly this reason.
+Public Function Core_SafeFileName(ByVal raw As String, _
+                                  Optional ByVal maxLen As Long = 0) As String
+    Dim nm As String, bad As String, i As Long
+    nm = Trim(raw)
+    bad = Core_BadSheetChars() & Chr(34) & "<>|"
+    For i = 1 To Len(bad)
+        nm = Replace(nm, Mid$(bad, i, 1), "-")
+    Next i
+    If maxLen > 0 Then
+        If Len(nm) > maxLen Then nm = Left$(nm, maxLen)
+    End If
+    Core_SafeFileName = Trim(nm)
+End Function
+
 ' Coerce a text value from a source export to a target type.
 '   T=text  N=number(strips $ , %)  D/DT=date  B=boolean  G=general(auto)
 Public Function Core_Coerce(ByVal v As Variant, ByVal code As String) As Variant
@@ -1040,6 +1565,13 @@ Private Function CoreCandidates() As Collection
     c.Add "ImportExport"            ' probes PkgImportExport_Manifest
     c.Add "Import"                  ' probes PkgImport_Manifest
     c.Add "Clean"                   ' probes PkgClean_Manifest
+    c.Add "Validate"                ' probes PkgValidate_Manifest
+    c.Add "Format"                  ' probes PkgFormat_Manifest
+    c.Add "Export"                  ' probes PkgExport_Manifest
+    c.Add "Summarize"               ' probes PkgSummarize_Manifest
+    c.Add "Enrich"                  ' probes PkgEnrich_Manifest
+    c.Add "Backup"                  ' probes PkgBackup_Manifest
+    c.Add "Workbook"                 ' probes PkgWorkbook_Manifest
     Set CoreCandidates = c
 End Function
 

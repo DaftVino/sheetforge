@@ -23,7 +23,7 @@ for the syntax check. No test framework - see *Verification*.
 
 **Written against the Core API phase 2 adds** (`2026-07-28-core-helper-promotion-plan.md`):
 `Core_AskRange`, `Core_AskHasHeader`, `Core_AskCols`, `Core_ParseCols`, `Core_NarrowToUsed`,
-`Core_DestUsable`, `Core_NewSheet`, `Core_SafeSheetName`, `Core_CleanText`, `Core_IsAlpha`,
+`Core_DestUsable`, `Core_NewSheet`, `Core_SafeSheetName`, `Core_IsAlpha`,
 plus phase 1's `Core_Refuse` and `Core_IsEngineSheet`. None of these exist in `src/` yet - all
 eight wave plans are written before phase 1's first line of code, per plan-of-record §6 - so
 every reference below is to the *plan text*, not to shipped code.
@@ -63,7 +63,7 @@ than by omission.
 |---|---|---|
 | 1 | `summarize.refresh_pivots` / `summarize.recalculate` exist today inside `PkgImportExport_Import`. Legacy keeps its copy, calls the new action, or the logic moves to Core? | **Legacy keeps its own two-line copy. The new actions get their own, independent ~15-line implementation. Nothing is promoted to Core in this wave.** A cross-package call is forbidden, which rules out "calls the new action" outright. Promoting to Core was the other real option, and the reason it loses: phase 2's helper-promotion pass already audited `PkgImport` and `PkgClean` for exactly this kind of duplication and produced an explicit "deliberately NOT promoted" list for anything with one consumer or a speculative second one. This pivot-refresh loop was not in that audit at all - it lives in a third package phase 2 did not touch - so promoting it now would be a second wave silently expanding a already-reviewed pass's scope instead of that pass's own diff. The duplication is real but small (about 15 lines, no branching, copied from working code), and touching `PkgImportExport.bas` - a shipped package this wave does not own - for a 15-line saving raises the risk to an already-live finance workflow for no user-visible gain. **If a third consumer appears in a later wave, promote then, in that wave's own diff and PR** - the same YAGNI rule phase 2 states for `PkgImport_WorkbookPaths` and `PkgImport_AlreadyOpen`. |
 | 2 | Do `enrich.join` and `enrich.mapped_columns` share one engine? | **Yes - one `PkgEnrich_JoinEngine`, matching PkgImport's two-combines split exactly.** The two actions differ only in WHERE their five inputs (target range, target key column, reference range, reference key column, which reference columns to copy and what to call them) come from: `enrich.join` asks for all five at run time; `enrich.mapped_columns` reads the last four from Setup config and asks only for the target range. That is the same shape as `import.combine_worksheets` vs. `import.combine_workbooks` differing only in where the source list comes from (design section 3.3, `PkgImport.bas:160-179`). The match-and-copy mechanics - build a dictionary, scan the target once, write one block - are identical, so they are capped at one coherent engine rather than forked. |
-| 3 | Duplicate key in the reference table - refuse, first wins, or last wins? | **First occurrence wins, and the count of duplicate keys encountered is always reported in the completion message, never silent.** Refusing outright fails the action on any real reference table, which is rarely perfectly clean, and defeats the feature entirely. Last-wins is no more "correct" than first and is harder for a reader to predict by scanning the sheet top to bottom. First-wins also matches what VLOOKUP and INDEX/MATCH already return, so a user replacing a formula with this action gets the same answer they were getting - the duplicate count is the one thing the formula never told them, and is the actual safety improvement over what it replaces. |
+| 3 | Duplicate key in the reference table - refuse, first wins, or last wins? | **First occurrence wins, and the count of DISTINCT keys that turned out to be duplicated is always reported in the completion message, never silent.** That count is of distinct keys, not repeated occurrences - a key appearing four times is one duplicate key, not three; the engine tracks this with a second lookup so a key's duplicate is only counted the first time it is found (see Task 2 Step 2). Refusing outright fails the action on any real reference table, which is rarely perfectly clean, and defeats the feature entirely. Last-wins is no more "correct" than first and is harder for a reader to predict by scanning the sheet top to bottom. First-wins also matches what VLOOKUP and INDEX/MATCH already return, so a user replacing a formula with this action gets the same answer they were getting - the duplicate count is the one thing the formula never told them, and is the actual safety improvement over what it replaces. |
 | 4 | A key present in the target but not the reference table? | **Left blank in the new columns, counted as unmatched, never refused.** A partial match is the ordinary outcome at month-end (a new store not yet in the master list), not an error condition. |
 | 5 | Does either side of a join, or the pivot builder, ever ask "is row 1 a header"? | **No - row 1 is always the header, on every range this wave prompts for.** `Core_AskHasHeader` exists and is available, but every use here needs the header text itself (to name new columns, or to name pivot fields) rather than just needing to skip it, so there is nothing to ask - the header's presence is a hard requirement stated in the prompt text ("include its header row"), not a run-time branch. This removes a whole class of "what if they say no" bugs at the cost of one constraint stated up front. |
 | 6 | `enrich.join`'s run-time key-column prompt returns a `Core_AskCols` result, which can name more than one column. What if the user names two? | **Refused, not silently narrowed to the first column.** A silent narrowing here is the same failure shape the duplicate-key question warns about, just moved one step earlier: a user who typed "1,2" meaning a composite key would get single-column matching with no indication anything was dropped, and their numbers would be wrong. Composite match keys are out of scope for v1 - refuse and name the count, rather than guess. |
@@ -73,17 +73,18 @@ than by omission.
 | 10 | `summarize.freeze_pivot` - which pivot range, and what does it preserve? | **`pt.TableRange2` (the whole visible pivot, including the report-filter area), copied as values + number formats + column widths.** `PasteSpecial xlPasteFormats` does not carry column width, so it is copied in a second explicit loop - otherwise the frozen copy would read correctly but not look like what was on screen, which defeats a "make it distributable" action. The source PivotTable is never refreshed and never written to - only read from via `.Copy`. |
 | 11 | `summarize.refresh_pivots` - does one bad pivot abort the rest? | **No. Every pivot on every non-engine sheet is attempted regardless of earlier failures; each failure is counted and named (sheet, pivot name, error) in the completion report.** Aborting would let one stale external connection block every other, unrelated pivot in the workbook from refreshing. This deliberately does NOT inherit the legacy `PkgImportExport_Import` loop's silent `On Error Resume Next` - that loop is import's own internal step and stays as it is (decision 1), but a *standalone, user-facing* action reporting nothing about a failure is the exact defect `Core_Refuse` exists to cure, just for a loop instead of a single precondition. If NO pivots exist anywhere in the workbook, the action refuses instead of reporting a vacuous "refreshed 0 of 0". |
 | 12 | Field key prefixes - collisions? | **None.** `grep -rn 'Core_AddField reg, "k_' src/packages` (run 2026-07-28) shows every existing key prefixed `k_export_`, `k_settings_`, `k_master_`, `k_import_`, or `k_clean_`. `k_summarize_*` is not used - `PkgSummarize` declares no config fields at all, the same starting point `PkgClean` had before v2.3.0. `k_enrich_lookup_sheet`, `k_enrich_lookup_key`, and `k_enrich_mapped` are new and collide with nothing. |
+| 13 | How does the join engine normalize a key before comparing it - and how far is too far? | **`Trim$` only - strip leading/trailing whitespace, touch nothing else.** `Core_CleanText` is available but deliberately NOT used for keys: it collapses repeated internal spaces and strips control characters, which would let two DIFFERENT finance identifiers collapse to the same dictionary key and pair with the wrong reference row - confidently wrong output, silently, over a consolidated dataset. Nothing in the contract authorizes a fuzzier match than exact text (case aside). Case-insensitivity is handled separately, by the dictionary's `CompareMode`, not by rewriting the key. |
 
 ### Safety story per action
 
 | Action | Safety story |
 |---|---|
-| `summarize.refresh_pivots` | Never overwrites or deletes anything; a bad pivot is counted and named, not hidden. Refuses if there is nothing to refresh. |
-| `summarize.recalculate` | Never refuses - recalculating changes no stored value, only formula results, so there is no precondition that can fail. |
-| `summarize.build_pivot` | Never overwrites a sheet - `Core_DestUsable` refuses and names the conflict, same rule as the two combines. |
-| `summarize.freeze_pivot` | Never modifies the source PivotTable (read-only `.Copy`); never overwrites a sheet, same `Core_DestUsable` rule. A click outside any pivot is refused by name instead of raising an engine error. |
-| `enrich.join` | Never overwrites existing columns - new columns are always appended to the right of the picked range. Refuses on a multi-column match key rather than silently matching on the wrong thing. Reports duplicate-key and unmatched-row counts rather than hiding them. |
-| `enrich.mapped_columns` | Same append-only, never-overwrite rule as `enrich.join`. Refuses if the configured reference sheet is missing, if the configured key column resolves nowhere, or if nothing is configured yet - the same "nothing configured" refusal shape `clean.standardize_formats` already uses for `k_clean_formats`. |
+| `summarize.refresh_pivots` | Never overwrites or deletes anything; a bad pivot is counted and named, not hidden, using `RefreshTable`'s own documented Boolean success signal rather than the absence of a raised error. Refuses if there is nothing to refresh; otherwise confirms the exact count before running. |
+| `summarize.recalculate` | Never refuses - recalculating changes no stored value, only formula results, so there is no precondition that can fail. Still confirms before running, since it can take a while on a large workbook; a cancelled confirmation is not a refusal. |
+| `summarize.build_pivot` | Never overwrites a sheet - `Core_DestUsable` refuses and names the conflict, same rule as the two combines - and refuses up front on a blank or duplicate source header rather than letting `PivotFields` raise a raw COM error. Creates the pivot cache from a fully qualified string reference, not a bare `Range`. Confirms before creating the sheet. If pivot construction fails after the sheet is created, the partial sheet is deleted before `Core_Fail` reports the original error. |
+| `summarize.freeze_pivot` | Never modifies the source PivotTable (read-only `.Copy`); never overwrites a sheet, same `Core_DestUsable` rule. A click outside any pivot is refused by name instead of raising an engine error. Confirms before creating the sheet. If the copy/paste sequence fails after the sheet is created, the partial sheet is deleted before `Core_Fail` reports the original error. |
+| `enrich.join` | Never overwrites existing columns - the exact destination block is previewed and refused if any cell in it already holds something, not merely assumed empty because it sits to the right of the picked range. Refuses on a multi-column match key rather than silently matching on the wrong thing. Keys are normalized with `Trim$` only (Decision 13), never `Core_CleanText`, so two distinct identifiers can never collapse into the same match. Reports the count of DISTINCT duplicate keys and the unmatched-row count rather than hiding them or over-counting. Confirms before writing. |
+| `enrich.mapped_columns` | Same append-only, never-overwrite rule, same destination preview, same `Trim$`-only key normalization, and same confirmation as `enrich.join`. Refuses if the configured reference sheet is missing, if the configured key column resolves nowhere, or if nothing is configured yet - the same "nothing configured" refusal shape `clean.standardize_formats` already uses for `k_clean_formats`. |
 
 ---
 
@@ -120,7 +121,12 @@ Every task verifies with:
 1. `pwsh build/build.ps1` - exit 0, `Core + N package(s)`, balanced `Sub`/`Function` counts.
    **N rises by exactly 2 over whatever it was immediately before this wave's first commit**
    - this plan cannot state an absolute number, because W2 and W3 land first and each adds
-   packages of their own.
+   packages of their own. `N` counts `Pkg*.bas` FILES `build.ps1` finds on disk
+   (`build.ps1:91-92`), not packages registered in `CoreCandidates()` - it rises by one the
+   moment each file is created (Task 2 for `PkgEnrich.bas`, Task 5 for `PkgSummarize.bas`),
+   well before Task 8 registers either package with Core. Task 8 itself never moves `N` - it
+   edits only `Core.bas` and adds no file. Every task-level "Expected" below states what `N`
+   does, if anything, at that specific step - do not assume it is flat until Task 8.
 2. `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` - no diagnostics.
 3. **A grep proving each new action id and field key exists exactly once** in its manifest.
 4. **A deliberate injection** (Task 8) proving `CoreCandidates()` registration actually
@@ -180,7 +186,7 @@ its first field.
 
 | id | caption | semantics |
 |---|---|---|
-| `summarize.refresh_pivots` | Refresh All PivotTables | Refresh every PivotTable on every sheet in the workbook, skipping engine-owned sheets (§7's `Core_IsEngineSheet` test). A PivotTable whose refresh raises MUST NOT stop the others; it MUST be counted and named (sheet, pivot, error) in the completion report rather than silently skipped or aborting the run. With no PivotTables anywhere in the workbook the action MUST refuse rather than report a vacuous success. |
+| `summarize.refresh_pivots` | Refresh All PivotTables | Refresh every PivotTable on every sheet in the workbook, skipping engine-owned sheets (§7's `Core_IsEngineSheet` test). Success MUST be read from `RefreshTable`'s own documented Boolean return value, not merely inferred from the absence of a raised error. A PivotTable whose refresh raises or returns `False` MUST NOT stop the others; it MUST be counted and named (sheet, pivot, error) in the completion report rather than silently skipped or aborting the run. With no PivotTables anywhere in the workbook the action MUST refuse rather than report a vacuous success. |
 | `summarize.recalculate` | Recalculate Workbook | Force a full recalculation of every formula in the workbook. This action MUST NOT refuse under any condition: it changes no stored value, so no precondition can be unmet. |
 | `summarize.build_pivot` | Build a Summary Table | Prompt for a range whose first row MUST be treated as its header, then which column(s) to group by and which to sum. Write the result as a new PivotTable on a new sheet. Every value column is aggregated by SUM; a per-column aggregation choice is out of scope for this version. The destination sheet MUST NOT overwrite an existing sheet - same refusal rule as `import.combine_worksheets`. |
 | `summarize.freeze_pivot` | Freeze a Pivot to Values | Prompt for a cell; resolve the PivotTable that cell belongs to, refusing by name if it belongs to none. Copy that pivot's current output - values, number formats, and column widths - to a new sheet. The action MUST NOT modify the source PivotTable (no refresh, no write to its cells). Same destination-sheet refusal rule as `summarize.build_pivot`. |
@@ -207,8 +213,8 @@ Insert immediately after the new `summarize` subsection:
 
 | id | caption | semantics |
 |---|---|---|
-| `enrich.join` | Join / Enrich Columns | Prompt for a target range and a reference range, each with its header row included and treated as such - there is no "does this have a header" branch. Prompt for the ONE matching column on each side (a multi-column answer MUST be refused, not narrowed to its first entry) and which reference column(s) to copy in. Match by building an in-memory dictionary keyed on the reference's matching column, then scanning the target once - an implementation MUST NOT re-scan the reference table per target row (dictionary lookup, not nested iteration). A reference key seen more than once MUST resolve to its FIRST occurrence and MUST be counted and reported as a distinct number, never silently overwritten and never a reason to refuse the whole action. A target row matching no reference key MUST be left blank in the new columns and counted as unmatched, not treated as an error. New columns are written immediately to the right of the target range, headed with the reference table's own header text. |
-| `enrich.mapped_columns` | Add Mapped Columns | Prompt only for the target range; the reference sheet, its matching column, and which columns to add come from `k_enrich_lookup_sheet` / `k_enrich_lookup_key` / `k_enrich_mapped`. MUST share the match implementation with `enrich.join` - same first-wins-and-counted duplicate-key rule, same unmatched-row rule, same append-to-the-right placement - differing only in where its five inputs come from. MUST refuse if the configured reference sheet does not exist, if the configured key does not resolve on the reference sheet, or if `k_enrich_mapped` is empty or none of its rows resolve to a real reference column. |
+| `enrich.join` | Join / Enrich Columns | Prompt for a target range and a reference range, each with its header row included and treated as such - there is no "does this have a header" branch. Prompt for the ONE matching column on each side (a multi-column answer MUST be refused, not narrowed to its first entry) and which reference column(s) to copy in. Match by building an in-memory dictionary keyed on the reference's matching column, then scanning the target once - an implementation MUST NOT re-scan the reference table per target row (dictionary lookup, not nested iteration). Key comparison MUST be exact aside from leading/trailing whitespace and case; an implementation MUST NOT normalize keys in any way that could make two distinct source values compare equal (e.g. collapsing internal whitespace or stripping characters). A reference key seen more than once MUST resolve to its FIRST occurrence; the number of DISTINCT reference keys that had at least one duplicate MUST be counted and reported, never silently overwritten and never a reason to refuse the whole action. A target row matching no reference key, or whose own key is blank, MUST be left blank in the new columns and counted as unmatched, not treated as an error. New columns are written immediately to the right of the target range, headed with the reference table's own header text, and only after the implementation confirms every cell in that exact destination block is empty and the user has confirmed the write; if any cell there is already occupied, the action MUST refuse rather than overwrite it. |
+| `enrich.mapped_columns` | Add Mapped Columns | Prompt only for the target range; the reference sheet, its matching column, and which columns to add come from `k_enrich_lookup_sheet` / `k_enrich_lookup_key` / `k_enrich_mapped`. MUST share the match implementation with `enrich.join` - same first-wins-and-counted-by-distinct-key duplicate-key rule, same key normalization policy, same unmatched-row rule, same append-to-the-right placement guarded by the same empty-destination check - differing only in where its five inputs come from. MUST refuse if the configured reference sheet does not exist, if the configured key does not resolve on the reference sheet, or if `k_enrich_mapped` is empty or none of its rows resolve to a real reference column. |
 ````
 
 - [ ] **Step 4: Add the §10 entry**
@@ -253,9 +259,15 @@ brief calls out; it lives here and must be right once.
 **Files:** Create `src/packages/PkgEnrich.bas`.
 
 **Interfaces:**
-- Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_AddTable`,
-  `Core_AddAction`, `Core_CleanText` (phase 2).
-- Produces: `PkgEnrich_Manifest(reg As Object)`, and the private
+- Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_AddTable`.
+  **Not** `Core_AddAction` - `build.ps1` rejects any `Core_AddAction` whose named handler does
+  not yet exist as a `Public Sub` in the bundle (`build.ps1:471`), and neither
+  `PkgEnrich_Join` nor `PkgEnrich_MappedColumns` exists until Tasks 3 and 4. Each action's own
+  `Core_AddAction` call is added to this manifest by the task that adds its handler, not here
+  - see Task 3 Step 2 and Task 4 Step 2. **Not** `Core_CleanText` either - see Step 2 below for
+  why the engine normalizes keys with plain `Trim$`, not `Core_CleanText`.
+- Produces: `PkgEnrich_Manifest(reg As Object)` (fields and sections only until Tasks 3/4 each
+  append their own action), and the private
   `PkgEnrich_JoinEngine(targetRng As Range, ByVal targetKeyCol As Long, lookupRng As Range,
   ByVal lookupKeyCol As Long, valueCols As Variant, newHeaders As Variant, ByRef matched As
   Long, ByRef unmatched As Long, ByRef dupKeys As Long, ByRef appendedCols As Long)`. Tasks 3
@@ -287,9 +299,12 @@ Option Explicit
 ' never a nested search, because this runs over a consolidated dataset
 ' that can be tens of thousands of rows: building the reference
 ' dictionary once is O(reference rows), then matching every target row
-' is O(target rows) with an O(1) lookup each - a nested loop over both
-' would be O(target rows * reference rows), minutes instead of seconds
-' on a real month-end file.
+' is O(target rows) with an O(1) lookup each, and each matched row
+' writes up to mappedColumns cells into the output array - so the full
+' shape is O(reference + target*mappedColumns), not strictly
+' O(reference + target). The point that matters stays true either way:
+' a nested loop over both tables would be O(target rows * reference
+' rows), minutes instead of seconds on a real month-end file.
 '
 ' A reference key seen more than once resolves to its FIRST occurrence
 ' and is counted, never refused and never silently overwritten - see
@@ -320,12 +335,12 @@ Public Sub PkgEnrich_Manifest(reg As Object)
         "One row per column to copy in from the reference sheet. Left cell: a column letter or header text in the reference sheet. Right cell: the header to give the new column here. Nothing happens until you fill this in.", _
         "enrich.mapped_columns"
 
-    Core_AddAction reg, "enrich.join", "Join / Enrich Columns", "PkgEnrich_Join", _
-        "Pick a range to enrich and a reference table (each including its header row); matches rows by a key column and copies in the reference columns you choose. Everything is picked at run time - nothing here is configured on Setup.", _
-        "Match & Enrich"
-    Core_AddAction reg, "enrich.mapped_columns", "Add Mapped Columns", "PkgEnrich_MappedColumns", _
-        "Pick a range; adds the columns configured above from the reference sheet, matched on the key column. The mapping is set up once above and runs the same way every time.", _
-        "Match & Enrich"
+    ' No Core_AddAction calls here. build.ps1 rejects any Core_AddAction whose
+    ' named handler does not already exist as a Public Sub in the bundle - and
+    ' at this point in the task sequence neither PkgEnrich_Join nor
+    ' PkgEnrich_MappedColumns has been written yet. Each action registers
+    ' itself in the task that adds its own handler: Task 3 appends the
+    ' enrich.join line here, Task 4 appends the enrich.mapped_columns line.
 End Sub
 ```
 
@@ -352,13 +367,15 @@ Private Sub PkgEnrich_JoinEngine(targetRng As Range, ByVal targetKeyCol As Long,
                                  ByRef matched As Long, ByRef unmatched As Long, _
                                  ByRef dupKeys As Long, ByRef appendedCols As Long)
     Dim tArr As Variant, lArr As Variant, outArr As Variant
-    Dim dict As Object, key As String
+    Dim dict As Object, dupSeen As Object, key As String
     Dim nRows As Long, mRows As Long, nCols As Long, c As Long, r As Long
     Dim hitRow As Variant, srcCol As Long
     Dim destWs As Worksheet, firstNewCol As Long
 
     Set dict = CreateObject("Scripting.Dictionary")
     dict.CompareMode = 1                            ' vbTextCompare - same rule as PkgImport's headerMap
+    Set dupSeen = CreateObject("Scripting.Dictionary")
+    dupSeen.CompareMode = 1                         ' tracks which keys' duplicate has already been counted
 
     tArr = targetRng.Value
     lArr = lookupRng.Value
@@ -367,16 +384,37 @@ Private Sub PkgEnrich_JoinEngine(targetRng As Range, ByVal targetKeyCol As Long,
     nCols = UBound(valueCols) - LBound(valueCols) + 1
 
     ' Build the reference dictionary once. Row 1 is the header and is skipped.
+    '
+    ' KEY NORMALIZATION: Trim$ only - leading/trailing whitespace is stripped
+    ' because it is invisible and never distinguishes two real identifiers, but
+    ' nothing else about the text is touched. Core_CleanText is deliberately
+    ' NOT used here even though it is available: it collapses repeated internal
+    ' spaces and strips control characters, which would let two DIFFERENT
+    ' finance identifiers (e.g. "AB  12" and "AB 12", or a store code with an
+    ' embedded tab from a bad export) resolve to the SAME dictionary key and
+    ' silently pair with the wrong reference row - confidently wrong output
+    ' over a consolidated dataset, the one failure mode a join cannot have.
+    ' Case-insensitivity is handled separately, by the dictionary's own
+    ' CompareMode above, not by rewriting the key text. Nothing in the
+    ' contract authorizes a fuzzier match than this.
+    '
     ' DUPLICATE KEYS: the row already in the dictionary wins - the first one
-    ' seen, top to bottom - and every later duplicate only increments the
-    ' count. Nothing here refuses on a duplicate: a reference table with a
-    ' repeated key is common, not exceptional, and the count is how the user
-    ' finds out rather than getting a wrong number with no signal at all.
+    ' seen, top to bottom. dupKeys counts DISTINCT keys that turned out to be
+    ' duplicated, not total repeated occurrences - a key appearing 4 times is
+    ' ONE duplicate key, not three - so dupSeen marks a key the first time its
+    ' second occurrence is found, and every occurrence after that no longer
+    ' increments dupKeys. Nothing here refuses on a duplicate: a reference
+    ' table with a repeated key is common, not exceptional, and the count is
+    ' how the user finds out rather than getting a wrong number with no
+    ' signal at all.
     For r = 2 To mRows
-        key = Core_CleanText(CStr(lArr(r, lookupKeyCol)))
+        key = Trim$(CStr(lArr(r, lookupKeyCol)))
         If Len(key) > 0 Then
             If dict.Exists(key) Then
-                dupKeys = dupKeys + 1
+                If Not dupSeen.Exists(key) Then
+                    dupKeys = dupKeys + 1
+                    dupSeen.Add key, True
+                End If
             Else
                 dict.Add key, r
             End If
@@ -390,22 +428,28 @@ Private Sub PkgEnrich_JoinEngine(targetRng As Range, ByVal targetKeyCol As Long,
         outArr(1, c) = CStr(newHeaders(LBound(newHeaders) + c - 1))
     Next c
     For r = 2 To nRows
-        key = Core_CleanText(CStr(tArr(r, targetKeyCol)))
-        If Len(key) > 0 And dict.Exists(key) Then
-            hitRow = dict(key)
-            matched = matched + 1
-            For c = 1 To nCols
-                srcCol = CLng(valueCols(LBound(valueCols) + c - 1))
-                outArr(r, c) = lArr(hitRow, srcCol)
-            Next c
+        key = Trim$(CStr(tArr(r, targetKeyCol)))    ' same normalization policy as the reference side
+        If Len(key) > 0 Then
+            If dict.Exists(key) Then
+                hitRow = dict(key)
+                matched = matched + 1
+                For c = 1 To nCols
+                    srcCol = CLng(valueCols(LBound(valueCols) + c - 1))
+                    outArr(r, c) = lArr(hitRow, srcCol)
+                Next c
+            Else
+                unmatched = unmatched + 1           ' outArr row stays blank for this row's new columns
+            End If
         Else
-            unmatched = unmatched + 1               ' outArr row stays blank for this row's new columns
+            unmatched = unmatched + 1               ' an empty target key can never match anything
         End If
     Next r
 
-    ' One write, immediately to the right of the target range - this never
-    ' overwrites a column the caller already had, and it is the reason both
-    ' actions are "append", never "replace", in their safety story.
+    ' One write, immediately to the right of the target range. The CALLER
+    ' (PkgEnrich_Join / PkgEnrich_MappedColumns) is responsible for previewing
+    ' this exact destination block and refusing before this engine is ever
+    ' invoked if any cell in it is already occupied - this engine has no ctx
+    ' to refuse with, so it only writes, it never checks.
     Set destWs = targetRng.Parent
     firstNewCol = targetRng.Column + targetRng.Columns.Count
     destWs.Range(destWs.Cells(targetRng.Row, firstNewCol), _
@@ -420,10 +464,14 @@ End Sub
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: `PkgEnrich_Manifest` and `PkgEnrich_JoinEngine` are the only two procedures so far;
-the build should still pass structurally even with no actions calling the engine yet (Tasks 3
-and 4 add those). If `build.ps1`'s entry-point resolver complains about an action with no
-handler, that is expected until Task 3/4 land - do not silence it by adding a stub.
+Expected: exit 0, no diagnostics. `PkgEnrich_Manifest` and `PkgEnrich_JoinEngine` are the only
+two procedures so far, and the manifest declares zero actions (Step 1 registers no
+`Core_AddAction` calls, on purpose) - so there is nothing for `build.ps1`'s entry-point
+resolver to reject; this build is clean, not merely tolerated. The printed `Core + N
+package(s)` already counts `PkgEnrich.bas` starting at THIS step, the moment the file exists
+on disk - `build.ps1` enumerates `Pkg*.bas` files present in `src/packages/`, not packages
+registered in `CoreCandidates()` (that is Task 8, which edits only `Core.bas` and adds no
+file). `N` therefore rises by one right here, not later.
 
 - [ ] **Step 4: Commit**
 
@@ -445,8 +493,10 @@ finance user replaces a volatile formula with this action, and the multi-column-
 **Interfaces:**
 - Consumes: `Core_AskRange`, `Core_NarrowToUsed`, `Core_AskCols`, `Core_ParseCols`,
   `Core_Refuse`, `Core_Done`, `Core_Fail`, `Core_SpeedOn`, `Core_SpeedOff`, `Core_RangeRef`
-  (all phase 1/2), `PkgEnrich_JoinEngine` (Task 2).
-- Produces: `Public Sub PkgEnrich_Join(ctx As Object)`.
+  (all phase 1/2), `Core_AddAction` (this task's own registration, deferred from Task 2 -
+  see Step 2), `PkgEnrich_JoinEngine` (Task 2).
+- Produces: `Public Sub PkgEnrich_Join(ctx As Object)`, plus the `enrich.join` line appended to
+  `PkgEnrich_Manifest`.
 
 - [ ] **Step 1: Add the action**
 
@@ -455,7 +505,7 @@ finance user replaces a volatile formula with this action, and the multi-column-
 ' ACTION - Ad hoc join: every input picked at run time
 '================================================================
 Public Sub PkgEnrich_Join(ctx As Object)
-    Dim targetRng As Range, lookupRng As Range
+    Dim targetRng As Range, lookupRng As Range, destPreview As Range
     Dim tKeys As String, lKeys As String, vKeys As String
     Dim targetKeyArr As Variant, lookupKeyArr As Variant, valueColsArr As Variant
     Dim newHeaders() As String, i As Long
@@ -466,7 +516,11 @@ Public Sub PkgEnrich_Join(ctx As Object)
     Set targetRng = Core_AskRange(TITLE & " - the data to enrich (include its header row)")
     If targetRng Is Nothing Then Exit Sub                     ' user cancelled
     Set targetRng = Core_NarrowToUsed(targetRng)
-    If targetRng Is Nothing Or targetRng.Rows.Count < 2 Then
+    If targetRng Is Nothing Then
+        Core_Refuse ctx, "Your selection needs a header row and at least one data row." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    ElseIf targetRng.Rows.Count < 2 Then
         Core_Refuse ctx, "Your selection needs a header row and at least one data row." & _
                vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
@@ -487,7 +541,11 @@ Public Sub PkgEnrich_Join(ctx As Object)
     Set lookupRng = Core_AskRange(TITLE & " - the reference table (include its header row)")
     If lookupRng Is Nothing Then Exit Sub
     Set lookupRng = Core_NarrowToUsed(lookupRng)
-    If lookupRng Is Nothing Or lookupRng.Rows.Count < 2 Then
+    If lookupRng Is Nothing Then
+        Core_Refuse ctx, "The reference table needs a header row and at least one data row." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    ElseIf lookupRng.Rows.Count < 2 Then
         Core_Refuse ctx, "The reference table needs a header row and at least one data row." & _
                vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
@@ -517,6 +575,28 @@ Public Sub PkgEnrich_Join(ctx As Object)
         newHeaders(i) = CStr(lookupRng.Cells(1, CLng(valueColsArr(i))).Value)
     Next i
 
+    ' Preview the EXACT block the engine is about to write and refuse if any
+    ' cell in it already holds something - "never overwrites existing
+    ' columns" is only true if this is checked before the write, not assumed
+    ' from wherever the write happens to land.
+    Set destPreview = targetRng.Parent.Range( _
+        targetRng.Parent.Cells(targetRng.Row, targetRng.Column + targetRng.Columns.Count), _
+        targetRng.Parent.Cells(targetRng.Row + targetRng.Rows.Count - 1, _
+            targetRng.Column + targetRng.Columns.Count + UBound(valueColsArr) - LBound(valueColsArr)))
+    If Application.WorksheetFunction.CountA(destPreview) > 0 Then
+        Core_Refuse ctx, "The column(s) immediately to the right of " & Core_RangeRef(targetRng) & _
+               " already contain data - adding new columns there would overwrite it." & _
+               vbCrLf & vbCrLf & "Clear that area, or pick a target range with empty columns to " & _
+               "its right, then run this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    ' Explicit confirmation before the write - this is the one place in the
+    ' action where cancelling still costs nothing.
+    If MsgBox("This adds " & (UBound(valueColsArr) - LBound(valueColsArr) + 1) & _
+              " new column(s) to " & Core_RangeRef(targetRng) & ", immediately to its right." & _
+              vbCrLf & vbCrLf & "Proceed?", vbOKCancel + vbQuestion, TITLE) <> vbOK Then Exit Sub
+
     Core_SpeedOn
     PkgEnrich_JoinEngine targetRng, CLng(targetKeyArr(LBound(targetKeyArr))), _
         lookupRng, CLng(lookupKeyArr(LBound(lookupKeyArr))), _
@@ -533,7 +613,21 @@ Fail:
 End Sub
 ```
 
-- [ ] **Step 2: Build and syntax-check**
+- [ ] **Step 2: Register the action in the manifest**
+
+`PkgEnrich_Join` now exists, so its `Core_AddAction` can be added. Edit `PkgEnrich_Manifest`
+(Task 2 Step 1): replace the deferral comment left after `Core_AddTable reg, "k_enrich_mapped"`
+with the actual registration, immediately before the manifest's `End Sub`:
+
+```vb
+    Core_AddAction reg, "enrich.join", "Join / Enrich Columns", "PkgEnrich_Join", _
+        "Pick a range to enrich and a reference table (each including its header row); matches rows by a key column and copies in the reference columns you choose. Everything is picked at run time - nothing here is configured on Setup.", _
+        "Match & Enrich"
+```
+
+The deferral comment about `enrich.mapped_columns` stays - Task 4 still owns that one.
+
+- [ ] **Step 3: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
@@ -543,7 +637,7 @@ grep -c '"enrich.join"' dist/MacrosBundle.bas
 Expected: exit 0, no diagnostics. The grep prints `2` (one in `Core_AddAction`, one in
 `Core_Fail`) - matching the W1 plan's corrected verification shape, not `1`.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgEnrich.bas
@@ -562,8 +656,10 @@ established; kept with the same owner for consistency across the pair.
 **Interfaces:**
 - Consumes: `Core_Cfg`, `Core_CfgTable`, `Core_SheetExists`, `Core_ResolveColumn` (Core, added
   by phase 2), `Core_AskRange`, `Core_NarrowToUsed`, `Core_Refuse`, `Core_Done`, `Core_Fail`,
-  `Core_SpeedOn`, `Core_SpeedOff`, `Core_RangeRef`, `PkgEnrich_JoinEngine` (Task 2).
-- Produces: `Public Sub PkgEnrich_MappedColumns(ctx As Object)`.
+  `Core_SpeedOn`, `Core_SpeedOff`, `Core_RangeRef`, `Core_AddAction` (this task's own
+  registration, deferred from Task 2 - see Step 2), `PkgEnrich_JoinEngine` (Task 2).
+- Produces: `Public Sub PkgEnrich_MappedColumns(ctx As Object)`, plus the
+  `enrich.mapped_columns` line appended to `PkgEnrich_Manifest`.
 
 - [ ] **Step 1: Add the action**
 
@@ -573,7 +669,7 @@ established; kept with the same owner for consistency across the pair.
 '================================================================
 Public Sub PkgEnrich_MappedColumns(ctx As Object)
     Dim lookupSheetName As String, lookupKeySpec As String
-    Dim lookupWs As Worksheet, lookupRng As Range, targetRng As Range
+    Dim lookupWs As Worksheet, lookupRng As Range, targetRng As Range, destPreview As Range
     Dim refCols() As String, newHdrs() As String, spare() As String
     Dim lookupKeyCol As Long, targetKeyCol As Long, colIdx As Long
     Dim valueCols() As Long, headers() As String, i As Long, n As Long
@@ -591,7 +687,11 @@ Public Sub PkgEnrich_MappedColumns(ctx As Object)
     End If
     Set lookupWs = ThisWorkbook.Worksheets(lookupSheetName)
     Set lookupRng = Core_NarrowToUsed(lookupWs.UsedRange)
-    If lookupRng Is Nothing Or lookupRng.Rows.Count < 2 Then
+    If lookupRng Is Nothing Then
+        Core_Refuse ctx, "'" & lookupSheetName & "' has no data rows to match against." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    ElseIf lookupRng.Rows.Count < 2 Then
         Core_Refuse ctx, "'" & lookupSheetName & "' has no data rows to match against." & _
                vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
@@ -637,7 +737,11 @@ Public Sub PkgEnrich_MappedColumns(ctx As Object)
     Set targetRng = Core_AskRange(TITLE & " - the data to enrich (include its header row)")
     If targetRng Is Nothing Then Exit Sub                     ' user cancelled
     Set targetRng = Core_NarrowToUsed(targetRng)
-    If targetRng Is Nothing Or targetRng.Rows.Count < 2 Then
+    If targetRng Is Nothing Then
+        Core_Refuse ctx, "Your selection needs a header row and at least one data row." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    ElseIf targetRng.Rows.Count < 2 Then
         Core_Refuse ctx, "Your selection needs a header row and at least one data row." & _
                vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
@@ -650,6 +754,26 @@ Public Sub PkgEnrich_MappedColumns(ctx As Object)
                "header includes it." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
     End If
+
+    ' Preview the EXACT block the engine is about to write and refuse if any
+    ' cell in it already holds something - same append-only guarantee as
+    ' enrich.join, checked the same way (Task 3 Step 1).
+    Set destPreview = targetRng.Parent.Range( _
+        targetRng.Parent.Cells(targetRng.Row, targetRng.Column + targetRng.Columns.Count), _
+        targetRng.Parent.Cells(targetRng.Row + targetRng.Rows.Count - 1, _
+            targetRng.Column + targetRng.Columns.Count + UBound(valueCols) - LBound(valueCols)))
+    If Application.WorksheetFunction.CountA(destPreview) > 0 Then
+        Core_Refuse ctx, "The column(s) immediately to the right of " & Core_RangeRef(targetRng) & _
+               " already contain data - adding new columns there would overwrite it." & _
+               vbCrLf & vbCrLf & "Clear that area, or pick a target range with empty columns to " & _
+               "its right, then run this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    ' Explicit confirmation before the write.
+    If MsgBox("This adds " & (UBound(valueCols) - LBound(valueCols) + 1) & " new column(s) to " & _
+              Core_RangeRef(targetRng) & ", immediately to its right, from '" & lookupSheetName & _
+              "'." & vbCrLf & vbCrLf & "Proceed?", vbOKCancel + vbQuestion, TITLE) <> vbOK Then Exit Sub
 
     Core_SpeedOn
     PkgEnrich_JoinEngine targetRng, targetKeyCol, lookupRng, lookupKeyCol, valueCols, headers, _
@@ -669,17 +793,33 @@ Fail:
 End Sub
 ```
 
-- [ ] **Step 2: Build and syntax-check**
+- [ ] **Step 2: Register the action in the manifest**
+
+`PkgEnrich_MappedColumns` now exists. Edit `PkgEnrich_Manifest` (Task 2 Step 1, already edited
+once by Task 3 Step 2): replace the remaining deferral comment about `enrich.mapped_columns`
+with the actual registration, immediately before the manifest's `End Sub`:
+
+```vb
+    Core_AddAction reg, "enrich.mapped_columns", "Add Mapped Columns", "PkgEnrich_MappedColumns", _
+        "Pick a range; adds the columns configured above from the reference sheet, matched on the key column. The mapping is set up once above and runs the same way every time.", _
+        "Match & Enrich"
+```
+
+`PkgEnrich_Manifest` now registers both actions and the deferral comment is gone entirely.
+
+- [ ] **Step 3: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+grep -c '"enrich.mapped_columns"' dist/MacrosBundle.bas
 ```
 
-Expected: exit 0, no diagnostics, `Core + N package(s)` where `N` includes `Enrich` for the
-first time (registration is Task 8 - until then `PkgEnrich`'s actions build and bundle but
-Core never calls them; that gap is expected and closed by Task 8, not here).
+Expected: exit 0, no diagnostics. The grep prints `2` (one in `Core_AddAction`, one in
+`Core_Fail`). `PkgEnrich.bas` has been counted in the printed `Core + N package(s)` since
+Task 2's build step (the file existed on disk then); this step does not change `N` - it only
+makes both of `PkgEnrich`'s actions reachable through the manifest that was already bundled.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgEnrich.bas
@@ -697,10 +837,17 @@ task has to invent - Task 1 already settled the shape.
 **Files:** Create `src/packages/PkgSummarize.bas`.
 
 **Interfaces:**
-- Consumes: `Core_DeclarePackage`, `Core_AddAction`, `Core_IsEngineSheet`, `Core_Refuse`,
-  `Core_Done`, `Core_Fail`, `Core_SpeedOn`, `Core_SpeedOff` (all phase 1/2).
+- Consumes: `Core_DeclarePackage`, `Core_AddAction` (only for `refresh_pivots` and
+  `recalculate` here - their handlers are both written within this same task, before its own
+  build/verify step; `build_pivot` and `freeze_pivot` are NOT registered here, since
+  `PkgSummarize_BuildPivot` and `PkgSummarize_FreezePivot` do not exist yet - `build.ps1`
+  rejects an action whose handler is missing (`build.ps1:471`). Each of those two registers
+  itself in the task that adds its own handler: Task 6 for `build_pivot`, Task 7 for
+  `freeze_pivot`), `Core_IsEngineSheet`, `Core_Refuse`, `Core_Done`, `Core_Fail`, `Core_SpeedOn`,
+  `Core_SpeedOff` (all phase 1/2).
 - Produces: `Public Sub PkgSummarize_RefreshPivots(ctx As Object)`,
-  `Public Sub PkgSummarize_Recalculate(ctx As Object)`, `PkgSummarize_Manifest(reg As Object)`.
+  `Public Sub PkgSummarize_Recalculate(ctx As Object)`, `PkgSummarize_Manifest(reg As Object)`
+  (declaring the package and registering these two actions only).
 
 - [ ] **Step 1: Write the file header and manifest**
 
@@ -744,12 +891,11 @@ Public Sub PkgSummarize_Manifest(reg As Object)
     Core_AddAction reg, "summarize.recalculate", "Recalculate Workbook", "PkgSummarize_Recalculate", _
         "Force a full recalculation of every formula in the workbook, the same as pressing Ctrl+Alt+F9.", _
         "Summarize & Analyze"
-    Core_AddAction reg, "summarize.build_pivot", "Build a Summary Table", "PkgSummarize_BuildPivot", _
-        "Pick a range (with its header row), then which column(s) to group by and which to total. Writes a new PivotTable to a new sheet.", _
-        "Summarize & Analyze"
-    Core_AddAction reg, "summarize.freeze_pivot", "Freeze a Pivot to Values", "PkgSummarize_FreezePivot", _
-        "Click any cell inside a PivotTable, then copy its current layout to a new sheet as static values and formats. The original PivotTable is never changed.", _
-        "Summarize & Analyze"
+
+    ' summarize.build_pivot and summarize.freeze_pivot are NOT registered yet -
+    ' their handlers (PkgSummarize_BuildPivot, PkgSummarize_FreezePivot) do not
+    ' exist until Tasks 6 and 7, and build.ps1 rejects a Core_AddAction whose
+    ' named handler is missing. Each is added here by the task that writes it.
 End Sub
 ```
 
@@ -759,44 +905,75 @@ End Sub
 '================================================================
 ' ACTION - Refresh every PivotTable on every sheet
 '
-' A bad pivot (source range deleted, external connection unreachable)
-' raises on .RefreshTable. One bad pivot does NOT stop the others - see
-' the wave plan's Decision 11 for why aborting or staying silent are
-' both wrong here.
+' A bad pivot (source range deleted, external connection unreachable) can
+' either raise on .RefreshTable, or complete without raising and still
+' return False - RefreshTable is documented to return a Boolean, and that
+' Boolean is the signal this code trusts, not merely the absence of a
+' raised error. One bad pivot does NOT stop the others - see the wave
+' plan's Decision 11 for why aborting or staying silent are both wrong
+' here.
 '================================================================
 Public Sub PkgSummarize_RefreshPivots(ctx As Object)
     Dim sh As Worksheet, pt As PivotTable
     Dim total As Long, refreshed As Long, failedNames As String
+    Dim thisOk As Boolean, thisErrNum As Long, thisErrDesc As String
     Const TITLE As String = "Refresh All PivotTables"
     On Error GoTo Fail
 
-    Core_SpeedOn
+    ' Count first, without touching anything - lets the refusal below fire
+    ' before any confirmation is shown, and lets the confirmation name a
+    ' real count instead of asking to "refresh everything" blind.
     For Each sh In ThisWorkbook.Worksheets
-        If Not Core_IsEngineSheet(sh.name) Then
-            For Each pt In sh.PivotTables
-                total = total + 1
-                On Error Resume Next
-                Err.Clear
-                pt.PivotCache.MissingItemsLimit = xlMissingItemsNone
-                pt.RefreshTable
-                If Err.Number = 0 Then
-                    refreshed = refreshed + 1
-                Else
-                    failedNames = failedNames & vbCrLf & "   " & sh.name & " ! " & pt.name & _
-                                  "  (#" & Err.Number & " " & Err.Description & ")"
-                End If
-                Err.Clear
-                On Error GoTo Fail
-            Next pt
-        End If
+        If Not Core_IsEngineSheet(sh.name) Then total = total + sh.PivotTables.Count
     Next sh
-    Core_SpeedOff
 
     If total = 0 Then
         Core_Refuse ctx, "There are no PivotTables anywhere in this workbook to refresh." & _
                vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
     End If
+
+    If MsgBox("This refreshes " & total & " PivotTable(s) across this workbook now." & _
+              vbCrLf & vbCrLf & "Proceed?", vbOKCancel + vbQuestion, TITLE) <> vbOK Then Exit Sub
+
+    Core_SpeedOn
+    For Each sh In ThisWorkbook.Worksheets
+        If Not Core_IsEngineSheet(sh.name) Then
+            For Each pt In sh.PivotTables
+                ' MissingItemsLimit is not supported on every pivot cache (an
+                ' OLAP source raises on it) - its own error is swallowed here
+                ' and MUST NOT be attributed to RefreshTable below, which is
+                ' the actual success/failure signal for this pivot.
+                On Error Resume Next
+                Err.Clear
+                pt.PivotCache.MissingItemsLimit = xlMissingItemsNone
+                Err.Clear
+                On Error GoTo Fail
+
+                ' RefreshTable RETURNS a Boolean - that is the documented
+                ' success signal. Still guarded with Resume Next because a
+                ' genuinely broken external connection raises rather than
+                ' returning False.
+                On Error Resume Next
+                Err.Clear
+                thisOk = pt.RefreshTable
+                thisErrNum = Err.Number
+                thisErrDesc = Err.Description
+                Err.Clear
+                On Error GoTo Fail
+
+                If thisErrNum <> 0 Then thisOk = False
+                If thisOk Then
+                    refreshed = refreshed + 1
+                Else
+                    failedNames = failedNames & vbCrLf & "   " & sh.name & " ! " & pt.name & _
+                                  IIf(thisErrNum <> 0, "  (#" & thisErrNum & " " & thisErrDesc & ")", _
+                                      "  (RefreshTable reported failure)")
+                End If
+            Next pt
+        End If
+    Next sh
+    Core_SpeedOff
 
     Core_Done ctx, "Refreshed " & refreshed & " of " & total & " PivotTable(s)." & _
            IIf(Len(failedNames) > 0, vbCrLf & vbCrLf & "These did not refresh:" & failedNames, ""), TITLE
@@ -812,15 +989,24 @@ End Sub
 '================================================================
 ' ACTION - Force a full recalculation
 '
-' Never refuses: recalculating is always valid to run and changes no
+' Never REFUSES: recalculating is always valid to run and changes no
 ' stored value, only formula results, so there is no precondition to
-' fail. Exists as its own action so it can be its own chain step -
-' summarize.refresh_pivots and the legacy import both want "and then
-' recalculate" as their last step.
+' fail. It still confirms before running - a full recalculation on a
+' large finance workbook can take a noticeable while, and a click on the
+' wrong button should still be cancellable at no cost, same as every
+' other action here. A cancelled confirmation exits quietly, the same as
+' every "user cancelled" exit elsewhere in this wave - it is not a
+' refusal and is never reported as one. Exists as its own action so it
+' can be its own chain step - summarize.refresh_pivots and the legacy
+' import both want "and then recalculate" as their last step.
 '================================================================
 Public Sub PkgSummarize_Recalculate(ctx As Object)
     Const TITLE As String = "Recalculate Workbook"
     On Error GoTo Fail
+
+    If MsgBox("This recalculates every formula in the workbook now. On a large workbook this " & _
+              "can take a while." & vbCrLf & vbCrLf & "Proceed?", vbOKCancel + vbQuestion, TITLE) _
+            <> vbOK Then Exit Sub
 
     Core_SpeedOn
     Application.CalculateFull
@@ -841,7 +1027,10 @@ grep -c '"summarize.refresh_pivots"\|"summarize.recalculate"' dist/MacrosBundle.
 ```
 
 Expected: exit 0, no diagnostics; the grep prints `4` (each id appears once in
-`Core_AddAction`, once in `Core_Fail`).
+`Core_AddAction`, once in `Core_Fail`). The printed `Core + N package(s)` rises by one again at
+THIS step - `PkgSummarize.bas` now exists on disk for the first time, the same rule Task 2
+established for `PkgEnrich.bas`. `N` now includes both new packages' files, still independent
+of `CoreCandidates()` (Task 8, which only edits `Core.bas`).
 
 - [ ] **Step 5: Commit**
 
@@ -862,8 +1051,10 @@ git commit -m "feat(summarize): PkgSummarize manifest, refresh_pivots and recalc
 **Interfaces:**
 - Consumes: `Core_AskRange`, `Core_NarrowToUsed`, `Core_AskCols`, `Core_ParseCols`,
   `Core_RangeRef`, `Core_SafeSheetName`, `Core_DestUsable`, `Core_NewSheet`, `Core_Refuse`,
-  `Core_Done`, `Core_Fail`, `Core_SpeedOn`, `Core_SpeedOff`.
-- Produces: `Public Sub PkgSummarize_BuildPivot(ctx As Object)`.
+  `Core_Done`, `Core_Fail`, `Core_SpeedOn`, `Core_SpeedOff`, `Core_AddAction` (this task's own
+  registration, deferred from Task 5 - see Step 2).
+- Produces: `Public Sub PkgSummarize_BuildPivot(ctx As Object)`, plus the `summarize.build_pivot`
+  line appended to `PkgSummarize_Manifest`.
 
 - [ ] **Step 1: Add the action**
 
@@ -882,22 +1073,53 @@ git commit -m "feat(summarize): PkgSummarize manifest, refresh_pivots and recalc
 ' finished PivotTable.
 '================================================================
 Public Sub PkgSummarize_BuildPivot(ctx As Object)
-    Dim srcRng As Range, rowKeys As String, valKeys As String
+    Dim srcRng As Range, srcRef As String, rowKeys As String, valKeys As String
     Dim rowColsArr As Variant, valColsArr As Variant, i As Long
     Dim destName As String, destWs As Worksheet
     Dim pc As PivotCache, pt As PivotTable
     Dim fld As PivotField, hdr As String
+    Dim seenHdr As Object, colScan As Long, hdrScan As String
+    Dim origNum As Long, origDesc As String, origSrc As String
     Const TITLE As String = "Build a Summary Table"
     On Error GoTo Fail
 
     Set srcRng = Core_AskRange(TITLE & " - your data, including its header row")
     If srcRng Is Nothing Then Exit Sub                        ' user cancelled
     Set srcRng = Core_NarrowToUsed(srcRng)
-    If srcRng Is Nothing Or srcRng.Rows.Count < 2 Then
+    If srcRng Is Nothing Then
+        Core_Refuse ctx, "Your selection needs a header row and at least one data row." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    ElseIf srcRng.Rows.Count < 2 Then
         Core_Refuse ctx, "Your selection needs a header row and at least one data row." & _
                vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
     End If
+
+    ' Every PivotTable field is resolved by header text (PivotFields(hdr)),
+    ' which is ambiguous when two columns share a header - Excel itself would
+    ' already have silently renamed the second one internally - and a blank
+    ' header cannot become a field at all. Both would otherwise surface as a
+    ' raw, unexplained COM error deep inside CreatePivotTable/AddDataField
+    ' below. Refuse cleanly, up front, instead.
+    Set seenHdr = CreateObject("Scripting.Dictionary")
+    seenHdr.CompareMode = 1
+    For colScan = 1 To srcRng.Columns.Count
+        hdrScan = Trim$(CStr(srcRng.Cells(1, colScan).Value))
+        If Len(hdrScan) = 0 Then
+            Core_Refuse ctx, "Column " & colScan & " of your selection has a blank header." & _
+                   vbCrLf & vbCrLf & "Every column needs header text before it can be summarized." & _
+                   vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+            Exit Sub
+        End If
+        If seenHdr.Exists(hdrScan) Then
+            Core_Refuse ctx, "Two columns in your selection are both headed '" & hdrScan & "'." & _
+                   vbCrLf & vbCrLf & "Give each column its own header, then run this again." & _
+                   vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+            Exit Sub
+        End If
+        seenHdr.Add hdrScan, True
+    Next colScan
 
     If Not Core_AskCols(srcRng, rowKeys, _
             "Which column(s) do you want to GROUP BY (e.g. Store, Month)? " & _
@@ -914,9 +1136,21 @@ Public Sub PkgSummarize_BuildPivot(ctx As Object)
     destName = Core_SafeSheetName(Core_RangeRef(srcRng) & " Summary")
     If Not Core_DestUsable(ctx, destName, TITLE) Then Exit Sub
 
+    If MsgBox("This creates a new sheet '" & destName & "' with a PivotTable, grouped by " & _
+              (UBound(rowColsArr) - LBound(rowColsArr) + 1) & " column(s) and summing " & _
+              (UBound(valColsArr) - LBound(valColsArr) + 1) & " column(s)." & vbCrLf & vbCrLf & _
+              "Proceed?", vbOKCancel + vbQuestion, TITLE) <> vbOK Then Exit Sub
+
+    ' A fully qualified string reference, not the Range object itself -
+    ' PivotCaches.Create is documented to accept SourceData as a Range, but a
+    ' plain Range argument has a known history of an unexpected type-mismatch
+    ' error on some Excel builds; the string form is the form Microsoft's own
+    ' examples use.
+    srcRef = "'" & srcRng.Worksheet.name & "'!" & srcRng.Address(RowAbsolute:=True, ColumnAbsolute:=True)
+
     Core_SpeedOn
     Set destWs = Core_NewSheet(destName)
-    Set pc = ThisWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRng)
+    Set pc = ThisWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRef)
     Set pt = pc.CreatePivotTable(TableDestination:=destWs.Range("A1"), TableName:="Pivot_" & destWs.Index)
 
     For i = LBound(rowColsArr) To UBound(rowColsArr)
@@ -935,27 +1169,51 @@ Public Sub PkgSummarize_BuildPivot(ctx As Object)
            (UBound(valColsArr) - LBound(valColsArr) + 1) & " column(s).", TITLE
     Exit Sub
 Fail:
+    ' Not transactional the easy way - Excel needs the sheet to exist before
+    ' PivotCaches.Create/CreatePivotTable can target it - so a failure after
+    ' Core_NewSheet leaves a partial or empty sheet unless it is cleaned up
+    ' here. Snapshot the ORIGINAL failure before attempting cleanup, since
+    ' the cleanup itself runs under its own Resume Next and could otherwise
+    ' overwrite Err with a cleanup-time error instead of the real one.
+    origNum = Err.Number
+    origDesc = Err.Description
+    origSrc = Err.Source
+    Core_SpeedOff
+    If Not destWs Is Nothing Then
+        On Error Resume Next
+        Application.DisplayAlerts = False
+        destWs.Delete                                  ' best-effort - remove the partial sheet
+        Application.DisplayAlerts = True
+    End If
+    On Error Resume Next
+    Err.Raise origNum, origSrc, origDesc                ' restore the ORIGINAL failure for Core_Fail
     Core_Fail ctx, "summarize.build_pivot", Err
 End Sub
 ```
 
-**Known limitation, stated because it is a real gap, not covered here:** a source range with
-two columns sharing the same header text will make `pt.PivotFields(hdr)` ambiguous - Excel
-itself already renamed the second occurrence internally, and this code does not detect or
-resolve that. No shipped source produces duplicate headers today (the two combines already
-guarantee unique headers by construction), so this is listed under *Unknowns and risks*
-rather than fixed here.
+- [ ] **Step 2: Register the action in the manifest**
 
-- [ ] **Step 2: Build and syntax-check**
+`PkgSummarize_BuildPivot` now exists. Edit `PkgSummarize_Manifest` (Task 5 Step 1): replace the
+deferral comment before its `End Sub` with `summarize.build_pivot`'s registration (the
+`summarize.freeze_pivot` half of the comment stays - Task 7 still owns that one):
+
+```vb
+    Core_AddAction reg, "summarize.build_pivot", "Build a Summary Table", "PkgSummarize_BuildPivot", _
+        "Pick a range (with its header row), then which column(s) to group by and which to total. Writes a new PivotTable to a new sheet.", _
+        "Summarize & Analyze"
+```
+
+- [ ] **Step 3: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 grep -c '"summarize.build_pivot"' dist/MacrosBundle.bas
 ```
 
-Expected: exit 0, no diagnostics, grep prints `2`.
+Expected: exit 0, no diagnostics, grep prints `2`. `N` in `Core + N package(s)` does not move
+here - `PkgSummarize.bas` has existed on disk since Task 5.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgSummarize.bas
@@ -973,8 +1231,10 @@ means (`TableRange2`, explicit column widths) and the never-modify-source-pivot 
 
 **Interfaces:**
 - Consumes: `Core_AskRange`, `Core_SafeSheetName`, `Core_DestUsable`, `Core_NewSheet`,
-  `Core_Refuse`, `Core_Done`, `Core_Fail`, `Core_SpeedOn`, `Core_SpeedOff`.
-- Produces: `Public Sub PkgSummarize_FreezePivot(ctx As Object)`.
+  `Core_Refuse`, `Core_Done`, `Core_Fail`, `Core_SpeedOn`, `Core_SpeedOff`, `Core_AddAction`
+  (this task's own registration, deferred from Task 5 - see Step 2).
+- Produces: `Public Sub PkgSummarize_FreezePivot(ctx As Object)`, plus the
+  `summarize.freeze_pivot` line appended to `PkgSummarize_Manifest`.
 
 - [ ] **Step 1: Add the action**
 
@@ -999,6 +1259,7 @@ means (`TableRange2`, explicit column widths) and the never-modify-source-pivot 
 Public Sub PkgSummarize_FreezePivot(ctx As Object)
     Dim sel As Range, pt As PivotTable, destName As String, destWs As Worksheet
     Dim srcRng As Range, c As Long
+    Dim origNum As Long, origDesc As String, origSrc As String
     Const TITLE As String = "Freeze a Pivot to Values"
     On Error GoTo Fail
 
@@ -1017,6 +1278,10 @@ Public Sub PkgSummarize_FreezePivot(ctx As Object)
 
     destName = Core_SafeSheetName(pt.name & " (values)")
     If Not Core_DestUsable(ctx, destName, TITLE) Then Exit Sub
+
+    If MsgBox("This copies '" & pt.name & "' to a new sheet '" & destName & "' as static " & _
+              "values and formats. The original PivotTable is not changed." & vbCrLf & vbCrLf & _
+              "Proceed?", vbOKCancel + vbQuestion, TITLE) <> vbOK Then Exit Sub
 
     Core_SpeedOn
     Set srcRng = pt.TableRange2
@@ -1037,20 +1302,55 @@ Public Sub PkgSummarize_FreezePivot(ctx As Object)
            "The original PivotTable was not changed.", TITLE
     Exit Sub
 Fail:
+    ' Same non-transactional shape as summarize.build_pivot (Task 6): the
+    ' sheet must exist before the two PasteSpecial calls can target it, so a
+    ' failure between Core_NewSheet and the end of the column-width loop
+    ' leaves a partial sheet unless removed here. Snapshot the ORIGINAL
+    ' failure before attempting cleanup - the cleanup runs under its own
+    ' Resume Next and could otherwise overwrite Err with a cleanup-time
+    ' error instead of the real one.
+    origNum = Err.Number
+    origDesc = Err.Description
+    origSrc = Err.Source
+    Core_SpeedOff
+    Application.CutCopyMode = False
+    If Not destWs Is Nothing Then
+        On Error Resume Next
+        Application.DisplayAlerts = False
+        destWs.Delete                                  ' best-effort - remove the partial sheet
+        Application.DisplayAlerts = True
+    End If
+    On Error Resume Next
+    Err.Raise origNum, origSrc, origDesc                ' restore the ORIGINAL failure for Core_Fail
     Core_Fail ctx, "summarize.freeze_pivot", Err
 End Sub
 ```
 
-- [ ] **Step 2: Build and syntax-check**
+- [ ] **Step 2: Register the action in the manifest**
+
+`PkgSummarize_FreezePivot` now exists. Edit `PkgSummarize_Manifest` (Task 5 Step 1, already
+edited once by Task 6 Step 2): replace the remaining deferral comment with
+`summarize.freeze_pivot`'s registration, immediately before the manifest's `End Sub`:
+
+```vb
+    Core_AddAction reg, "summarize.freeze_pivot", "Freeze a Pivot to Values", "PkgSummarize_FreezePivot", _
+        "Click any cell inside a PivotTable, then copy its current layout to a new sheet as static values and formats. The original PivotTable is never changed.", _
+        "Summarize & Analyze"
+```
+
+`PkgSummarize_Manifest` now registers all four actions and the deferral comment is gone.
+
+- [ ] **Step 3: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 grep -c '"summarize.freeze_pivot"' dist/MacrosBundle.bas
 ```
 
-Expected: exit 0, no diagnostics, grep prints `2`.
+Expected: exit 0, no diagnostics, grep prints `2`. `N` in `Core + N package(s)` does not move
+here either - both this wave's files have existed on disk since Tasks 2 and 5.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/packages/PkgSummarize.bas
@@ -1096,7 +1396,11 @@ pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 grep -n 'c.Add "Summarize"\|c.Add "Enrich"' src/core/Core.bas
 ```
 
-Expected: exit 0, no diagnostics, both greps hit exactly once.
+Expected: exit 0, no diagnostics, both greps hit exactly once. `N` in `Core + N package(s)`
+does not move at this step - this task edits only `Core.bas`, adds no `Pkg*.bas` file, and `N`
+already counted both `PkgEnrich.bas` (since Task 2) and `PkgSummarize.bas` (since Task 5).
+What this step changes is which registered packages Core actually calls at run time, not what
+`build.ps1` counts.
 
 - [ ] **Step 3: Deliberate injection - prove registration actually matters**
 
@@ -1160,18 +1464,29 @@ the track. Append a new `## W4` section:
 ```markdown
 ## W4 - Summarize & Analyze, Match & Enrich
 
-- `PivotCaches.Create` / `CreatePivotTable` / `PivotFields(...).Orientation` /
-  `AddDataField` (summarize.build_pivot) has not run against a real workbook. Confirm a
-  built PivotTable groups and sums exactly the columns named, and that a source range with
-  a duplicate header name produces the documented error rather than a silent misgroup.
+- `PivotCaches.Create` (against the fully qualified string reference, not a bare `Range`) /
+  `CreatePivotTable` / `PivotFields(...).Orientation` / `AddDataField` (summarize.build_pivot)
+  has not run against a real workbook. Confirm a built PivotTable groups and sums exactly the
+  columns named, that the blank/duplicate-header refusal actually fires before any sheet is
+  created, and that a source range that passes that check still builds cleanly.
+- The build_pivot / freeze_pivot partial-sheet cleanup on failure (the `destWs.Delete` in each
+  action's `Fail:` handler) has not been exercised against a real mid-build failure - confirm
+  the sheet is actually removed and that `Core_Fail` still reports the ORIGINAL error, not a
+  cleanup-time one.
 - `Range.PivotTable` correctly resolves the containing pivot from an arbitrary clicked cell,
   including a cell in the report-filter area (summarize.freeze_pivot) - not exercised.
 - `pt.TableRange2` genuinely captures the whole visible pivot, and the explicit column-width
   copy loop actually reproduces the on-screen layout - not visually confirmed.
 - The dictionary-based join's stated complexity claim (fast over tens of thousands of rows)
   has not been measured against a real consolidated dataset from W1's combine actions.
-- `enrich.join` and `enrich.mapped_columns`' duplicate-key count and unmatched-row count
-  have not been checked against a reference table with deliberately seeded duplicates.
+- `enrich.join` and `enrich.mapped_columns`' duplicate-key count (DISTINCT keys, not
+  occurrences) and unmatched-row count have not been checked against a reference table with
+  deliberately seeded duplicates - including a key repeated more than twice, to confirm the
+  count stays at one rather than incrementing per extra occurrence.
+- The six `MsgBox` confirmations added across this wave's actions (`enrich.join`,
+  `enrich.mapped_columns`, `summarize.build_pivot`, `summarize.freeze_pivot`,
+  `summarize.refresh_pivots`, `summarize.recalculate`) have not been seen on screen - confirm
+  each shows the stated title/message and that Cancel exits with no change and no error.
 - `summarize.refresh_pivots` skipping engine-owned sheets via `Core_IsEngineSheet`, and
   correctly naming a pivot that fails to refresh, has not been run against a workbook with
   a genuinely broken pivot connection.
@@ -1213,11 +1528,15 @@ first-wins-and-counted, never a refusal (Decisions 2-4); and the two Task 8 inje
 
 ## Unknowns and risks
 
-- **`summarize.build_pivot`'s duplicate-header-name gap** (Task 6): a source range with two
-  columns sharing a header text makes `pt.PivotFields(hdr)` ambiguous. No shipped source
-  produces this today, so it is left as a known gap rather than solved here - fixing it would
-  mean generating and tracking synthetic unique field names, which is a bigger change than
-  this wave's charter.
+- **`summarize.build_pivot`'s blank/duplicate-header check only covers the source range, not
+  the summed columns' data type** (Task 6): a source range with two columns sharing a header,
+  or a blank header, is now refused up front rather than raising a raw COM error inside
+  `PivotFields`/`AddDataField`. What is still NOT checked is whether a column picked to be
+  SUMMED actually holds numbers - `AddDataField(..., xlSum)` on an all-text column does not
+  raise, it just sums to zero, which reads as a legitimate (if boring) result rather than a
+  refusal. Left as a known gap: distinguishing "genuinely zero" from "summed the wrong column"
+  would need sampling the column's values before committing to the pivot, which is a bigger
+  change than this wave's charter.
 - **`enrich.join`'s reference-range re-selection cost.** Each run rebuilds the dictionary from
   scratch even inside a chain that calls it twice in a row against the same reference table.
   Acceptable for a per-run action; would need a cached dictionary keyed by range address if a

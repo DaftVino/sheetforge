@@ -299,6 +299,51 @@ concrete answer to designing a 60-button layout while only 7 actions exist.
 
 ## 5. Handoff log
 
+### 2026-07-29 - track 2 is code-complete (43 actions), and the stack never reached main
+
+**Eight phases planned, reviewed and merged as PRs #20-#27.** Two Core passes then W2-W6,
+plus one end-to-end validation document. `feat/w6-workbook` carries the finished tree:
+**43 actions across ten packages**, `VERSION` 0.17.0, contract v2.9.0, `SCHEMA_VER` still
+`"v2.0"`. Build is green (`Core + 10 package(s)`, `Sub 123/123 | Function 182/182`), syntax
+check clean.
+
+**The defect this hand-off exists to flag: `main` is still at v0.11.0 with three packages.**
+Every PR reads MERGED, but each was based on the previous feature branch and only #20
+targeted `main`. Phases 2-8 merged into each other and stopped. This is the same stranding
+that produced #18. **Nothing is lost** - `feat/w6-workbook` is complete and pushed - but the
+first job of the next session is landing it, and no new branch may be cut from `main` until
+it is.
+
+**What review bought, since it is the argument for doing it again.** Planning every phase
+first, reviewing each plan before writing code, and dry-running the checklist blind caught
+four defects that would otherwise have shipped, two of which destroy data: `importexport`'s
+import and updateMaster discarded a colleague's unsaved edits by closing a workbook they had
+not opened; W5's snapshot pruning would `Kill` any file merely starting `SNAPSHOT_`; W6's TOC
+skipped the reserved-name check whenever the sheet already existed, so an existing `_Config`
+could reach a `Cells.Clear`; and `Core_DestUsable` accepted `Macros 3`, which builds, fills
+with a month of data, and is deleted without a prompt by the next Finalize. The blind
+dry-run then found five buttons the checklist named that do not exist.
+
+**Nothing has run in Excel.** Every phase shipped reviewed, not verified, per the 2026-07-28
+gate deferral. `docs/designs/2026-07-28-end-to-end-validation.md` is the 41-item consequence-
+ordered checklist that discharges it, and it is still unrun.
+
+**Scope the owner corrected on 2026-07-29.** Declaring track 2 "complete" measured the work
+against the plan of record rather than against this design. Three gaps were real and are the
+next phase: `Macros Home` (design section 2.2) was built during track 1 and withdrawn before
+release; the **8 catalog items marked *Later*** say "in scope, no wave assigned yet" and were
+never assigned; and a **Finalize-reminder** the owner expected was never specified anywhere.
+`PkgFixture` (section 2.5) was also never built and is now **explicitly dropped** - the owner
+does not want it.
+
+**Next phase - Macros Home, the 8 Later items, and the Finalize reminder.** No plan document
+exists yet; writing one is the first task, in the same shape as track 2: plan every step
+first, review each plan before any code, then implement step by step. Contract goes to
+v2.10.0 or higher. Ending catalog: **51 actions**.
+
+**Read manifest for the next phase.** `docs/designs/next-session-prompt.md` holds it.
+
+
 ### 2026-07-28 — W1 built and open as PR #19; gate DEFERRED; Core pass planned
 
 **Branch / PR.** All work on `feat/w1-ingest-clean`, 27 commits, `29a3392..bafb905`,

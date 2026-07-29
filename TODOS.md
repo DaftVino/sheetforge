@@ -5,15 +5,54 @@ touching Core or more than one package go through `writing-plans` first. Verify 
 `pwsh build/build.ps1`; there is no headless VBA test, so also import
 `dist/MacrosBundle.bas` and run the workbook, recorded in the PR/notes.
 
-Current: **v0.10.0**, contract **v2.3.0**. Track 1 is finished and shipped
-(v0.6.0–v0.9.0). Track 2 is under way: **W1 is built and open as PR #19**, not
-yet merged, because its manual gate has not been run. Remote: `origin` =
-`github.com/DaftVino/sheetforge` (private). The Apps Script port is deferred to
-last, deliberately.
+Current: **v0.17.0**, contract **v2.9.0**. **Track 2 is code-complete: 43 actions across
+ten packages.** Track 1 shipped at v0.6.0-v0.9.0. Remote: `origin` =
+`github.com/DaftVino/sheetforge` (private). The Apps Script port is deferred to last,
+deliberately.
 
-**The one thing blocking progress is gate time, not build time.** 45 checklist
-items are unticked: 37 from W1 and 8 left over from track 1. Everything below is
-downstream of those.
+**The one thing blocking release is validation time, not build time.** Nothing in track 2
+has run in Excel. Seven PRs are open and stacked; they must merge in order.
+
+## Next — active
+
+- [ ] **Merge the stack, in this order.** Each branches from the one before it, so an
+      out-of-order merge does not build:
+      **#20** Core refusal pass (v0.11.0, contract v2.4.0)
+      → **#21** Core helper promotion (v0.12.0)
+      → **#22** W2 Validate & Reconcile (v0.13.0, v2.5.0)
+      → **#23** W3 Format & Export (v0.14.0, v2.6.0)
+      → **#24** W4 Summarize & Enrich (v0.15.0, v2.7.0)
+      → **#25** W5 Protect & Back Up (v0.16.0, v2.8.0)
+      → **#26** W6 Workbook housekeeping (v0.17.0, v2.9.0)
+      → **#27** the end-to-end validation document.
+
+- [ ] **Run `docs/designs/2026-07-28-end-to-end-validation.md`.** 41 items, ordered by
+      consequence rather than by release. It replaces the six per-wave gates that were never
+      written, per the 2026-07-28 deferral. It has been dry-run by an agent that was allowed
+      to read only the checklist and the built bundle — that pass corrected five button
+      captions that did not exist and six items that could not have been executed as written.
+
+      **§2 is the section that matters.** Seven items, each of which can destroy work rather
+      than merely report a wrong number. If §2 is green, nothing in this release can lose
+      your data. §3 is the wrong-numbers section. §4 and §5 degrade gracefully.
+
+      **Start with 1.2** (`Debug ▸ Compile VBAProject`) — it discharges the only open
+      assumption in the build, and everything else is invalid until it passes. Then **3.2**,
+      the oldest unverified change in the tree.
+
+- [ ] **Reskin 4 is still the likeliest real finding** (item 5.1). The palette came off a
+      dark-background proof and lands on an explicitly white sheet, and nothing has ever
+      checked the two together.
+
+## After validation
+
+- [ ] **Ship v1.0.0** once the validation passes, or fix what it finds first.
+- [ ] **The Apps Script port**, against `spec/contract.md` v2.9.0. The contract is the
+      language-neutral source of truth and every wave has kept it current, so the port is
+      meant to be mechanical.
+- [ ] **8 catalog items are marked *Later*** and 5 *Deferred*. The Deferred ones are still
+      deferred: `backup.snapshot` supplies the save half of an undo story, not the restore
+      half, and only one of the three blocked items ever cited undo as its blocker.
 
 ## Before the remote (blocker) — DONE (2026-07-24)
 
