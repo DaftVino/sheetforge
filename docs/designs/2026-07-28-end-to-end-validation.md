@@ -316,10 +316,19 @@ These are the items where a failure costs you something you cannot get back.
 - [ ] **3.10 — `Export Dashboard (.xlsx)` still produces the same file it always did.**
   Run it on a workbook containing a dynamic-array spill, a legacy CSE array, and ordinary
   formulas. Compare against a file exported by v0.13.0 or earlier. **You need that older file
-  before you start** — either one you already exported and kept, or one you make now:
-  `git stash && git checkout v0.13.0 && pwsh build/build.ps1`, import that bundle into a
-  scratch copy of the workbook, export, then `git checkout feat/macros-home` and rebuild.
-  **If you have neither, record this item UNTESTED rather than guessing** — a comparison
+  before you start** — either one you already exported and kept, or one you build now.
+
+  **There are no git tags in this repo**, so `git checkout v0.13.0` does not work. Find the
+  commit by what it contains instead, which also survives any future history rewrite:
+
+  ```bash
+  git log --all --format='%h %s' -S'0.13.0' -- VERSION   # the last hit is the 0.13.0 bump
+  git switch --detach <that hash> && pwsh build/build.ps1
+  ```
+
+  Import that bundle into a **scratch copy** of the workbook, export, then
+  `git switch main` and rebuild before doing anything else.
+  **If you have neither file, record this item UNTESTED rather than guessing** — a comparison
   against nothing is not a pass.
   *Expected:* the same flattening — every formula frozen, spills expanded to static values,
   formatting and conditional formatting intact.
