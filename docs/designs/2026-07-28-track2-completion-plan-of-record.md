@@ -51,10 +51,18 @@ previous has merged.
 | 7 | W6 — Workbook housekeeping | `2026-07-28-w6-workbook-plan.md` | 5 | 0.17.0 | v2.9.0 |
 | 8 | End-to-end validation | `2026-07-28-end-to-end-validation.md` | 0 | 1.0.0 | unchanged |
 
-28 new actions across W2–W6, plus W1's 7 = the 35 §3.6 counts. Ending catalog: **43
-listed actions** (15 shipped + 28). §3.6's "~48" counted four *Later* items that carry no
-wave; 43 is the number this plan actually delivers, and the difference is those unassigned
-items, not a scope cut.
+28 new actions across W2–W6, plus W1's 7 = the 35 §3.6 counts.
+
+**Ending total: 43 action ids** (15 shipped today + 28 from W2–W6). §3.6's "~48" is a
+different quantity, not a larger scope: it adds **13 catalog items** marked shipped-or-
+embedded to the 35 wave ids. Only 7 of those 13 are selectable actions — the other 6 are
+embedded helpers with no id of their own (`Core_Coerce`, `Core_FindFile`, the speed
+wrapper, the last-row finder, the error handler, the dated-filename convention). Counting
+ids against ids gives 43; counting catalog items against ids gives ~48. **Neither number
+is wrong and nothing is being cut** — the 8 *Later* items are unassigned in both.
+
+One bookkeeping note: `importexport.suggestTypes` is a shipped id that appears in no
+catalog entry, so the catalog alone under-counts today's actions by one.
 
 ---
 
@@ -162,6 +170,20 @@ is the only thing the owner runs, and it accumulates what each phase would have 
 Each phase appends its run-time-only claims to a running list in
 `docs/designs/2026-07-28-deferred-validation-log.md` as it goes, so phase 8 assembles rather
 than reconstructs.
+
+**The residual risk, stated plainly rather than argued away.** The four substitutes above do
+not close the run-time hole; they **postpone** it. None of them executes Excel. A build guard
+proves a guard fires, not that a macro works. A refusal the user can read proves the message
+exists, not that the precondition is detected correctly. A static read proves the code says
+what it appears to say. So through phases 1–7 **every wave builds on behaviour that has been
+reviewed but never observed**, and a defect in phase 1's chain halt would sit under five
+waves before phase 8 finds it — with the `bafb905` used-range fix already in that position
+today, unverified since the partial gate.
+
+That is a deliberate, owner-made trade of early detection for owner time, and it is the right
+call *given* that Excel cannot be driven on CI. It is recorded here so it stays a decision
+rather than becoming an assumption. **No phase may describe its run-time behaviour as
+verified.** Reviewed, yes. Verified, at phase 8.
 
 ### 3.6 What phase 8 already owes the owner
 
