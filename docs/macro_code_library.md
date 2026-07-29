@@ -8,14 +8,14 @@ Working VBA for every macro in `macro_catalog_plug_and_play.md`, as **standalone
 
 **How they're verified.** Statically: method signatures checked against Microsoft Learn (notably `TextToColumns` and `ExportAsFixedFormat`), syntax/structure reviewed, and the VBA gotchas respected. They are **not runtime-tested** — there's no Excel in the authoring environment. Test each in Excel before relying on it. Treat any hardcoded path/name (marked `' <-- set`) as a placeholder; in the real project these become config fields.
 
-**Conventions.** Put `Option Explicit` at the top of the module. Many snippets use `ActiveSheet`/`Selection` so you can test them fast — in production point them at explicit worksheets/ranges (the catalog's config-driven versions will). Where a routine is genuinely non-trivial (import with type coercion, full values-only export), your existing `FoodDashMacros.bas` already has the hardened version and is noted as such.
+**Conventions.** Put `Option Explicit` at the top of the module. Many snippets use `ActiveSheet`/`Selection` so you can test them fast — in production point them at explicit worksheets/ranges (the catalog's config-driven versions will). Where a routine is genuinely non-trivial (import with type coercion, full values-only export), the legacy `SetupImportExportMacros.bas` already has the hardened version and is noted as such.
 
 ---
 
 ## 1. Bring Data In
 
 ### Import files from a folder
-*Standard pattern (folder loop + copy). Type-aware hardened version: your `FoodDashMacros.ImportSourceData`.*
+*Standard pattern (folder loop + copy). Type-aware hardened version: `SetupImportExportMacros.ImportSourceData`.*
 ```vb
 Sub ImportFilesFromFolder()
     Dim folderPath As String, f As String
@@ -151,7 +151,7 @@ End Sub
 ## 2. Clean & Standardize
 
 ### Clear data rows, keep headers
-*Matches your `FoodDashMacros.ClearInputTabs` (single-sheet form).*
+*Matches `SetupImportExportMacros.ClearInputTabs` (single-sheet form).*
 ```vb
 Sub ClearDataKeepHeaders()
     Dim ws As Worksheet, lastRow As Long, lastCol As Long
@@ -394,7 +394,7 @@ End Sub
 ## 4. Match & Enrich
 
 ### Refresh a reference/master table (column-mapped)
-*Compact form of your `FoodDashMacros.UpdateRefMaster`.*
+*Compact form of `SetupImportExportMacros.UpdateRefMaster`.*
 ```vb
 Sub RefreshRefMaster()
     Dim srcPath As String, wbSrc As Workbook, wsSrc As Worksheet, wsDst As Worksheet
@@ -624,7 +624,7 @@ End Sub
 ## 7. Get It Out
 
 ### Export a values-only snapshot (.xlsx)
-*Compact form. Full spill/array + conditional-format handling: your `FoodDashMacros.ExportDashboard`.*
+*Compact form. Full spill/array + conditional-format handling: `SetupImportExportMacros.ExportDashboard`.*
 ```vb
 Sub ExportValuesSnapshot()
     Dim newWb As Workbook, ws As Worksheet, outPath As String
@@ -859,7 +859,7 @@ End Sub
 ```
 
 ### Speed wrapper (use inside any of the above)
-*The pattern every action should wrap in; already used throughout your `FoodDashMacros.bas`.*
+*The pattern every action should wrap in; already used throughout `SetupImportExportMacros.bas`.*
 ```vb
 Sub SpeedOn()
     Application.ScreenUpdating = False
