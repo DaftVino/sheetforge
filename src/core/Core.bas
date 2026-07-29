@@ -787,6 +787,46 @@ Public Function Core_SheetExists(ByVal nm As String) As Boolean
     On Error GoTo 0
 End Function
 
+' Is this sheet one the engine owns? Packages ask before treating a sheet as user
+' data - combining the config store into a master would be meaningless at best.
+'
+' It lives in Core because the names ARE Core's: the seven constants below are
+' Private Const in this module, and a package that hardcodes its own copy is one
+' Core rename away from silently folding the Setup sheet into a user's data.
+'
+' The generated button pages are PANEL_BASE & <n> - "Macros 1", "Macros 2". The
+' test requires a NUMERIC tail, not just the prefix: a plain prefix test also
+' swallows a user's own sheet called "Macros Data". The accepted trade is that a
+' user sheet literally named "Macros 999" is treated as the engine's, which beats
+' enumerating the generated pages to find out how many exist.
+'
+' No Trim: trimming first means a user's own " Setup " is read as the engine's and
+' silently dropped. The engine's own sheets carry no stray spaces.
+Public Function Core_IsEngineSheet(ByVal nm As String) As Boolean
+    Dim tail As String
+    Select Case LCase(nm)
+        Case LCase(SETUP_SHEET), LCase(ADMIN_SHEET), LCase(CONFIG_SHEET), _
+             LCase(CONFIG_STAGE), LCase(PACKAGES_SHEET), LCase(MACRO_SHEET), _
+             LCase(HOME_SHEET)
+            Core_IsEngineSheet = True
+            Exit Function
+    End Select
+    If LCase(Left$(nm, Len(PANEL_BASE))) = LCase(PANEL_BASE) Then
+        tail = Mid$(nm, Len(PANEL_BASE) + 1)
+        If Len(tail) > 0 Then Core_IsEngineSheet = IsAllDigits(tail)
+    End If
+End Function
+
+Private Function IsAllDigits(ByVal s As String) As Boolean
+    Dim i As Long, ch As String
+    If Len(s) = 0 Then Exit Function
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If ch < "0" Or ch > "9" Then Exit Function
+    Next i
+    IsAllDigits = True
+End Function
+
 ' "TabName!M2:M12", or "'TabName Data'!M2:M12" when the sheet name needs quoting.
 ' Range.Address omits the sheet name BY DESIGN, so every message that names a
 ' range must qualify it here or a cross-tab run is indistinguishable from a
