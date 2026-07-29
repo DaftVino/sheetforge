@@ -316,10 +316,19 @@ These are the items where a failure costs you something you cannot get back.
 - [ ] **3.10 — `Export Dashboard (.xlsx)` still produces the same file it always did.**
   Run it on a workbook containing a dynamic-array spill, a legacy CSE array, and ordinary
   formulas. Compare against a file exported by v0.13.0 or earlier. **You need that older file
-  before you start** — either one you already exported and kept, or one you make now:
-  `git stash && git checkout v0.13.0 && pwsh build/build.ps1`, import that bundle into a
-  scratch copy of the workbook, export, then `git checkout feat/macros-home` and rebuild.
-  **If you have neither, record this item UNTESTED rather than guessing** — a comparison
+  before you start** — either one you already exported and kept, or one you build now.
+
+  **There are no git tags in this repo**, so `git checkout v0.13.0` does not work. Find the
+  commit by what it contains instead, which also survives any future history rewrite:
+
+  ```bash
+  git log --all --format='%h %s' -S'0.13.0' -- VERSION   # the last hit is the 0.13.0 bump
+  git switch --detach <that hash> && pwsh build/build.ps1
+  ```
+
+  Import that bundle into a **scratch copy** of the workbook, export, then
+  `git switch main` and rebuild before doing anything else.
+  **If you have neither file, record this item UNTESTED rather than guessing** — a comparison
   against nothing is not a pass.
   *Expected:* the same flattening — every formula frozen, spills expanded to static values,
   formatting and conditional formatting intact.
@@ -505,34 +514,64 @@ These are the items where a failure costs you something you cannot get back.
 
 ### New in this phase — the Finalize reminder
 
-- [ ] **4.29 — On a fresh import with everything `Off`, the reminder line is BLANK.**
-  Import into a clean workbook, run `Core_BuildSetup`, and look at the row directly above the
-  `Action` / `Availability` / `Placement` headers.
-  *Expected:* **empty**. A `Setup Menu` link sits beside it; that is always there.
-  *Failure:* the reminder text showing when nothing is switched on.
+**The reminder lives in `D1`**, at the top of the Setup tab beside the `Toolkit Setup` title —
+not on the row above the action catalog, which is where it was before v0.18.0. It was moved
+there because column D of that old row holds the `Setup Menu` link, leaving column C no empty
+neighbour to overflow into, so the text was clipped at 34 characters no matter what.
+
+- [ ] **4.29 — On a fresh import with everything `Off`, `D1` is BLANK.**
+  Import into a clean workbook, run `Core_BuildSetup`, and click cell **`D1`**.
+  *Expected:* the cell looks **empty**, and the formula bar shows a formula starting `=IF(`.
+  *Failure:* the reminder text showing when nothing is switched on — or an empty formula bar,
+  which means no formula was written at all.
   *Why:* this is the item that proves the formula excludes blanks and matches `Off`
   correctly. If it fires here it fires forever, from first import, and means nothing.
-  **Run 4.29 and 4.30 as a pair, in that order.** On its own 4.29 would pass on a build that
-  never wrote the formula at all — a blank cell is also what "no formula" looks like. 4.30 is
-  what proves the cell is a live formula; 4.29 is what proves it is the *right* one.
+  **Checking the formula bar is what makes this item worth running.** A blank cell alone is
+  also exactly what "no formula was ever written" looks like, so without that check the item
+  passes on a broken build. 4.30 is the other half of the proof.
 
-- [ ] **4.30 — Setting one action to `Button` makes the reminder appear immediately, before
-  Finalize.** Change a single Availability dropdown and do not click anything else.
-  *Expected:* the line appears **as soon as the dropdown changes**, telling you to click
-  `Finalize Setup Tab` and then `Create Setup Tab`.
+- [ ] **4.30 — Setting one action to `Button` makes the reminder appear in `D1` immediately,
+  before Finalize.** Change a single Availability dropdown and do not click anything else.
+  *Expected:* the text appears in `D1` **as soon as the dropdown changes**.
   *Failure:* nothing appears until after Finalize — which would mean it is static text, not a
   formula, and the whole point of it is gone.
 
-- [ ] **4.31 — Setting that action back to `Off` makes the line disappear again.**
+- [ ] **4.31 — Setting that action back to `Off` empties `D1` again.**
   *Failure:* the text persisting once shown.
 
-- [ ] **4.32 — The `Setup Menu` link beside the reminder opens the Setup Menu tab.**
+- [ ] **4.32 — The `Setup Menu` link on the row above the action catalog opens the Setup Menu
+  tab.** That link stayed where it was when the reminder moved to `D1`; this item is what
+  proves the move did not take it along.
 
 - [ ] **4.33 — Finalize still works with the reminder row present.**
   *Expected:* Finalize reports the same **51 actions** and completes normally.
   *Failure:* a wrong action count, or Finalize reporting it cannot find a block.
-  *Why:* the reminder inserts a row above the action catalog. It carries no machine key
-  precisely so nothing can mistake it for a block — this item is what proves that held.
+  *Why:* the row above the action catalog is still reserved and still carries no machine key,
+  precisely so nothing can mistake it for a block — this item is what proves that held even
+  though the reminder text no longer sits on it.
+
+- [ ] **4.33a — The reminder is fully readable, and tells you to Finalize TWICE.**
+  Switch one action to `Button` and read `D1` without widening any column or clicking into the
+  cell.
+  *Expected:* the whole sentence is visible, in **bold dark red**, and it names three clicks in
+  order: `Finalize Setup Tab`, then `Create Setup Tab`, then `Finalize Setup Tab` **again**.
+  *Failure:* text cut off at the edge of column D; or a version that stops after
+  `Create Setup Tab` and never mentions finalizing a second time.
+
+  **How to tell a pass from a near-pass, since both are readable.** Row 1 must still be a
+  **single line tall** — the same height as every other row on the sheet — with the sentence
+  running unbroken to the right, straight across where the borders of E, F, G and H would be.
+  That is spill.
+  *Failure, even though you can read it:* row 1 is **two or three lines tall** and the text is
+  stacked inside the width of column D. That is wrap, and it means someone set `WrapText` on the
+  cell. It looks fine at today's length and silently clips the moment the sentence grows, which
+  is the original defect coming back by another route.
+
+  *Why:* both halves of this item are the defect being fixed. The old text taught two of the
+  loop's four steps and went quiet exactly where the user has new fields in front of them and no
+  idea that answering them is not enough. And the old cell had the `Setup Menu` nav link
+  immediately to its right — Excel spills overflow text only across **empty** cells, so it was
+  clipped at 34 characters no matter what. This one is legible only because `E1:H1` are empty.
 
 ### New in this phase — the header notes
 
@@ -568,6 +607,69 @@ These are the items where a failure costs you something you cannot get back.
   is later `AutoFit`, given the row directly above every header is merged B:E. Nothing in this
   codebase has attached a note to anything before.
 
+### New in this phase — option bands name their macro
+
+- [ ] **4.38 — An option band says which macro its fields belong to.**
+  Set **Split One Column Into Many** to `Button`, Finalize, then Create Setup Tab. Scroll to the
+  `Clean & Standardize` band and read the header above the two split fields.
+  *Expected:* it reads **`Split One Column Into Many  -  SPLIT COLUMN`** — the macro's caption
+  first, then the band title, separated by a dash. The band title is upper case; it was the one
+  mixed-case section title in the toolkit until v0.18.0 and was normalised in the same change.
+  *Failure:* a bare `SPLIT COLUMN`, a mixed-case `Split Column`, or a header naming a macro you
+  did not switch on.
+  *Why:* you just picked from 51 captions, and a band named after a topic gives you nothing to
+  match that choice against.
+
+- [ ] **4.39 — A band shared by several macros names every one of them.**
+  Set **all four** Protect & Back Up actions to `Button` — `Backup Now (Timestamped Copy)`,
+  `Snapshot Before a Risky Step`, `Save Month-End Version`, `Archive a Generated Output` — then
+  Finalize and Create Setup Tab. Those are the full captions as they appear in the action
+  catalog.
+  *Expected:* the `BACKUP & SNAPSHOT` header lists **all four captions** before the title, and
+  **every caption is readable**. The row will be two lines tall.
+  *Failure:* a truncated list, an "and 3 more", or a caption cut off at the bottom of the row.
+  *Why the row height matters:* band header rows are merged B:E, and **Excel's AutoFit does not
+  resize a row containing merged cells** — so the engine sets the height itself from a character
+  count (roughly 115 characters per line). This is the longest header the toolkit can currently
+  produce, at about 132 characters, so it is the case that tests whether that estimate is
+  generous enough. A caption clipped at the bottom edge means the estimate is short, not that
+  the prefix is wrong.
+  *Why:* one field there is used by all four actions. A header that silently drops one tells
+  you a setting reaches fewer macros than it does, which is the opposite of the point.
+
+- [ ] **4.40 — Turning a macro off removes it from the header, without removing the band.**
+  From 4.39's state, set **Archive a Generated Output** back to `Off`, Finalize, Create Setup
+  Tab.
+  *Expected:* `BACKUP & SNAPSHOT` now names the **three** remaining captions. The `ARCHIVE`
+  band, whose only field belongs to the action you just switched off, has moved down into the
+  collapsed `SETTINGS FOR ACTIONS YOU HAVEN'T TURNED ON` band.
+  ***This is the item that proves the header is computed from what is actually on screen.***
+  The prefix is built by re-running the same in-use test the field rows are filtered by. If it
+  were built from what the package *declares* instead, this header would keep naming all four
+  forever — and it would be wrong in the one direction a user cannot detect, because the macro
+  it names is one they deliberately turned off.
+
+- [ ] **4.41 — A macro set to `Chains only` is still named on its band.**
+  Set **Split One Column Into Many** to `Chains only` — not `Button` — then Finalize and Create
+  Setup Tab.
+  *Expected:* the `SPLIT COLUMN` band is **present** in the main area with its two fields, and
+  its header still reads `Split One Column Into Many  -  SPLIT COLUMN`.
+  *Failure:* the band missing, dropped into the collapsed `SETTINGS FOR ACTIONS YOU HAVEN'T
+  TURNED ON` band, or present with its caption gone from the header.
+  *Why:* `Chains only` gives the action no button but a chain can still run it — so its options
+  still have to be answerable, and the header still has to say whose they are. This is the case
+  where "is it switched on?" and "does it have a button?" give different answers, and the code
+  has to use the first. Getting it wrong the other way hides the settings for a macro that can
+  still run, and the user has nowhere to set them.
+
+**No item covers a band whose fields have an empty `usedBy`**, and that is deliberate rather
+than an omission. Every one of the 40 field declarations in the toolkit names at least one
+action, so a band with no macro of its own cannot occur today — an item for it could not be
+executed. The engine still handles the case (an empty list yields no prefix and no orphaned
+separator) because a future field may omit `usedBy`; it is simply not reachable to test. `GENERAL`
+is **not** an example: both `GENERAL` bands tie every field to specific export actions, so they
+do get a prefix.
+
 ---
 
 ## 5. Appearance — carried over from track 1, still unrun
@@ -584,7 +686,10 @@ These are the items where a failure costs you something you cannot get back.
   **Two cannot be run against the bundle you just imported and need their own build first.**
   Hardening 3.1 needs a deliberately hostile `PkgClean` declaring the reserved id
   `core.legacy`: edit a copy, run `pwsh build/build.ps1`, confirm the build **fails**, discard
-  the edit. Reorder 3 needs the v0.6.0 bundle rebuilt from commit `812d88c`.
+  the edit. Reorder 3 needs the v0.6.0 bundle rebuilt from an old commit — that gate document
+  now tells you how to **find** it (`git log -S'0.6.0' -- VERSION`) rather than quoting a hash,
+  because the history was rewritten to strip client jargon before this repo went public and
+  every hash quoted in these documents before that is dead.
   **Do these two last and rebuild from `main` afterwards** — both leave a bundle you do not
   want to keep.
 

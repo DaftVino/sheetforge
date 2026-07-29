@@ -26,15 +26,50 @@ All notable changes to this project are documented here. Format: [Keep a Changel
   Alphabetically, and Add A Back To Contents Link To Every Sheet complete the catalog's planned
   work.
 
-- **Setup now asks you to Finalize as soon as a choice changes.** A reminder above the action
-  catalog gives the two clicks needed to apply the change. It is driven by a formula rather
-  than static text, so it appears as soon as an action is switched on, before any macro has run.
+- **Setup now asks you to Finalize as soon as a choice changes**, and tells you the whole loop.
+  A bold red reminder in `D1` names all three clicks in order: Finalize, then Create Setup Tab
+  to reveal the new option fields, then **Finalize again** to save the answers you just typed
+  into them. It is driven by a formula rather than static text, so it appears the moment an
+  action is switched on, before any macro has run.
+
+  **It sits in `D1` rather than above the action catalog, and that is the whole reason it is
+  readable.** On the old row, column D holds the `Setup Menu` link — and Excel spills overflow
+  text only across *empty* cells, so a 34-character column with an occupied neighbour clipped a
+  180-character sentence with no recourse. Widening the column would have distorted every other
+  block on the sheet without removing the wall. `D1` has `E1:H1` empty beside it.
 
 - **Four Setup headers now explain themselves on hover.** Notes on Availability, Placement,
   Steps, and Column types put the meaning of those columns beside the choices, without making
   you keep the guide open next to the workbook.
 
+- **Every option band now names the macro whose options it holds.** A band header read
+  `SPLIT COLUMN`; it now reads `Split One Column Into Many  -  SPLIT COLUMN`. You have just
+  picked from 51 captions in the action catalog, and a band named after a topic gave you nothing
+  to match that choice against — `EMAIL` in particular could as easily have been a setting
+  shared by every export.
+
+  **A band shared by several macros names all of them, and the list tracks what is switched
+  on.** One field can serve several actions — the backup folder serves all four backup macros —
+  so the header tests each action on its own rather than naming everything the field mentions.
+  Turn one off and it leaves the header. A macro set to `Chains only` stays named, because a
+  chain can still run it and its options still have to be answerable. Building the list from
+  what a package *declares* would have been simpler and wrong in the one direction a user
+  cannot detect: the header would go on advertising a macro they had deliberately disabled and
+  can see no button for.
+
+- **`SPLIT COLUMN` is now upper case like every other band title.** It was the toolkit's one
+  mixed-case section heading, which only became visible once the headings started carrying
+  macro names.
+
 ### Changed
+
+- **Help text no longer teaches the `Sheet!Cell` placement form with a tab name only its author
+  recognised.** The example was `TabName!B4` — three letters left over from the workbook this
+  toolkit grew out of — sitting in the one example meant to teach the syntax. It is now
+  `TabName!B4`, which reads as a placeholder. The same rename runs through the code comments and
+  through `spec/contract.md`'s illustrative examples; no normative clause changed, since none of
+  them ever depended on the placeholder's spelling. Example folder paths went from `C:\Close\…`
+  to `C:\Reports\…` for the same reason.
 
 - **Chain steps are now written as a comma-separated list of ids, such as `clean.dupes,
   clean.trim`.** The parser never splits on a comma when a line contains a bracket, so a legacy

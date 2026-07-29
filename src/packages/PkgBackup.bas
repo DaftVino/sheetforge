@@ -42,7 +42,7 @@ Public Sub PkgBackup_Manifest(reg As Object)
     Core_AddField reg, "k_backup_folder", "Folder to write backup and snapshot files into", "text", "", _
         "simple", _
         "Leave blank to use the folder this workbook is saved in - that is the usual answer. " & _
-        "Otherwise a full path, e.g. C:\Close\Backups. Backups go in a 'Backup' subfolder here, " & _
+        "Otherwise a full path, e.g. C:\Reports\Backups. Backups go in a 'Backup' subfolder here, " & _
         "snapshots in 'Backup\Snapshots', and archived files in 'Archive\yyyy_mm'.", _
         "backup.timestamped_copy,backup.snapshot,backup.month_end_version,backup.archive_output"
     Core_AddField reg, "k_backup_base", "Base name for a backup file", "text", "Backup", _
