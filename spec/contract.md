@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.7.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.8.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -968,6 +968,27 @@ its first field.
 |---|---|---|
 | `enrich.join` | Join / Enrich Columns | Prompt for a target range and a reference range, each with its header row included and treated as such - there is no "does this have a header" branch. Prompt for the ONE matching column on each side (a multi-column answer MUST be refused, not narrowed to its first entry) and which reference column(s) to copy in. Match by building an in-memory dictionary keyed on the reference's matching column, then scanning the target once - an implementation MUST NOT re-scan the reference table per target row (dictionary lookup, not nested iteration). Key comparison MUST be exact aside from leading/trailing whitespace and case; an implementation MUST NOT normalize keys in any way that could make two distinct source values compare equal (e.g. collapsing internal whitespace or stripping characters). A reference key seen more than once MUST resolve to its FIRST occurrence; the number of DISTINCT reference keys that had at least one duplicate MUST be counted and reported, never silently overwritten and never a reason to refuse the whole action. A target row matching no reference key, or whose own key is blank, MUST be left blank in the new columns and counted as unmatched, not treated as an error. New columns are written immediately to the right of the target range, headed with the reference table's own header text, and only after the implementation confirms every cell in that exact destination block is empty and the user has confirmed the write; if any cell there is already occupied, the action MUST refuse rather than overwrite it. |
 | `enrich.mapped_columns` | Add Mapped Columns | Prompt only for the target range; the reference sheet, its matching column, and which columns to add come from `k_enrich_lookup_sheet` / `k_enrich_lookup_key` / `k_enrich_mapped`. MUST share the match implementation with `enrich.join` - same first-wins-and-counted-by-distinct-key duplicate-key rule, same key normalization policy, same unmatched-row rule, same append-to-the-right placement guarded by the same empty-destination check - differing only in where its five inputs come from. MUST refuse if the configured reference sheet does not exist, if the configured key does not resolve on the reference sheet, or if `k_enrich_mapped` is empty or none of its rows resolve to a real reference column. |
+### Package `backup` — "Protect & Back Up" (v1.0.0, contract v2.8.0)
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_backup_folder` | text | simple | *(blank)* | Root folder for every action in this package. **Blank means the deployment's data location** (section 9), which is the common case. Backups land in a `Backup` subfolder here, snapshots in `Backup\Snapshots`, and archived files in `Archive\yyyy_mm`. `usedBy` all four actions. |
+| `k_backup_base` | text | simple | `Backup` | Base name used inside a timestamped or month-end file name. `usedBy` `backup.timestamped_copy`, `backup.month_end_version`. |
+| `k_backup_offset` | int | advanced | `0` | Days to shift today's date before computing the prior month end. Same convention as `k_export_offset` (package `importexport`): a negative value looks back further than today. `usedBy` `backup.month_end_version`. |
+| `k_backup_snapshot_label` | text | simple | *(blank)* | Short tag appended to a snapshot's file name, e.g. `before Import`. Blank means no tag. `usedBy` `backup.snapshot`. |
+| `k_backup_snapshot_keep` | int | advanced | `20` | How many of the most recent snapshots to keep. On each new snapshot, older ones past this count are deleted automatically; nothing else in the folder is touched. `usedBy` `backup.snapshot`. |
+| `k_backup_archive_prefix` | file | simple | *(blank)* | Name-prefix of the generated file this action relocates, resolved the same way every `file` field is (section 3): the newest file in the deployment's data location whose name starts with this text. `usedBy` `backup.archive_output`. |
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `backup.timestamped_copy` | Backup Now (Timestamped Copy) | Save a full copy of this workbook, exactly as it stands at the moment the action runs (including any edits not yet saved to the main file), into `<root>\Backup\` with a datetime-stamped name. This workbook's own name, path, and unsaved-changes state MUST be unaffected. MUST refuse rather than overwrite if the computed destination name already exists. |
+| `backup.snapshot` | Snapshot Before a Risky Step | As `backup.timestamped_copy`, into `<root>\Backup\Snapshots\`, named with a full timestamp and an optional configured label. After a successful save, prune that folder to the configured keep-count by file modified time, oldest first, touching only files this action's own naming pattern produced. **This action provides no restore.** A conforming implementation MUST NOT claim or imply an automatic restore capability for the file it writes. |
+| `backup.month_end_version` | Save Month-End Version | As `backup.timestamped_copy`, named for the last day of the calendar month before the reference date's month (`k_backup_offset` days from today), independent of which day of that month the action runs on. |
+| `backup.archive_output` | Archive a Generated Output | Locate the newest file matching `k_backup_archive_prefix` (the `file` kind rule). MUST refuse if that file is currently open in this Excel instance rather than attempting to move it. Move it into `<root>\Archive\yyyy_mm\` (the current date's year and month), creating that folder if it does not exist. MUST refuse rather than overwrite if a file of that name already exists at the destination. |
 ---
 
 ## 9. Platform-abstraction appendix
@@ -1032,6 +1053,11 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.8.0 (additive):** a new package `backup` with six fields and four actions (§8). The
+  `backup` domain itself is not new - section 7 already listed it `active` ahead of any package
+  using it - so this bullet adds only the package, not the domain. **Additive by the two-axes
+  rule:** no existing `key`, action `id`, `kind`, or encoding changes meaning; every prior stored
+  configuration keeps working exactly as it did. `SCHEMA_VER` does **not** move.
 - **v2.7.0 (additive):** two new packages, `summarize` (four actions, no fields) and `enrich`
   (three fields, two actions). Both domains were already listed `active` in §7's vocabulary
   table before this version - this bullet backs that listing with a shipping package, and
