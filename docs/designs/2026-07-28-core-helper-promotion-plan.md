@@ -3,16 +3,25 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development`
 > to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give Core the twelve helpers W2–W6 would otherwise each re-invent, and leave every
-package private carrying its package prefix — so the flat namespace stops being a landmine
-and `CLAUDE.md` rule 4 is true rather than aspirational.
+**Goal:** Give Core the fourteen helpers W2–W6 would otherwise each re-invent, and leave
+every package private carrying its package prefix — so the flat namespace stops being a
+landmine and `CLAUDE.md` rule 4 is true rather than aspirational.
 
-**Architecture:** A pure refactor. Twelve helpers move from `PkgClean` and `PkgImport` into
-Core as `Core_*`; their old call sites change name only. Three helpers whose prompt text was
+**Architecture:** Almost a pure refactor. **14 new `Core_*` procedures**, plus one
+(`IsAllDigits`, added by phase 1) renamed and published as `Core_IsDigits`. Their old call
+sites in `PkgClean` and `PkgImport` change name only. Three helpers whose prompt text was
 baked to one caller gain a parameter for it. Every remaining unprefixed package private is
-renamed to carry its prefix. **No action changes behaviour, no action is added, and no
-contract value moves** — the contract calls these names "an Excel/VBA detail, not part of the
-portable contract" (§7, last bullet), so there is nothing here for `spec/contract.md` to say.
+renamed to carry its prefix. **No contract value moves** — the contract calls these names "an
+Excel/VBA detail, not part of the portable contract" (§7, last bullet), so there is nothing
+here for `spec/contract.md` to say.
+
+**Three behaviour changes, and they are the whole list.** Everything else must be a verbatim
+move; if a diff changes anything else a user could see, it is wrong.
+
+1. `Core_AskHasHeader`'s dialog title stops being hardcoded `"Remove Duplicates"`.
+2. `Core_AskCols`'s prompt and title stop being hardcoded to Remove Duplicates.
+3. `Core_DestUsable` **also refuses a name taken by a chart sheet**, which the version it
+   replaces did not — see Task 2 Step 3.
 
 **Tech stack:** VBA (Excel/Windows, one concatenated `.bas`), PowerShell for the build, Node
 for the syntax check. No test framework — see *Verification*.
@@ -121,7 +130,7 @@ That is why this phase carries no run-time-only claims into the phase-8 validati
 
 | File | Change |
 |---|---|
-| `src/core/Core.bas` | **+12 `Core_*` helpers**, in two new sections; `IsAllDigits` (phase 1) becomes `Core_IsDigits`. |
+| `src/core/Core.bas` | **+14 `Core_*` procedures**, in two new sections; `IsAllDigits` (phase 1) becomes `Core_IsDigits`. Net `Function` count rises by 14. |
 | `src/packages/PkgClean.bas` | 8 helpers deleted, call sites renamed; 3 remaining privates gain the `PkgClean_` prefix. |
 | `src/packages/PkgImport.bas` | 5 helpers deleted or shrunk, call sites renamed; the in-file duplicated sheet-creation recipe collapses to one `Core_NewSheet` call. |
 | `src/packages/PkgImportExport.bas` | 5 privates gain the `PkgImportExport_` prefix. |
@@ -191,8 +200,9 @@ Public Function Core_AskHasHeader(rng As Range, ByRef hasHeader As Boolean, _
     Dim ans As VbMsgBoxResult
     ans = MsgBox("Does " & Core_RangeRef(rng) & " include a header row?" & vbCrLf & vbCrLf & _
                  "Yes  -  the first row is a title row: it is kept, and never " & _
-                 "treated as data." & vbCrLf & _
-                 "No  -  every row is data, including the first one.", _
+                 "compared against the data." & vbCrLf & _
+                 "No  -  every row is data: all of them are compared, including " & _
+                 "the first one.", _
                  vbQuestion + vbYesNoCancel + vbDefaultButton1, title)
     If ans = vbCancel Then Exit Function
     hasHeader = (ans = vbYes)
@@ -263,10 +273,13 @@ End Function
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: **FAIL**, and this is the point. The duplicate-procedure guard is silent here
-(`Core_AskRange` and `AskRange` are different names), so the build should PASS with `Core + 3
-package(s)` and `Function` up by four. If it instead reports a duplicate, a name collision
-was missed — stop and re-check rather than renaming around it.
+Expected: **exit 0**, `Core + 3 package(s)`, no diagnostics, `Function` up by four.
+
+Nothing has been deleted yet, so `PkgClean` still holds its own `AskRange` alongside Core's
+new `Core_AskRange`. **That is intended, and the build passing is the proof the new names
+collide with nothing** — the duplicate-procedure guard compares whole names, and
+`Core_AskRange` and `AskRange` are different. If it *does* report a duplicate, a collision
+was missed in the pre-flight grep; stop and find it rather than renaming around it.
 
 - [ ] **Step 3: Commit**
 
@@ -286,9 +299,11 @@ git commit -m "feat(core): Core_AskRange, Core_AskHasHeader, Core_AskCols, Core_
 
 **Interfaces:**
 - Consumes: `Core_Refuse` (phase 1), `Core_SheetExists` (`:782`), `Core_FileName` (`:902`).
+- Consumes additionally: `Core_IsEngineSheet` (phase 1) — `Core_DestUsable` refuses an
+  engine-owned name with it.
 - Produces: `Core_CleanText`, `Core_IsBlank`, `Core_IsAlpha`, `Core_IsDigits`,
-  `Core_NarrowToUsed`, `Core_DestUsable`, `Core_NewSheet`, `Core_SafeSheetName`,
-  `Core_ResolveFolder`, `Core_FolderExists`.
+  `Core_NarrowToUsed`, `Core_BadSheetChars`, `Core_DestUsable`, `Core_NewSheet`,
+  `Core_SafeSheetName`, `Core_ResolveFolder`, `Core_FolderExists`.
 
 - [ ] **Step 1: Publish phase 1's `IsAllDigits`**
 
@@ -376,12 +391,20 @@ End Function
 '
 ' Refuses via Core_Refuse, so a chain STOPS here rather than running its remaining
 ' steps against a sheet this one did not produce (contract section 6).
+' fieldLabel is the Setup field the caller reads its name from, quoted back to the
+' user verbatim. It is a parameter and not generic text because the message it
+' appears in is the one that has to be actionable: "fill in the destination name"
+' sends a user hunting down a Setup tab, and "fill in 'Name for the combined sheet
+' this creates'" does not. The version this replaces hardcoded one caller's label.
 Public Function Core_DestUsable(ctx As Object, ByVal destName As String, _
-                                ByVal title As String) As Boolean
-    Dim bad As String, i As Long
+                                ByVal title As String, _
+                                Optional ByVal fieldLabel As String = "") As Boolean
+    Dim bad As String, i As Long, whichField As String, s As Object
+    whichField = fieldLabel
+    If Len(whichField) = 0 Then whichField = "the destination sheet name"
     If Len(destName) = 0 Then
         Core_Refuse ctx, "No name is set for the sheet this creates." & vbCrLf & vbCrLf & _
-               "Fill the destination name in on the Setup tab, Finalize, and run this " & _
+               "Fill in '" & whichField & "' on the Setup tab, Finalize, and run this " & _
                "again." & vbCrLf & vbCrLf & "Nothing has been changed.", title
         Exit Function
     End If
@@ -401,7 +424,33 @@ Public Function Core_DestUsable(ctx As Object, ByVal destName As String, _
             Exit Function
         End If
     Next i
-    If Core_SheetExists(destName) Then
+    ' A name the ENGINE owns is refused even though no such sheet exists yet.
+    ' Contract section 7 reserves "Macros", every "Macros <n>", "Macros Home",
+    ' "_Config" and "_Config_staged", and the engine DELETES those names
+    ' unconditionally with alerts suppressed on every rebuild. So a user who sets
+    ' the destination to "Macros 3" gets a sheet that builds, fills with a month of
+    ' combined data, and is destroyed without a prompt by the next Finalize. The
+    ' exists-check above cannot catch it: the name is free right up until the moment
+    ' it matters. Core_IsEngineSheet already knows the whole list.
+    If Core_IsEngineSheet(destName) Then
+        Core_Refuse ctx, "'" & destName & "' is a name the macro toolkit uses for its own " & _
+               "sheets, so it cannot be used for your data." & vbCrLf & vbCrLf & _
+               "A sheet by this name would be deleted without warning the next time the " & _
+               "Setup tab is finalized. Pick a different name." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", title
+        Exit Function
+    End If
+
+    ' ThisWorkbook.Sheets, NOT Core_SheetExists. Core_SheetExists looks only at
+    ' Worksheets, so a CHART sheet holding this name passes the check and then
+    ' Core_NewSheet's rename raises 1004 - after Worksheets.Add has already put an
+    ' empty sheet in the workbook. The user gets an engine error and a stray "Sheet1"
+    ' from an action whose entire promise is that it changes nothing when it refuses.
+    ' Sheets covers every sheet type; a name is taken or it is not.
+    On Error Resume Next
+    Set s = ThisWorkbook.Sheets(destName)
+    On Error GoTo 0
+    If Not s Is Nothing Then
         Core_Refuse ctx, "A sheet named '" & destName & "' already exists in this workbook, " & _
                "and this action will not overwrite it." & vbCrLf & vbCrLf & _
                "Rename or delete that sheet, then run " & title & " again." & vbCrLf & vbCrLf & _
@@ -417,11 +466,35 @@ End Function
 '
 ' Written once here because the same two lines were repeated verbatim at two
 ' places inside PkgImport, and four more waves each need a destination sheet.
+'
+' The rename is trapped and rolled back. Add-then-rename is two operations, and
+' the rename is the one that can fail on a name Core_DestUsable approved - a sheet
+' created by another macro in the same second, a name Excel rejects for a reason
+' the validator does not model. Without the rollback the failure leaves a stray
+' empty "Sheet1" behind and the error surfaces from an action that reported nothing.
+' The original error is re-raised, so the caller's Core_Fail still reports the real
+' cause rather than a swallowed one.
 Public Function Core_NewSheet(ByVal destName As String) As Worksheet
-    Dim ws As Worksheet
+    Dim ws As Worksheet, eNum As Long, eDesc As String
     Set ws = ThisWorkbook.Worksheets.Add( _
         After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+
+    On Error Resume Next
     ws.name = destName
+    eNum = Err.Number
+    eDesc = Err.Description
+    On Error GoTo 0
+
+    If eNum <> 0 Then
+        Application.DisplayAlerts = False
+        On Error Resume Next
+        ws.Delete
+        On Error GoTo 0
+        Application.DisplayAlerts = True
+        Err.Raise eNum, "Core_NewSheet", _
+            "Could not name the new sheet '" & destName & "': " & eDesc
+        Exit Function
+    End If
     Set Core_NewSheet = ws
 End Function
 
@@ -679,10 +752,15 @@ one shape another package would want.
 - [ ] **Step 2: Prove no unprefixed private remains anywhere**
 
 ```bash
-grep -nE '^\s*Private\s+(Sub|Function)\s+' src/packages/*.bas | grep -vE 'Private\s+(Sub|Function)\s+Pkg'
+grep -nE '^\s*Private\s+(Static\s+)?(Sub|Function|Property\s+(Get|Let|Set))\s+' src/packages/*.bas \
+  | grep -vE '(Sub|Function|Get|Let|Set)\s+Pkg'
 ```
 
 Expected: **no output.** Every private in every package file now begins `Pkg`.
+
+**The `Property` and `Static` arms are in this grep because they are in the Task 6 guard.**
+A pre-flight check narrower than the guard it precedes reports clean and then fails the
+build, which is the worst of both.
 
 - [ ] **Step 3: Build, syntax-check, commit**
 
@@ -716,8 +794,17 @@ the build can answer on every run, forever. A checklist answers it once, if some
 # fails a build for a collision whose cause is invisible in the failing file. This
 # says so at the point the name is introduced instead. Core is exempt: it IS the
 # shared namespace, and its privates are the ones packages must not shadow.
+#
+# Enumerated from disk, NOT from $pkgFiles. $pkgFiles honours -Packages, so a
+# `build.ps1 -Packages PkgImportExport` would not look at PkgClean at all - and a
+# guard that only fires on a full build is a guard someone will route around
+# without meaning to. $asciiCandidates is built the same way, for the same reason.
+$prefixCandidates = @(
+    Get-ChildItem -LiteralPath $pkgDir -Filter 'Pkg*.bas' | Sort-Object Name |
+        ForEach-Object { $_.FullName }
+)
 $prefixProblems = New-Object System.Collections.ArrayList
-foreach ($f in $pkgFiles) {
+foreach ($f in $prefixCandidates) {
     $leaf = Split-Path $f -Leaf
     if ($leaf -notmatch '^(Pkg[A-Za-z0-9]+)\.bas$') { continue }
     $expected = $matches[1] + '_'
@@ -756,16 +843,43 @@ is incomplete — fix that rather than loosening the guard.
 
 A guard that has never failed is not known to work.
 
+Inject into a **scratch file**, never into a tracked one. The obvious version of this test
+appends to `PkgClean.bas` and reverts with `git checkout -- src/packages/PkgClean.bas`,
+which throws away every uncommitted change in that file — including the ones Task 3 just
+made if they are not yet committed.
+
 ```bash
-printf '\nPrivate Function TotallyUnprefixed() As Boolean\nEnd Function\n' >> src/packages/PkgClean.bas
+cat > src/packages/PkgZZInject.bas <<'VBA'
+Attribute VB_Name = "PkgZZInject"
+Option Explicit
+
+Private Function TotallyUnprefixed() As Boolean
+End Function
+
+Private Property Get AlsoUnprefixed() As Long
+End Property
+VBA
 pwsh build/build.ps1; echo "exit=$?"
-git checkout -- src/packages/PkgClean.bas
+rm src/packages/PkgZZInject.bas
 pwsh build/build.ps1; echo "exit=$?"
+git status --short          # must show only the untracked .vscode/
 ```
 
-Expected: **exit 1** the first time, naming `PkgClean.bas` and `TotallyUnprefixed`; **exit 0**
-after the revert. **Record both in the PR body** — this is the phase's only "meant to fail"
-evidence.
+Expected: **exit 1** the first time, naming `PkgZZInject.bas` and **both**
+`TotallyUnprefixed` and `AlsoUnprefixed`; **exit 0** after the removal, and a working tree
+holding nothing but the untracked `.vscode/`.
+
+**Two declarations, not one, and one of them a `Property`** — the guard's regex claims to
+cover `Sub`, `Function` and `Property Get/Let/Set`, and a test exercising only the `Function`
+arm proves only the `Function` arm.
+
+**A fresh minimal file, not a copy of a real package and not an append to one.** An append
+reverts with `git checkout --`, which discards every uncommitted change in that file,
+including the ones Task 3 just made. A copy of `PkgClean.bas` duplicates every procedure in
+it and fails the **duplicate-name** guard first, proving nothing about this one. This file
+declares no manifest and no action, so the id guard has nothing to check and the two
+unprefixed privates are the only thing wrong with it. The `ZZ` sorts it last, so it cannot
+perturb the bundle order of the real packages.
 
 - [ ] **Step 4: Commit**
 
@@ -839,6 +953,19 @@ they are checking *for*, and "nothing" is the claim being made.
 - **`Core_AskCols`'s message now says "Run <title> again"** where the original said "Run
   Remove Duplicates again". For the one existing caller these are the same string. For a new
   caller the old text would have been wrong, which is the fix.
+- **`Core_AskHasHeader`'s dialog BODY is kept verbatim, and it still reads as
+  dupes-flavoured** — "all of them are compared" is a comparison the caller may not be doing.
+  Only the title was parameterised. This is deliberate: the body is a behaviour change with
+  no second caller yet to design it against, and the "two consumers before you generalise"
+  rule this plan applies to promotions applies to rewording too. **W2 is the wave that gets
+  a real second caller; it should decide then**, and this note exists so it is a decision
+  rather than an inheritance.
+- **`Core_DestUsable` now refuses two things its predecessor allowed**: a name taken by a
+  chart sheet, and an engine-owned name that does not exist yet. Both are fixes for silent
+  data loss, but both are **new refusals on inputs that previously succeeded**. If any
+  existing deployment has `k_import_dest` set to something in the `Macros <n>` family, its
+  next combine refuses where it used to run. That is the correct behaviour and it is still a
+  change; it belongs in the changelog entry, not only here.
 - **The prefix guard's regex does not follow line continuations.** A `Private Function` split
   across a `_` is not matched and would slip through. No such declaration exists in this
   codebase and none is plausible, but it is a known limit rather than a covered case.

@@ -76,8 +76,12 @@ The last row is the reason this is not cosmetic.
 - **Never read `src/core/Core.bas` whole** (229KB). Grep `docs/code-map.md` for an anchor
   and read that slice.
 - **`dist/` is gitignored.** Never `git add -f` the bundle.
-- **The three shipped `clean` actions and the five `importexport` actions are untouched.**
-  Their refusal behaviour is not in scope; only W1's nine refusal sites migrate.
+- **The three shipped `clean` actions keep their behaviour.** `clean.dupes`, `clean.trim` and
+  `clean.filldown` are not in scope; the `PkgClean` site Task 4 migrates belongs to
+  `clean.standardize_formats`, a W1 action.
+  **Amended:** the five `importexport` actions ARE now in scope, for their refusal *flag*
+  only (Task 4b). Their wording does not change. The original constraint said they were
+  untouched; that was written before the missing `ctx("failed")` was found.
 - **No attribution footer, `Co-Authored-By`, or session URL** in any commit or PR body.
 
 ---
@@ -90,10 +94,17 @@ be driven on CI. **Do not propose a test suite.** Every task verifies with:
 1. `pwsh build/build.ps1` — must exit 0, `Core + 3 package(s)`, balanced counts.
 2. `node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas` — no diagnostics.
 3. **A deliberate injection** for anything meant to *fail*.
-4. The owner running the imported bundle against the gate additions in Task 5.
+4. **A static adversarial read of the built bundle** (Task 5 Step 2), by a subagent forbidden
+   from reading `src/`.
 
-**This pass changes engine behaviour that only shows up at run time.** The build cannot see
-a chain halting. Task 5's gate items are the only real proof, and they must be run.
+**This pass changes engine behaviour that only shows up at run time, and this phase does not
+observe it.** The build cannot see a chain halting. The original version of this section said
+Task 5's gate items were "the only real proof, and they must be run" — **that is withdrawn**,
+because the owner deferred that gate on 2026-07-28. The claims are logged in Task 5 Step 1
+and observed once, at phase 8, over the finished workbook.
+
+**So this phase ships reviewed, not verified.** Say exactly that in the PR body. Anything
+stronger is a claim the work does not support.
 
 ---
 
@@ -577,12 +588,22 @@ message's first line stands alone as a reason** — `FirstLine` trims it for the
 
 - [ ] **Step 3: Confirm no refusal path still returns silently**
 
+Build an explicit inventory of exit sites and walk it. A count cannot do this job — a
+`grep -c` after context flags collapses everything to one integer, and a fixed context window
+cannot associate an `Exit Sub` with a sink call that spans four continued lines above it.
+
 ```bash
-grep -nB2 -A2 'Exit Sub' src/packages/PkgImportExport.bas | grep -c 'Core_Refuse\|Core_Done\|Core_Fail'
+grep -n 'Exit Sub\|^Public Sub\|^Private Sub\|Core_Refuse\|Core_Done\|Core_Fail' \
+     src/packages/PkgImportExport.bas
 ```
 
-Read the result rather than trusting the count: every `Exit Sub` that is not the procedure's
-normal end must be preceded by one of the three sinks.
+That prints one line per procedure boundary, per sink call, and per exit, **in file order**.
+Read it top to bottom: for each `Exit Sub`, the nearest preceding sink must be on the same
+side of the last procedure boundary. An `Exit Sub` with no sink between it and the procedure
+header is a silent return, and is the defect.
+
+The `Exit Sub` immediately before a `Fail:` label is the procedure's normal end and needs no
+sink — the handler below it calls `Core_Fail`.
 
 - [ ] **Step 4: Build and syntax-check**
 
