@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.5.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.6.0** (2026-07-28) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -877,6 +877,60 @@ no fill immediately beforehand — so "clear the fill on the affected cells" alw
 undoes what the action did. **No action in this package may delete, move, or overwrite a value
 or formula.**
 
+### Package `format` - "Format & Present" (v1.0.0, contract v2.6.0)
+
+Presentation only (§7): every action changes how a report looks and never a stored value.
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_format_highlight_rules` | table | simple | **none** | Rules for `format.conditional_highlight`. Three columns: **Column** (a column letter, or a header name matched against the first row of the picked range - same resolution rule as `k_clean_formats`) - **Condition** (`greater_than <value>`, `less_than <value>`, `equal_to <value>`, `contains <value>`, or `blank`, one operator plus its comparison value in one cell) - **Fill color** (one of `red`, `yellow`, `green`, `orange`, `blue`, `gray`). A row whose Column resolves to nothing inside the picked range MUST be reported, not silently skipped. Rules are evaluated top to bottom; a cell matching more than one rule takes the LAST match. `usedBy` `format.conditional_highlight`. |
+
+`k_format_highlight_rules` header: `Column (letter or header)|Condition|Fill color`.
+
+**This field ships with NO default rows, for the same reason `k_clean_formats` does not
+(§8, package `clean`).** §5 resolves an empty stored table to the field's declared defaults,
+so demo rows would make `format.conditional_highlight`'s required "nothing configured"
+refusal unreachable, and would risk coloring a first-time user's own data by a rule they
+never wrote.
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `format.conditional_highlight` | Highlight by Rule | Prompt for a range, then whether its first row is a header. Read `k_format_highlight_rules`; if empty, refuse naming where to configure it. Otherwise, before changing anything, show the range and the rule count and ask to proceed. On yes: clear any existing native conditional formatting in the picked range, then for each rule, resolve its Column against the range and set a static fill color (§ above - not a live conditional-formatting rule) on every data-row cell in that column matching the rule's condition. A rule whose Column resolves to nothing MUST be reported by name, not silently dropped. Changes cell fill only; no value changes. |
+| `format.style_headers` | Style Header Row | Prompt for a range. Bold and fill the range's first row, then autofit every column in the range. Overwrites any formatting already on that row. No confirmation - this is unambiguously what the action is for. |
+| `format.report_title` | Add Report Title | Refuse if the active sheet is engine-owned. Prompt for title text (run-time input, not stored config - §3's "range is not a kind" precedent extended to free text); refuse if left blank. Show the row count that will be inserted and ask to proceed, noting that formulas and defined names on that sheet follow the shift automatically (native host behavior, §9) and that a formula whose result depends on its own row (`ROW()`, an `INDIRECT()` built from a row number) can return a different result after the shift. On yes: insert that many rows at row 1, merge and center the title text across the sheet's used width, and style it. This DOES write one new stored value - the title text, into the merged title cell; every value that already existed on the sheet keeps its own value and only its row position moves. |
+| `format.table_style` | Apply House Table Style | Prompt for a range. Show what will happen (existing fill/border formatting in the range is replaced with a fixed banded-row + thin-border house style) and ask to proceed. On yes: apply it. No value changes. |
+| `format.print_layout` | Prep for Print | Refuse if the active sheet is engine-owned. Set that sheet to landscape orientation, fit-to-one-page-wide, a fixed narrow-margin preset, and a repeating first print row. Fixed preset, no configuration. No confirmation - touches print setup only, no cell. |
+
+### Package `export` - "Export" (v1.0.0, contract v2.6.0)
+
+A second package in the `export` domain alongside the grandfathered `importexport.export`
+(§7). Declares its own fields under new keys; it does **not** read `k_export_base`,
+`k_export_offset` or `k_export_tabs` from `importexport`'s manifest - those are a different
+package's declared defaults, and the reference implementation's config-read fallback is
+scoped per owning package (see this wave's plan, Decision 5), so borrowing another package's
+key is not just a naming collision but a live default-resolution bug waiting for an
+unconfigured deployment.
+
+**Fields**
+
+| key | kind | tier | default | semantics |
+|---|---|---|---|---|
+| `k_export_folder` | text | simple | *(blank)* | Folder exported files are written to. **Blank means the deployment's data location** (§9), same convention as `k_import_folder`. `usedBy` `export.pdf, export.per_sheet`. |
+| `k_export_date_offset` | int | advanced | `-1` | Days to shift the date placed in front of an exported file's name. Same semantics as `importexport`'s `k_export_offset`, under its own key (§ above). `usedBy` `export.pdf, export.per_sheet`. |
+| `k_export_pdf_base` | text | simple | `Report` | Base name for `export.pdf`'s single dated PDF -> `<date> <base>.pdf`. `usedBy` `export.pdf`. |
+| `k_export_persheet_format` | text | simple | `pdf` | File type `export.per_sheet` writes: `pdf` or `xlsx`. Any other stored value MUST be refused at run time, naming the two accepted tokens. `usedBy` `export.per_sheet`. |
+
+**Actions**
+
+| id | caption | semantics |
+|---|---|---|
+| `export.freeze_values` | Freeze Formulas to Values | Prompt for a range. Count its formula cells (including dynamic-array spill anchors); refuse if none. Show the count and ask to proceed, stating this cannot be undone. On yes: convert every formula in the range - including spills and legacy CSE arrays - to a static value, using the same flattening behavior `importexport.export` already applies per sheet (§ Core_FreezeValues). Promoted from being embedded inside `importexport.export` to a standalone, range-scoped action; `importexport.export`'s own behavior is unchanged. |
+| `export.pdf` | Export to PDF | Resolve the export folder; refuse if the workbook has never been saved and no folder is configured, or if the configured folder does not exist. Ask whether to export the whole workbook, one sheet, or a range (workbook / sheet / range); an unrecognised answer is refused, naming the three accepted tokens. Build the dated output path (`k_export_date_offset` + `k_export_pdf_base`); refuse rather than overwrite if a file already exists at that path. For "sheet", refuse if the named sheet does not exist or is engine-owned. For "range", the picked range temporarily becomes the target sheet's print area for the export and is restored to its prior value immediately after, whether the export succeeds or fails. Writes one PDF. |
+| `export.per_sheet` | Export Each Tab Separately | Validate `k_export_persheet_format` is `pdf` or `xlsx`; refuse otherwise. Resolve and validate the export folder as `export.pdf` does. Build the list of every VISIBLE, non-engine-owned sheet (§ Decision 6 - hidden sheets are excluded too, on top of the required engine-sheet exclusion); refuse if none. Check every target file path for an existing collision, AND every target path against every other target path for a collision WITHIN this batch (sanitizing is many-to-one - two different, both-legal sheet names can produce the identical file name); refuse the WHOLE batch, naming every collision, if even one exists - no file is written until every target is clear. That refusal is all-or-nothing; the write itself is not transactional - it proceeds file by file, and a failure partway through leaves the files already written in place, with the failure message stating how many succeeded before the error. Otherwise show the full file list and ask to proceed. On yes: write one file per sheet, named `<date> <sheet name>.<ext>`. The `xlsx` path flattens every formula in a full workbook copy (via `Core_FreezeValues`, same technique `importexport.export` already relies on) before isolating each sheet, so a sheet with a cross-sheet formula does not export with a broken reference. |
 ---
 
 ## 9. Platform-abstraction appendix
@@ -905,6 +959,13 @@ port realizes them per platform rather than re-deriving them:
   ScreenUpdating/Calculation/EnableEvents; other platforms use their nearest
   equivalent or omit if not applicable.)
 
+- **Range-scoped PDF export (`export.pdf`, range mode)** - a temporary print-area override on
+  the target sheet, restored immediately after export. Neutral: render exactly the picked
+  cells to the platform's page-description format, without permanently changing the sheet's
+  own print setup.
+- **Per-tab explode (`export.per_sheet`)** - one output file per visible, non-engine sheet,
+  named `<date+offset> <sheet name>.<ext>`. Neutral: the platform's nearest equivalent to "one
+  file per tab, skip the toolkit's own surfaces."
 ---
 
 ## 10. Change control
@@ -934,6 +995,25 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.6.0 (additive):** two new packages, `format` (one field, five actions) and `export`
+  (four fields, three actions) - §8. `export.freeze_values` promotes logic that already
+  shipped embedded inside `importexport.export`; that action's own id, fields and behavior
+  are unchanged. **Additive by the two-axes rule:** no existing `key`, action `id`, `kind` or
+  encoding is touched or reinterpreted; every new field and action is new surface on an
+  already-`active` domain (§7, v2.3.0). `SCHEMA_VER` does **not** move - it stays `"v2.0"`.
+  **One judgement call worth stating, honestly rather than softened:** `format.report_title`
+  DOES write a stored value - the title text goes into the newly inserted, merged title cell
+  - and it moves every value that already existed on the sheet below the insert point to a
+  new row address. A formula whose RESULT depends on its own row (`ROW()`, or an
+  `INDIRECT()` string built from a row number) can therefore return a different result after
+  the shift, even though the formula's own stored text is untouched. This still belongs
+  under the `format` domain, not `export`/`clean`, because every value that existed on the
+  sheet before the action ran keeps its own value - the ONE new value is the title text
+  itself, which is the entire declared purpose of the action, disclosed in its own confirm
+  prompt and completion message, not a side effect discovered later. A platform whose
+  row-insert does not auto-adjust formulas and defined names the way Excel's does MUST
+  perform the equivalent adjustment itself, or refuse the action - silently breaking a
+  reference is not a conforming realization of this semantics.
 - **v2.5.0 (additive):** a new package `validate` with four fields and five actions (§8):
   `validate.reconcile`, `validate.scan`, `validate.highlight_duplicates`,
   `validate.highlight_outliers`, `validate.missing_fields`. The `validate` domain has been

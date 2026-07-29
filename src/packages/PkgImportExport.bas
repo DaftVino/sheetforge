@@ -361,12 +361,10 @@ End Sub
 Public Sub PkgImportExport_Export(ctx As Object)
     Dim mainTabs As Variant, t As Variant
     Dim newWb As Workbook, ws As Worksheet
-    Dim fRange As Range, ar As Range
     Dim keepD As Object, sh As Worksheet, i As Long
     Dim lnks As Variant, li As Long
     Dim outPath As String, fileName As String
     Dim setSh As String, expTabs As Collection
-    Dim cel As Range, sp As Range, sv As Variant
     On Error GoTo Fail
 
     Set expTabs = Core_CfgList(ctx, "k_export_tabs")
@@ -410,39 +408,15 @@ Public Sub PkgImportExport_Export(ctx As Object)
     Set newWb = Application.ActiveWorkbook
     newWb.Application.CalculateFull
 
-    ' Flatten dynamic-array SPILLS and legacy CSE ARRAYS to static values
-    ' first, then freeze ordinary formulas.
+    ' Flatten dynamic-array SPILLS, legacy CSE ARRAYS, and ordinary formulas
+    ' to static values - Core_FreezeValues, shared with export.freeze_values
+    ' (2026-07-28 W3 plan). reevalUsedRange:=True matches this loop's
+    ' original behavior of reading ws.UsedRange fresh before EACH of the
+    ' two passes (see Core_FreezeValues's header, difference #2, for why
+    ' this matters here and why export.freeze_values - a range-scoped
+    ' action, Task 10 - does NOT pass True).
     For Each ws In newWb.Worksheets
-        Set fRange = Nothing
-        On Error Resume Next
-        Set fRange = ws.UsedRange.SpecialCells(xlCellTypeFormulas)
-        On Error GoTo Fail
-        If Not fRange Is Nothing Then
-            For Each cel In fRange.Cells
-                If cel.HasSpill Then
-                    Set sp = cel.SpillingToRange
-                    sv = sp.Value
-                    cel.ClearContents
-                    sp.Value = sv
-                ElseIf cel.HasArray Then
-                    Set sp = cel.CurrentArray
-                    sv = sp.Value
-                    sp.ClearContents
-                    sp.Value = sv
-                End If
-            Next cel
-        End If
-        Set fRange = Nothing
-        On Error Resume Next
-        Set fRange = ws.UsedRange.SpecialCells(xlCellTypeFormulas)
-        On Error GoTo Fail
-        If Not fRange Is Nothing Then
-            For Each ar In fRange.Areas
-                On Error Resume Next
-                ar.Value = ar.Value
-                On Error GoTo Fail
-            Next ar
-        End If
+        Core_FreezeValues ws.UsedRange, True
     Next ws
 
     ' Delete every sheet EXCEPT the main tabs + the settings sheet.

@@ -113,3 +113,26 @@ a chain halt.
 - **Colour legibility on a dark Excel theme.** The three highlight colours against a dark
   theme. *Why:* pairs with the outstanding track-1 reskin item — same untested assumption,
   same palette origin.
+
+---
+
+## W3 — Format & Present, plus export (v0.14.0, contract v2.6.0)
+
+- **`importexport.export` still produces the same file it did before the refactor.** Run it on
+  a workbook containing a dynamic-array spill, a legacy CSE array, and ordinary formulas.
+  Expected: byte-for-byte the same flattening as v0.13.0 — every formula frozen, spills
+  expanded to static values, formatting and conditional formatting intact. *Failure looks
+  like:* a `#SPILL!`, a surviving formula, or a lost array. *Why:* the flatten engine moved out
+  of this shipped action into Core. **This is the highest-risk item in W3** — it is the most
+  sophisticated routine in the codebase and it produces a finance deliverable.
+- **`export.per_sheet` refuses a name collision instead of overwriting.** Create two sheets
+  named `A"B` and `A<B` — both legal in Excel, both sanitising to `A-B`. Expected: a refusal
+  naming both, and **no files written at all**. *Failure looks like:* one file, silently
+  holding the second sheet.
+- **`export.per_sheet` emits no `Setup.pdf` or `_Config.pdf`.** *Why:* `Core_IsEngineSheet`.
+- **A partly-written batch reports how far it got.** Make the destination unwritable partway
+  through. Expected: the failure names how many files were already written. *Why:* the write
+  loop is sequential with no rollback, and the plan no longer claims otherwise.
+- **`format.report_title` asks before inserting rows, and a formula using `ROW()` below the
+  title reflects its new position afterwards.** *Why:* this is the action that admits it
+  changes values; the item exists to confirm the admission is the true one.
