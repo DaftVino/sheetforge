@@ -426,6 +426,34 @@ These are the items where a failure costs you something you cannot get back.
   `Export Dashboard (.xlsx)` — no `1.`, `2.`, `3.`, `4.`.
   *Failure:* any surviving number.
 
+### New in this phase — the Finalize reminder
+
+- [ ] **4.29 — On a fresh import with everything `Off`, the reminder line is BLANK.**
+  Import into a clean workbook, run `Core_BuildSetup`, and look at the row directly above the
+  `Action` / `Availability` / `Placement` headers.
+  *Expected:* **empty**. A `Setup Menu` link sits beside it; that is always there.
+  *Failure:* the reminder text showing when nothing is switched on.
+  *Why:* this is the item that proves the formula excludes blanks and matches `Off`
+  correctly. If it fires here it fires forever, from first import, and means nothing.
+
+- [ ] **4.30 — Setting one action to `Button` makes the reminder appear immediately, before
+  Finalize.** Change a single Availability dropdown and do not click anything else.
+  *Expected:* the line appears **as soon as the dropdown changes**, telling you to click
+  `Finalize Setup Tab` and then `Create Setup Tab`.
+  *Failure:* nothing appears until after Finalize — which would mean it is static text, not a
+  formula, and the whole point of it is gone.
+
+- [ ] **4.31 — Setting that action back to `Off` makes the line disappear again.**
+  *Failure:* the text persisting once shown.
+
+- [ ] **4.32 — The `Setup Menu` link beside the reminder opens the Setup Menu tab.**
+
+- [ ] **4.33 — Finalize still works with the reminder row present.**
+  *Expected:* Finalize reports the same **51 actions** and completes normally.
+  *Failure:* a wrong action count, or Finalize reporting it cannot find a block.
+  *Why:* the reminder inserts a row above the action catalog. It carries no machine key
+  precisely so nothing can mistake it for a block — this item is what proves that held.
+
 ---
 
 ## 5. Appearance — carried over from track 1, still unrun

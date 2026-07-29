@@ -180,6 +180,7 @@ Private Const END_KEY   As String = "_core_end"   ' sentinel key row: bounds the
 Private Const CHAINS_KEY As String = "k_core_chains"   ' Compose section: chains block sentinel (col A)
 Private Const LAYOUT_KEY As String = "k_core_layout"   ' Compose section: placement block sentinel (col A)
 Private Const RID_COL    As Long = 10                  ' Compose section: col J, hidden per-row id
+Private Const REMINDER_TEXT As String = "Actions are switched on. Click 'Finalize Setup Tab' and then 'Create Setup Tab' to reveal their option fields."
 
 ' ---- speed wrapper saved state (module-level, depth-counted) ----
 Private mSpeedDepth  As Long
@@ -2982,7 +2983,8 @@ End Sub
 ' never make the action undiscoverable.
 Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
     Dim prior As Object, priorAvail As Object, reg As Object, a As Object, id As String
-    Dim firstDataRow As Long, lastDataRow As Long
+    Dim firstDataRow As Long, lastDataRow As Long, reminderRow As Long
+    Dim availabilityRange As String, f As String
     ' Fix round 3, fix 3: "hide" used to read as manual-layout-only ("leave one
     ' button off A MANUAL LAYOUT") - true only before fix round 3's fix 1, which
     ' made GatherButtons drop a hide-coded button before either filer runs, so
@@ -2996,6 +2998,19 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
                    "for example  TabName!B4  places it on cell B4 of the TabName tab, and " & _
                    "does not change where any other button goes. " & _
                    "Type  hide  to leave any one button off, whether or not you use placement codes.")
+    ' Reserve this row now and write its formula AFTER the action rows exist.
+    ' The formula spans the availability column of the whole block, so it needs
+    ' the block's real extent - and predicting that from a registry count would
+    ' drift silently the moment the loop below gained any filter, taking the
+    ' bounded validation range at the end of this procedure with it. Writing the
+    ' formula last costs nothing: Excel does not care what order cells are
+    ' filled in, and lastDataRow stays derived from the loop that produces it.
+    ' KEY_COL intentionally stays EMPTY on this row: blocks are located by
+    ' machine key via FindKeyRow, never by row offset, so a keyless row cannot
+    ' shift any block's parse - and a key here would make it look like a block.
+    reminderRow = r
+    NavLink ws.Cells(reminderRow, VAL_COL + 1), "Setup Menu", ADMIN_SHEET
+    r = r + 1
     ws.Cells(r, KEY_COL).Value = LAYOUT_KEY
     ws.Cells(r, VAL_COL).Value = "Action"
     ws.Cells(r, VAL_COL + 1).Value = AVAIL_HEADER
@@ -3026,6 +3041,29 @@ Private Function RenderPlacementBlock(ws As Worksheet, ByVal r As Long) As Long
         Next a
     Next reg
     lastDataRow = r - 1
+
+    ' The reminder, written now that the block's real extent is known. It fires
+    ' whenever any action is not Off and is blank otherwise, so it appears the
+    ' moment a dropdown changes - before Finalize, which is the point of using a
+    ' formula rather than static text. The "<>" test excludes blanks: on a fresh
+    ' import every cell reads Off and the line must stay empty.
+    '
+    ' Compares against AvailLabel(AVAIL_OFF) - the "Off" actually written into
+    ' the cell - not the AVAIL_OFF token "off". Excel's COUNTIFS text matching
+    ' is believed case-insensitive, so the token would probably have worked, but
+    ' "probably" is a claim about Excel that nothing here has run to confirm.
+    ' Comparing against the literal the cell contains removes the question.
+    If lastDataRow >= firstDataRow Then
+        availabilityRange = ws.Range(ws.Cells(firstDataRow, VAL_COL + 1), _
+                                     ws.Cells(lastDataRow, VAL_COL + 1)).Address( _
+                                     RowAbsolute:=True, ColumnAbsolute:=True)
+        f = "=IF(COUNTIFS(" & availabilityRange & ",""<>""," & availabilityRange & _
+            ",""<>" & AvailLabel(AVAIL_OFF) & """)>0,""" & REMINDER_TEXT & ""","""")"
+    Else
+        f = "="""""
+    End If
+    ws.Cells(reminderRow, VAL_COL).Formula = f
+
     ' ONE validation call over the exact block of action rows. Bounded to the
     ' rows actually written - never the whole column - so it cannot leak
     ' validation onto the key/marker row above it or onto anything below the
