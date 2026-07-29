@@ -1,5 +1,28 @@
 # W1 manual gate — the ingest→clean wave (7 actions)
 
+> ## DEFERRED, 2026-07-28 — by owner decision
+>
+> **Do not work through this item by item.** The remaining items are deferred to a single
+> end-to-end validation on the finished workbook, once the Core pass and the remaining waves
+> are built. The reasoning: the answers are available statically, so defects that a careful
+> read can find should be found that way rather than spent as owner time.
+>
+> **What was actually run before the deferral:**
+>
+> | Item | Result |
+> |---|---|
+> | 0.1, 0.2 | PASS — imported clean, `Debug ▸ Compile` clean |
+> | 0.3 | Ran, but `Macros 1` did not exist afterwards — **re-do this first** when the gate resumes |
+> | 0.4 | PASS — `GateAudit_Run`: 31 PASS, 0 FAIL, 2 SKIP (both SKIPs from the missing `Macros 1`). All fifteen action ids present in the catalog, no unexpected ids |
+> | 2.3 | **FAILED, and found a real defect.** The already-open workbook stayed open and its unsaved data was copied — but each source's rows landed ~15 rows below the last, and a two-row file wrote to rows 27–28. Root cause: `PkgImport_AppendSheet` took its extent from `UsedRange`, a rectangle Excel inflates, and advanced `destRow` by it. **Fixed in `bafb905`; the fix is NOT yet verified in Excel.** |
+>
+> Everything else in this file is **unrun**. Nothing below is evidence of anything.
+>
+> **When this resumes, start here:** rebuild, re-import (0.1), redo 0.3 until `Macros 1`
+> exists, then items **1.5** and **2.4** — the two contiguity checks written specifically to
+> catch the defect above. If those pass, the `bafb905` fix is confirmed.
+
+
 > **For the owner.** This is written for someone who has not read the code. Every item
 > states the observable result first, then what a failure looks like, then why it matters.
 > Tick an item only against a real run. If you skip one, write **UNTESTED** next to it
@@ -559,6 +582,6 @@ failure reads as "the assumption was wrong" rather than "the macro is broken":
 
 ## Result
 
-- Items passed: ____ / 39
-- Items recorded UNTESTED: ____
-- Anything that failed, with what you saw:
+**DEFERRED 2026-07-28.** 3 items passed (0.1, 0.2, 0.4), 1 ran and found a defect since
+fixed but unverified (2.3), 1 is inconclusive and must be redone (0.3), and the remaining 34
+are unrun. See the banner at the top of this file.
