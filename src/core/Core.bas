@@ -1570,6 +1570,7 @@ Private Function CoreCandidates() As Collection
     c.Add "Export"                  ' probes PkgExport_Manifest
     c.Add "Summarize"               ' probes PkgSummarize_Manifest
     c.Add "Enrich"                  ' probes PkgEnrich_Manifest
+    c.Add "Backup"                  ' probes PkgBackup_Manifest
     Set CoreCandidates = c
 End Function
 

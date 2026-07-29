@@ -6,6 +6,37 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-28
+
+### Added
+
+- **Four ways to keep a copy before something goes wrong.** A timestamped copy into a Backup
+  folder, a snapshot taken before a risky run, a month-end named version for finance packs, and
+  moving a finished output into a dated archive folder.
+
+- **Snapshot is the one to know about, and it is worth being precise about what it does.** It
+  saves a full copy of the workbook, named and dated, into a Snapshots folder. **It does not
+  restore.** There is no undo button in this release, and the catalog items that are waiting on
+  one are still waiting - only "hide all sheets except the active one" was ever blocked on
+  undo; the other two are blocked on not having a preview. Saying otherwise would be selling
+  you a safety net that is not there.
+
+- **Old snapshots are pruned, and the pruning checks its own handwriting.** It keeps the newest
+  few and deletes the rest - but only files matching the complete name this action writes:
+  the prefix, a real timestamp, and the workbook's own extension. **A file merely starting
+  `SNAPSHOT_` is left alone.** Matching the prefix and deleting the result would have made your
+  own `SNAPSHOT_notes.txt` collateral.
+
+- **Archiving a file moves it, which is the only thing in this toolkit that does.** It refuses
+  if the destination exists, and refuses if the file is open in this Excel. Across drives,
+  Windows implements a move as copy-then-delete, so it can half-fail - **so it checks
+  afterwards which of the two files exist and tells you**, rather than reporting a generic
+  error and leaving you to work out whether your file still exists.
+
+### Changed
+
+- **Contract v2.8.0.** Adds the `backup` package. Additive: `SCHEMA_VER` stays `"v2.0"`.
+
 ## [0.15.0] - 2026-07-28
 
 ### Added

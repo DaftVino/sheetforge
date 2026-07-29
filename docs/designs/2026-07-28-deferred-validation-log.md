@@ -155,3 +155,23 @@ a chain halt.
   building anything.
 - **A failed `build_pivot` leaves no half-built sheet behind**, and reports the original error
   rather than a cleanup error.
+
+---
+
+## W5 — Protect & Back Up (v0.16.0, contract v2.8.0)
+
+- **Pruning leaves a lookalike file alone.** Put a file named `SNAPSHOT_notes.txt` and another
+  named `SNAPSHOT_2020-01-01_000000.xlsm` in the Snapshots folder, then run `backup.snapshot`
+  enough times to trigger pruning. Expected: the `.txt` **still exists**; the old dated `.xlsm`
+  is gone. *Failure looks like:* the `.txt` deleted. *Why:* a prefix match is not proof the
+  action wrote the file. **This is the destroys-user-data item for W5.**
+- **`backup.archive_output` refuses rather than overwrites**, and refuses a file open in this
+  Excel instance. Try both.
+- **A cross-volume move that fails reports which files exist.** Archive to a different drive
+  and interrupt it (remove the drive, or make the destination read-only mid-run). Expected: the
+  error names whether the source still exists and whether the destination was created. *Failure
+  looks like:* a generic error leaving you unsure whether your file survived.
+- **`backup.month_end_version` names the file correctly on 1 January** and on the 1st of a
+  month. *Why:* prior-month-end on 1 Jan is 31 Dec of the previous year.
+- **`backup.snapshot` as step 1 of a destructive chain runs quietly** and the later steps still
+  run. *Why:* this is the intended flagship usage.
