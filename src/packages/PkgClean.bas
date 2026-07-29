@@ -427,10 +427,9 @@ Public Sub PkgClean_StandardizeFormats(ctx As Object)
     If rng Is Nothing Then Exit Sub
 
     If Not Core_CfgTable(ctx, "k_clean_formats", cols, fmts, spare) Then
-        PkgClean_Refuse ctx, "No column formats are set up yet."
-        MsgBox "No column formats are set up yet." & vbCrLf & vbCrLf & _
+        Core_Refuse ctx, "No column formats are set up yet." & vbCrLf & vbCrLf & _
                "Fill in the 'Column formats' table on the Setup tab, Finalize, and run " & _
-               "this again." & vbCrLf & vbCrLf & "Nothing has been changed.", vbExclamation, TITLE
+               "this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
         Exit Sub
     End If
 
@@ -583,20 +582,6 @@ Private Function PkgClean_NarrowToUsed(rng As Range) As Range
     If rng Is Nothing Then Exit Function
     Set PkgClean_NarrowToUsed = Application.Intersect(rng, rng.Parent.UsedRange)
 End Function
-
-' Mark ctx as failed on a refusal - a path that shows its reason and returns WITHOUT
-' doing the work. Core's RunAction decides a step succeeded by the ABSENCE of this
-' flag, so a refusal that only shows a MsgBox is reported to a chain as a green tick
-' beside a step that did nothing. Writes wrapped the way Core_Fail wraps its own, so
-' a ctx that never received these keys cannot raise from inside a refusal path.
-'
-' The MsgBox stays, quiet or not: a chain that stops has to say why.
-Private Sub PkgClean_Refuse(ctx As Object, ByVal reason As String)
-    On Error Resume Next
-    ctx("failed") = True
-    ctx("failMsg") = reason
-    On Error GoTo 0
-End Sub
 
 ' Prompt the user to select a range. Returns Nothing if they cancel
 ' (InputBox Type:=8 returns Boolean False on cancel, which fails the Set).
