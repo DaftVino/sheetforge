@@ -715,7 +715,7 @@ End Function
 '================================================================
 
 ' ---- speed wrapper: disable, do work, guaranteed restore ----
-Public Sub Core_SpeedOn()
+Private Sub Core_SpeedOn()
     If mSpeedDepth = 0 Then
         mSaveScreen = Application.ScreenUpdating
         mSaveEvents = Application.EnableEvents
@@ -730,7 +730,7 @@ Public Sub Core_SpeedOn()
     mSpeedDepth = mSpeedDepth + 1
 End Sub
 
-Public Sub Core_SpeedOff()
+Private Sub Core_SpeedOff()
     If mSpeedDepth > 0 Then mSpeedDepth = mSpeedDepth - 1
     If mSpeedDepth <= 0 Then RestoreSpeed
 End Sub
@@ -3868,6 +3868,69 @@ Fail:
     MsgBox "Core_FinalizeSetup error: " & Err.Description, vbExclamation, "Finalize Setup Tab"
 End Sub
 
+' Strip the setup surfaces once the workbook is configured, while preserving the
+' activated config and every generated macro page.
+Public Sub Core_CompleteSetup()
+    Dim ws As Worksheet, target As Worksheet, ans As VbMsgBoxResult
+    Dim nPages As Long
+    Const TITLE As String = "Complete Macro Setup"
+    On Error GoTo Fail
+
+    If Not Core_SheetExists(CONFIG_SHEET) Then
+        MsgBox "Setup has never been finalized, so there is nothing to complete." & vbCrLf & vbCrLf & _
+               "Click 'Finalize Setup Tab' first." & vbCrLf & vbCrLf & _
+               "Nothing has been changed.", vbExclamation, TITLE
+        Exit Sub
+    End If
+
+    For Each ws In ThisWorkbook.Worksheets
+        If IsPanelName(ws.name) Then
+            nPages = nPages + 1
+            If target Is Nothing Then Set target = ws
+        End If
+    Next ws
+
+    If nPages = 0 Then
+        MsgBox "There are no macro pages in this workbook yet, so removing the setup tabs " & _
+               "would leave you with nothing at all." & vbCrLf & vbCrLf & _
+               "Switch on the macros you want, click 'Finalize Setup Tab', then run this " & _
+               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", vbExclamation, TITLE
+        Exit Sub
+    End If
+
+    ans = MsgBox("This removes the setup tabs from this workbook:" & vbCrLf & _
+                 "    Setup" & vbCrLf & "    Setup Menu" & vbCrLf & "    Macros Home" & vbCrLf & vbCrLf & _
+                 "Your macro buttons and all your settings are kept." & vbCrLf & vbCrLf & _
+                 "IF YOU HAVE CHANGED ANYTHING ON THE SETUP TAB SINCE YOU LAST CLICKED " & _
+                 "'Finalize Setup Tab', CLICK NO NOW, FINALIZE FIRST, THEN COME BACK. " & _
+                 "Unfinalized changes will be lost." & vbCrLf & vbCrLf & _
+                 "To get the Setup tab back later: press Alt+F8, choose Core_BuildSetup, " & _
+                 "click Run." & vbCrLf & vbCrLf & "Remove the setup tabs now?", _
+                 vbYesNo + vbExclamation + vbDefaultButton2, TITLE)
+    If ans <> vbYes Then Exit Sub
+
+    Core_SpeedOn
+    target.Activate
+    For Each ws In ThisWorkbook.Worksheets
+        If IsPanelName(ws.name) Then
+            ws.Cells(1, 2).Hyperlinks.Delete
+            ws.Cells(1, 2).Clear
+        End If
+    Next ws
+
+    If Core_SheetExists(HOME_SHEET) Then ThisWorkbook.Worksheets(HOME_SHEET).Delete
+    If Core_SheetExists(SETUP_SHEET) Then ThisWorkbook.Worksheets(SETUP_SHEET).Delete
+    If Core_SheetExists(ADMIN_SHEET) Then ThisWorkbook.Worksheets(ADMIN_SHEET).Delete
+    Core_SpeedOff
+    MsgBox "Setup is complete. Your macro buttons are ready to use." & vbCrLf & vbCrLf & _
+           "Your settings are saved and hidden. To change them later: press Alt+F8, " & _
+           "choose Core_BuildSetup, click Run.", vbInformation, TITLE
+    Exit Sub
+Fail:
+    RestoreSpeed
+    MsgBox "Could not finish: " & Err.Description, vbCritical, TITLE
+End Sub
+
 '================================================================
 ' 7. CONTROL PANEL  (builds the Macros pages)
 '================================================================
@@ -4117,7 +4180,7 @@ Private Sub BuildAdminPanel()
                  "done - to come back, right-click any visible tab -> Unhide, or press Alt+F8."
         .Font.Italic = True
     End With
-    ws.Rows("5:12").RowHeight = 15
+    ws.Rows("5:14").RowHeight = 15
     leftPos = ws.Range("B5").Left
     topPos = ws.Range("B5").Top
     AddBtn ws, "btnCreateSetup", "Create Setup Tab", "Core_BuildSetup", leftPos, topPos, 220, 32
@@ -4129,6 +4192,13 @@ Private Sub BuildAdminPanel()
     AddBtn ws, "btnFinalizeSetup", "Finalize Setup Tab", "Core_FinalizeSetup", leftPos, topPos, 220, 32
     With ws.Range(ws.Cells(8, 3), ws.Cells(9, 3))
         .Merge: .Value = "Validates your Setup answers, activates them, and rebuilds the Macros pages."
+        .Font.Size = 10: .WrapText = True: .VerticalAlignment = xlCenter
+    End With
+    topPos = topPos + 75
+    AddBtn ws, "btnCompleteSetup", "Complete Macro Setup", "Core_CompleteSetup", leftPos, topPos, 220, 32
+    With ws.Range(ws.Cells(13, 3), ws.Cells(14, 3))
+        .Merge: .Value = "Removes Setup, Setup Menu, and Macros Home while keeping macro pages and settings. " & _
+                         "Press Alt+F8, then run Core_BuildSetup to bring Setup back."
         .Font.Size = 10: .WrapText = True: .VerticalAlignment = xlCenter
     End With
 End Sub
