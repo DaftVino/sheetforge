@@ -201,6 +201,14 @@ Put two or three data rows on each.
   *Failure looks like:* Setup's key column or a page of buttons appearing as data rows.
   *Why:* engine-owned sheets are not data.
 
+- [ ] **1.5 — The three tabs' rows are contiguous: header, then rows 2 to 7, no gaps.**
+  Count them. With three tabs of two data rows each you get six data rows and no blank ones.
+
+  *Failure looks like:* a blank band between each tab's rows, growing with each tab.
+  *Why:* both combines share one engine, so this is the same defect item 2.4 covers, reached
+  by the other route. A tab that has ever held more data than it does now reports an
+  inflated used range, and trusting it costs blank rows AND misplaces everything after.
+
 ---
 
 ## 2. `import.combine_workbooks`
@@ -244,13 +252,28 @@ blank, make sure that folder holds only the files you want combined — the acti
   never appears. In a shared close folder somebody usually has a source open. **If this
   item fails, do not ship.**
 
-- [ ] **2.4 — Excel's hidden `~$` lock files do not break the run.**
-  With a source workbook open (so a `~$Name.xlsx` lock file exists beside it), the combine
-  still completes.
+- [ ] **2.4 — Each workbook's rows sit directly under the previous one, with no blank
+  band between them.**
+  With three source workbooks of two data rows each, the combined sheet holds a header row
+  and then six rows: 2, 3, 4, 5, 6, 7. Nothing blank in between, and nothing starting at
+  row 27.
 
-  *Expected — but NOT verified:* `Dir` defaults to excluding hidden files and these lock
-  files are hidden, so they should never be seen. On a network share the hidden attribute
-  is not always preserved.
+  *Failure looks like:* the second file's rows starting fifteen rows below the first's, the
+  gap growing with each extra file.
+  *Why:* a source's used range is a rectangle that Excel inflates with formatting and with
+  cells that once held data, so a sheet with two data rows can report itself sixteen rows
+  deep. If the combine trusts that number it writes fourteen blank rows and pushes every
+  later file down by the same amount. **This exact defect shipped in v0.10.0 and this item
+  is what found it** — the extent is now measured from where content actually ends, per
+  column.
+
+- [ ] **2.5 — Excel's hidden `~$` lock files never appear in the result.**
+  While 2.3's workbook is still open, check the combined sheet: no column headed
+  `~$something`, no rows of junk, and no error message naming a `~$` file.
+
+  *Expected — but NOT verified:* `Dir` excludes hidden files by default and these lock files
+  are hidden, so they should never be enumerated. On a network share the hidden attribute is
+  not always preserved.
   *Failure looks like:* an error naming a `~$` file, and the combine abandoned.
 
 ---
@@ -528,13 +551,14 @@ failure reads as "the assumption was wrong" rather than "the macro is broken":
 | Deleting whole rows never renumbers columns | 4.4 |
 | Excel's sheet-name rules match the hardcoded `: \ / ? * [ ]` and 31-character checks | 1.2, 3.2 |
 | `Workbooks.Open` on an already-open file returns the open copy, not a read-only second copy | 2.3 |
-| `Dir` excludes hidden files by default, so `~$` lock files are not enumerated | 2.4 |
+| `Dir` excludes hidden files by default, so `~$` lock files are not enumerated | 2.5 |
 | Nothing outside `UsedRange` can hold a value, a formula or a merge | 4.5 |
+| `End(xlUp)` navigates by content and ignores formatting, so an inflated used range does not affect it | 1.5, 2.4 |
 
 ---
 
 ## Result
 
-- Items passed: ____ / 37
+- Items passed: ____ / 39
 - Items recorded UNTESTED: ____
 - Anything that failed, with what you saw:

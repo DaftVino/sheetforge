@@ -265,21 +265,51 @@ Private Function PkgImport_AppendSheet(src As Worksheet, dest As Worksheet, head
     Dim hdr As String, vals As Variant, colVals() As Variant
     Dim ur As Range, seenHere As Object
     Dim n As Long, candidate As String
+    Dim lastInCol As Long, maxC As Long
 
     ' Per-SOURCE header tally, not the cross-source map: two sheets each having one
     ' "Amount" column must still align onto one destination column.
     Set seenHere = CreateObject("Scripting.Dictionary")
     seenHere.CompareMode = 1
 
-    ' Extent comes from the WHOLE sheet, not from column A and row 1. A source whose
-    ' first column has a gap would be truncated by End(xlUp) on column A, and a trailing
-    ' column with a blank header would be dropped by End(xlToLeft) on row 1 - silently,
-    ' and the completion dialog would still report success. UsedRange overstates on a
-    ' sheet with stray formatting; overstating costs blank rows, understating loses data.
+    ' Extent comes from where the CONTENT actually ends, found per column, not from
+    ' UsedRange's rectangle and not from column A alone. Both of the obvious shortcuts
+    ' are wrong in opposite directions:
+    '
+    '   End(xlUp) on column A alone TRUNCATES a source whose first column has a gap -
+    '   every row below the gap is silently dropped.
+    '
+    '   UsedRange OVERSTATES. It is a rectangle inflated by formatting and by cells that
+    '   once held data, so a sheet with two data rows can report a used range 16 rows
+    '   deep. That is not merely "some blank rows": this function advances destRow by the
+    '   extent it was given, so an inflated source pushes every LATER source down by the
+    '   difference. Sources then land 15 rows apart with blank bands between them, which
+    '   is what the v0.10.0 gate found.
+    '
+    ' Scanning each column from the bottom with End(xlUp) is immune to both. End()
+    ' navigates by content and ignores formatting, so an inflated used range costs
+    ' nothing, and taking the maximum across columns means a gap in any one column
+    ' cannot truncate the rest.
     Set ur = src.UsedRange
     If ur Is Nothing Then Exit Function
-    lastR = ur.Row + ur.Rows.Count - 1
     lastC = ur.Column + ur.Columns.Count - 1
+    If lastC > src.Columns.Count Then lastC = src.Columns.Count
+
+    lastR = 0
+    maxC = 0
+    For c = 1 To lastC
+        lastInCol = src.Cells(src.Rows.Count, c).End(xlUp).Row
+        ' End(xlUp) lands on row 1 both for "only the header is filled" and for a
+        ' completely empty column; the value test tells those apart.
+        If lastInCol = 1 Then
+            If Len(Trim(CStr(src.Cells(1, 1).Offset(0, c - 1).Value))) = 0 Then lastInCol = 0
+        End If
+        If lastInCol > 0 Then
+            maxC = c                                 ' trailing empty columns fall off here
+            If lastInCol > lastR Then lastR = lastInCol
+        End If
+    Next c
+    lastC = maxC
     If lastR < 2 Or lastC < 1 Then Exit Function     ' empty, or a header with no data
 
     vals = src.Range(src.Cells(1, 1), src.Cells(lastR, lastC)).Value
