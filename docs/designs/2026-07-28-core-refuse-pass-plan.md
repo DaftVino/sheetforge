@@ -7,6 +7,24 @@
 `Core_IsEngineSheet` — and make a chain stop when a step refuses, so the toolkit stops
 reporting a green tick for work it did not do.
 
+> ## Amended 2026-07-28, after `bde8400` and a re-read of the packages
+>
+> This plan was written before the owner deferred the W1 gate. Two changes; nothing else
+> in it moves, and none of the three settled decisions is re-opened.
+>
+> 1. **Task 5 steps 1 and 2 are withdrawn.** They add gate items to
+>    `docs/designs/2026-07-28-w1-manual-gate.md` for the owner to run. The owner deferred
+>    that gate on 2026-07-28 precisely to stop spending owner time on what a careful read
+>    can find. **Task 5' replaces them** below: the same claims, verified statically and
+>    logged for the single end-to-end validation at the end of the track.
+> 2. **Task 4b is added** — `PkgImportExport`'s refusal paths never set `ctx("failed")` at
+>    all, so a chain ticks them green. This is a third instance of the exact defect the
+>    pass is named after, found on 2026-07-28. Scope extension, stated rather than silent;
+>    reasoning in `2026-07-28-track2-completion-plan-of-record.md` §3.3.
+>
+> Sequencing for everything after this phase:
+> `docs/designs/2026-07-28-track2-completion-plan-of-record.md`.
+
 **Architecture:** Three Core additions and one behaviour change, then delete the package
 copies that exist only because Core lacked them. `Core_Refuse` mirrors `Core_Done`: it sets
 the outcome on `ctx` **and** owns the dialog, suppressed when the context is quiet.
@@ -87,7 +105,8 @@ a chain halting. Task 5's gate items are the only real proof, and they must be r
 | `src/core/Core.bas` | **+`Core_Refuse`**, **+`Core_IsEngineSheet`**, `RunAction` carries `refused`, `Core_RunChain` halts on it, new private `FailCode`. |
 | `src/packages/PkgImport.bas` | 8 refusal sites migrate; delete `PkgImport_Refuse`, `PkgImport_IsEngineSheet`, `PkgImport_IsDigits`. |
 | `src/packages/PkgClean.bas` | 1 refusal site migrates; delete `PkgClean_Refuse`. |
-| `docs/designs/2026-07-28-w1-manual-gate.md` | Gate items for the new behaviour. |
+| `src/packages/PkgImportExport.bas` | **Task 4b:** every refusal path routes through `Core_Refuse` instead of returning silently. |
+| `docs/designs/2026-07-28-deferred-validation-log.md` | **New.** The run-time-only claims, for phase 8. Replaces the withdrawn gate items. |
 | `CHANGELOG.md`, `VERSION` | v0.11.0. |
 
 ---
@@ -508,55 +527,155 @@ git commit -m "refactor: move refusal and engine-sheet knowledge out of the pack
 
 ---
 
+### Task 4b: `PkgImportExport` stops ticking green for work it did not do
+
+**Owner: delegate to codex (`sonnet`).** Same edit shape as Task 4.
+
+**Added 2026-07-28.** A scope extension over the settled decision 3, stated rather than
+silent. Decision 3 ruled out absorbing *the remaining W1 minors*; this is not one. It is a
+third instance of the defect this pass is named after, found while inventorying the packages,
+and it is the only one left after Task 4.
+
+**The defect:** `PkgImportExport`'s refusal paths — `PkgImportExport_Clear` at
+`PkgImportExport.bas:96`, `PkgImportExport_UpdateMaster` at `:224`, and their siblings — show
+a `MsgBox` and `Exit Sub` **without ever setting `ctx("failed")`**. `RunAction` decides a step
+succeeded by the absence of that flag (`Core.bas:1122`), so inside a chain each of these is
+reported as a green tick beside a step that did nothing, and the steps after it run against
+whatever was already on the sheet. Leaving it would mean this pass cures the disease in two
+packages and ships it in the third.
+
+**Files:** Modify `src/packages/PkgImportExport.bas`.
+
+**Interfaces:** Consumes `Core_Refuse` (Task 2).
+
+- [ ] **Step 1: Find every refusal site**
+
+```bash
+grep -n 'MsgBox' src/packages/PkgImportExport.bas
+```
+
+A site qualifies when **all three** are true: it shows a `MsgBox`, it then `Exit Sub`s, and
+it has done no work. A `MsgBox` that reports a *completed* run is `Core_Done`'s job and is
+already correct — **do not touch those**. A `MsgBox` inside `Core_Fail`'s path is an error,
+not a refusal, and is also already correct.
+
+- [ ] **Step 2: Migrate each one**
+
+```vb
+' was:
+        MsgBox "<the full existing wording>", vbExclamation, TITLE
+        Exit Sub
+' becomes:
+        Core_Refuse ctx, "<the same full existing wording>", TITLE
+        Exit Sub
+```
+
+**Keep every message's wording exactly as it is.** These are shipped strings the owner has
+read; this task changes what the engine records, not what the user sees standalone. The one
+new consequence is that the first line now also appears in a chain summary, so **check each
+message's first line stands alone as a reason** — `FirstLine` trims it for the summary.
+
+- [ ] **Step 3: Confirm no refusal path still returns silently**
+
+```bash
+grep -nB2 -A2 'Exit Sub' src/packages/PkgImportExport.bas | grep -c 'Core_Refuse\|Core_Done\|Core_Fail'
+```
+
+Read the result rather than trusting the count: every `Exit Sub` that is not the procedure's
+normal end must be preceded by one of the three sinks.
+
+- [ ] **Step 4: Build and syntax-check**
+
+```bash
+pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+```
+
+Expected: exit 0, `Core + 3 package(s)`, no diagnostics. Counts are unchanged — this task
+adds and deletes no procedure.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/packages/PkgImportExport.bas
+git commit -m "fix(importexport): a refusal must not be reported to a chain as a success"
+```
+
+---
+
 ### Task 5: Gate the new behaviour, and refresh the map
 
-**Owner: Opus writes the gate items** (`CLAUDE.md` §7 governs their wording); **delegate the
-blind dry-run.**
+**Owner: Opus.** **Steps 1 and 2 are the amended ones** — see the banner at the top of this
+file. They no longer write gate items for the owner.
 
-**Files:** Modify `docs/designs/2026-07-28-w1-manual-gate.md`, `CHANGELOG.md`, `VERSION`,
-`docs/code-map.md`.
+**Files:** Create `docs/designs/2026-07-28-deferred-validation-log.md`; modify
+`CHANGELOG.md`, `VERSION`, `docs/code-map.md`.
 
-- [ ] **Step 1: Add the gate items**
+- [ ] **Step 1: Log the run-time-only claims, do not gate them**
 
-The build cannot see a chain halt. These are the only proof the pass worked. Each states the
-observable result first, then the failure, then why — and **none of them may pass on a build
-that does nothing**, so each pairs an action that must run with one that must not.
+The build cannot see a chain halt. But the owner deferred the W1 gate on 2026-07-28 to stop
+spending owner time on what a careful read can find, so these do **not** become a checklist to
+work through now. They go into a running log that phase 8 assembles into one end-to-end
+validation over the finished workbook.
 
-Add to §9 of the W1 gate:
+Create `docs/designs/2026-07-28-deferred-validation-log.md` with this preamble:
 
-- **9.2 — A chain stops at a refused step, and says so.** Run the §9 chain a *second* time
-  without deleting `Master`. Expected: the combine's refusal appears in the summary with no
-  error number; the summary says the remaining 3 steps were skipped; the count reads `0/4`;
-  and — the load-bearing part — **`Master` still holds exactly what run 1 produced**, because
-  the clean steps did not touch it. *Failure looks like:* `4/4 ok`, or `Master` visibly
-  cleaned again. *Why:* this is the exact wrong-number-with-a-tick case the pass exists to
-  remove.
-- **9.3 — A refusal inside a chain shows no dialog of its own.** During 9.2, the only dialog
-  is the final chain summary. *Failure looks like:* a modal refusal box mid-chain. *Why:*
-  `Core_Refuse` suppresses its own presentation when quiet, like `Core_Done`.
-- **9.4 — A refusal standalone still shows its dialog.** Click the combine's own button with
-  `Master` present. Expected: the full refusal message, and no chain summary. *Why:* this is
-  the pair for 9.3 — together they prove suppression is conditional, not broken.
-- **9.5 — A step that FAILS still asks.** Point `k_import_folder` at a folder holding a
-  zero-byte `.xlsx` and run a chain starting with `import.combine_workbooks`. Expected:
-  Continue/Stop. *Failure looks like:* the chain stops without asking. *Why:* the asymmetry
-  is the decision; if failures stop too, the distinction was not implemented.
-- **9.6 — No summary line reads `#0`.** *Why:* a refusal has no error number, and `#0` reads
-  as a malfunction.
+````markdown
+# Deferred validation log
 
-Add to §1:
+Run-time-only claims, accumulated per phase, for the **single** end-to-end validation at the
+end of track 2. **This is not a checklist to work through now.** The W1 gate was deferred on
+2026-07-28 (`bde8400`) because the answers are available statically; anything a careful read
+or a build guard can settle is settled there instead, and only what genuinely needs Excel
+lands here.
 
-- **1.5 — A user sheet named `Macros Data` is still combined, and `Macros 1` is still
-  excluded.** *Why:* `Core_IsEngineSheet` replaced the package's copy; this proves the
-  numeric-tail rule survived the move.
+Each entry states the observable result first, then what a failure looks like, then why —
+`CLAUDE.md` §7. **An entry whose expected result equals the default state proves nothing**,
+so each pairs something that must happen with something that must not.
+````
 
-- [ ] **Step 2: Blind dry-run**
+then append this phase's entries:
 
-Dispatch a subagent with **only** the gate and the built `dist/MacrosBundle.bas`, forbidden
-from reading `src/`. Ask it to flag every item it cannot execute, cannot judge, or that could
-pass on a broken build — and to check each claimed dialog string against the bundle text.
-**Fix what it finds before the gate reaches the owner.** Its limit is known: it reads VBA, it
-does not execute it.
+- **A chain stops at a refused step, and says so.** Run a 4-step chain beginning with
+  `import.combine_worksheets` a *second* time without deleting `Master`. Expected: the
+  refusal appears in the summary with no error number; the summary says the remaining 3 steps
+  were skipped; the count reads `0/4`; and — the load-bearing part — **`Master` still holds
+  exactly what run 1 produced**, because the clean steps did not touch it. *Failure looks
+  like:* `4/4 ok`, or `Master` visibly cleaned again. *Why:* the exact wrong-number-with-a-tick
+  case this pass exists to remove.
+- **A refusal inside a chain shows no dialog of its own.** During the run above, the only
+  dialog is the final chain summary. *Failure:* a modal refusal box mid-chain.
+- **A refusal standalone still shows its dialog.** Click the combine's own button with
+  `Master` present. Expected: the full refusal message, and no chain summary. *Why:* the pair
+  for the item above — together they prove suppression is conditional, not broken. Either
+  alone passes on a build that broke the other.
+- **A step that FAILS still asks.** Point `k_import_folder` at a folder holding a zero-byte
+  `.xlsx` and run a chain starting with `import.combine_workbooks`. Expected: Continue/Stop.
+  *Failure:* the chain stops without asking. *Why:* the asymmetry is settled decision 2; if
+  failures stop too, the distinction was never implemented.
+- **A user sheet named `Macros Data` is still combined, and `Macros 1` is still excluded.**
+  *Why:* `Core_IsEngineSheet` replaced the package's hardcoded copy; this is the only thing
+  that proves the numeric-tail rule survived the move.
+- **`Select Case LCase(<Const>)` compiles.** Excel `Debug ▸ Compile VBAProject` is clean.
+  **Marked as an assumption** (`CLAUDE.md` §7): it is believed legal VBA and is exercised
+  nowhere else in this codebase. Task 3 states the `If/ElseIf` fallback.
+
+- [ ] **Step 2: Static verification instead of a blind dry-run**
+
+What a checklist would have caught here, the bundle can be read for. Dispatch a subagent given
+**only** `dist/MacrosBundle.bas` and this step, **forbidden from reading `src/`** — the
+blindness is the mechanism. Ask it to answer, quoting bundle line numbers:
+
+1. Does every `Core_Refuse` call site pass a message whose **first line stands alone** as a
+   reason? (`FirstLine` trims it for the chain summary.)
+2. Is there any path that sets `ctx("failed")` without also setting `ctx("refused")` or going
+   through `Core_Fail`? Name it.
+3. Does `RunAction` initialise `res("refused")` **before** every one of its early returns?
+   Reading a missing key from a `Scripting.Dictionary` raises.
+4. Can any summary line still render `#0`? Trace `FailCode` for `errNumber = 0`.
+5. Does `Core_Refuse` suppress its dialog on exactly the same condition `Core_Done` does?
+
+**Fix what it finds before opening the PR.** Its limit is known and real: it reads VBA, it
+does not execute it. Anything it cannot settle stays in the Step 1 log.
 
 - [ ] **Step 3: Version, changelog, code map**
 
@@ -588,13 +707,16 @@ the one that should land first.
 
 ## Unknowns and risks
 
-- **This pass cannot be verified by the build.** Everything it changes shows up only at run
-  time in a chain. If Task 5's items are not run, the pass ships unproven.
+- **This pass cannot be fully verified by the build.** The chain halt shows up only at run
+  time. Task 5's static read narrows it; what it cannot settle ships on the strength of the
+  code review and waits for phase 8. **That is a deliberate, owner-endorsed trade** — the
+  alternative was owner time this phase was told not to spend — but it means the halt is
+  *reviewed*, not *observed*, until then. Do not describe it as verified in the PR.
 - **`Select Case LCase(<Const>)`** is believed legal VBA but is not exercised anywhere in
-  this codebase today. Task 3 states the fallback. Mark it as an assumption in the gate.
-- **W1's PR #19 is still open.** This branch touches two of the same files. Land #19 first.
-  If that is not possible, expect a conflict in `PkgImport.bas`'s refusal sites and resolve
-  in favour of this pass.
+  this codebase today. Task 3 states the fallback. Logged as an assumption in Task 5 Step 1.
+- **W1's PR #19 merged on 2026-07-28** (`6b68ebc`). `origin/main` carries W1, so this phase
+  branches cleanly from `main` and the `PkgImport.bas` conflict this section used to warn
+  about cannot occur.
 - **`Core_Refuse`'s dialog title defaults to "Cannot run this yet".** Every W1 site passes
   its own `TITLE`, so the default is only for future callers. If it reads badly on the Setup
   surface, it is one string.
