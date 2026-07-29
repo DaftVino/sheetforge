@@ -686,7 +686,10 @@ do get a prefix.
   **Two cannot be run against the bundle you just imported and need their own build first.**
   Hardening 3.1 needs a deliberately hostile `PkgClean` declaring the reserved id
   `core.legacy`: edit a copy, run `pwsh build/build.ps1`, confirm the build **fails**, discard
-  the edit. Reorder 3 needs the v0.6.0 bundle rebuilt from commit `812d88c`.
+  the edit. Reorder 3 needs the v0.6.0 bundle rebuilt from an old commit — that gate document
+  now tells you how to **find** it (`git log -S'0.6.0' -- VERSION`) rather than quoting a hash,
+  because the history was rewritten to strip client jargon before this repo went public and
+  every hash quoted in these documents before that is dead.
   **Do these two last and rebuild from `main` afterwards** — both leave a bundle you do not
   want to keep.
 
