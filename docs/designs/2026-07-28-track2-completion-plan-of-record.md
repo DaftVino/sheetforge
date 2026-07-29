@@ -121,6 +121,30 @@ defect the pass is named after, and the edit is the same shape as phase 1's Task
 it would mean the pass cures the disease in two packages and ships it in the third.
 Flagged rather than done silently, per `CLAUDE.md`.
 
+### 3.3a Core keeps growing after phase 2, and the waves are no longer interchangeable
+
+Phase 2 promotes what is **already duplicated**. Drafting W2–W6 surfaced three more helpers
+that phase 2 could not have known about, because they have no second consumer until a
+specific wave exists. Each is added by the wave that creates its second consumer, per phase
+2's own "two consumers, or already duplicated" rule:
+
+| Helper | Added by | Why not phase 2 |
+|---|---|---|
+| `Core_ResolveColumn` | **phase 2 after all** | W2 and W4 both needed `PkgClean_ResolveFormatCol`'s letter-or-header resolution, which made it three consumers — so it moved into phase 2 with `PkgClean` migrated onto it. |
+| `Core_FreezeValues` | **W3** | The formula-to-values flatten lives inside `PkgImportExport_Export` today. `export.freeze_values` is its second consumer and does not exist until W3. |
+| `Core_SafeFileName` | **W3** | `export.pdf` and `export.per_sheet` are two consumers on their own. |
+| `Core_AlreadyOpen` | **W5** | Phase 2 explicitly declined to promote it on the grounds that W5's need was speculative. Drafting W5 showed the need is real (`backup.archive_output` moves a file that must not be open), which is exactly the condition phase 2 named for promoting it later. |
+
+**Consequence: W3 must land before W5.** `backup.archive_output` and `backup.snapshot` call
+`Core_SafeFileName`, which W3 introduces. The wave order in design §3.5 already puts W3
+third and W5 fifth, so nothing has to move — but the dependency is now real rather than
+incidental, and reordering the remaining waves is no longer free.
+
+**`Core_ResolveColumn` returns a `Long` index, not a `Range`.** Three plans independently
+invented three signatures for it; this is the one. Callers wanting the column itself write
+`rng.Columns(idx)`; `0` means unresolved. It is the single promotion in phase 2 whose call
+site changes shape rather than only its name.
+
 ### 3.4 One package per domain
 
 Seven new modules, one per active domain: `PkgValidate`, `PkgFormat`, `PkgExport`,

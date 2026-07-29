@@ -29,6 +29,12 @@ for the syntax check. No test framework - see *Verification*.
 `2026-07-28-core-helper-promotion-plan.md` - every `Core_*` helper this plan calls is assumed
 already merged to `main` by the time this wave branches.
 
+**Also depends on `2026-07-28-w3-format-export-plan.md` having landed**, because Task 5 calls
+`Core_SafeFileName`, which that plan adds to Core (its Task 2, Step 2). W3 ships as phase 4 and
+this wave as phase 6, so `Core_SafeFileName` is expected to already be in `main` by the time this
+wave branches - but if it is not there when this plan is picked up, W3 has not landed; reconcile
+before starting, do not write a local substitute.
+
 ---
 
 ## Why this wave matters more than its size suggests
@@ -94,10 +100,19 @@ this wave has no legitimate reason to use an already-open file in place of the o
 workbooks; `archive_output` targets exactly one file via `Core_FindFile`. The phase-2 decision
 to leave it in `PkgImport` stands unchanged.
 
-**Nothing else escalates.** `PkgBackup_EnsureFolder`, `PkgBackup_Ext`, `PkgBackup_SafeFileToken`,
-and `PkgBackup_PruneSnapshots` are used only by this package's own four actions; no other wave's
+**Nothing else escalates.** `PkgBackup_EnsureFolder`, `PkgBackup_Ext`, and
+`PkgBackup_PruneSnapshots` are used only by this package's own four actions; no other wave's
 plan names a consumer for any of them, so by the same YAGNI reasoning phase 2 used, they stay
 package-private and prefixed.
+
+**One helper is removed, not added: this package declares no package-private "safe file name"
+function.** An earlier revision of this plan declared its own copy of that job, but
+`2026-07-28-w3-format-export-plan.md` (Task 2, Step 2) already adds `Core_SafeFileName` to Core
+for the identical "make this a legal Windows file name" job - flagged there for this exact
+wave at the time it was written. Keeping a second, package-private copy here would be the
+cross-package duplicate CLAUDE.md rule 4 forbids, so every call in this plan uses
+`Core_SafeFileName` instead. This wave now depends on W3 having landed first; see the
+dependency note below and the gap noted in "Unknowns and risks."
 
 ---
 
@@ -362,7 +377,7 @@ git commit -m "refactor(core): promote PkgImport_AlreadyOpen to Core_AlreadyOpen
 - Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_AddAction`,
   `Core_ResolveFolder`, `Core_FolderExists`, `Core_FileName` (all existing).
 - Produces: `PkgBackup_Manifest`, `PkgBackup_EnsureFolder`, `PkgBackup_Ext`,
-  `PkgBackup_SafeFileToken`, `PkgBackup_PruneSnapshots`. Tasks 4-7 depend on all five.
+  `PkgBackup_PruneSnapshots`. Tasks 4-7 depend on all four.
 
 - [ ] **Step 1: Header and manifest**
 
@@ -497,21 +512,12 @@ Private Function PkgBackup_Ext() As String
     If dot > 0 Then PkgBackup_Ext = Mid$(nm, dot) Else PkgBackup_Ext = ".xlsm"
 End Function
 
-' A user-typed label reduced to something safe inside a Windows file name. This
-' cannot reuse Core_BadSheetChars: a file name additionally forbids " < > | and
-' allows [ ], a different set from a SHEET name's. Borrowing the sheet list would
-' silently let one of those four through into a SaveCopyAs call, which raises a
-' runtime error deep inside the Speed-wrapped block instead of a clean refusal.
-Private Function PkgBackup_SafeFileToken(ByVal raw As String) As String
-    Dim s As String, bad As String, i As Long
-    s = Trim(raw)
-    bad = ":\/?*""<>|"
-    For i = 1 To Len(bad)
-        s = Replace(s, Mid$(bad, i, 1), "-")
-    Next i
-    If Len(s) > 40 Then s = Left$(s, 40)
-    PkgBackup_SafeFileToken = s
-End Function
+' NOTE: a package-private "user-typed label reduced to something safe inside a
+' Windows file name" helper used to live here. It is gone - Task 5 now calls
+' Core_SafeFileName (added to Core by 2026-07-28-w3-format-export-plan.md, Task 2,
+' Step 2) instead, so this package does not carry a second copy of the identical
+' job. See "Escalations to Core" above and "Unknowns and risks" below for the one
+' behavior gap that removal opens up (no length cap on the token).
 
 ' Deletes the oldest files matching "SNAPSHOT_*" in folderPath, keeping the newest
 ' keepCount by file MODIFIED time (not by parsing the name - the label segment
@@ -668,8 +674,9 @@ size suggests") - review the diff against this task more carefully than Tasks 4,
 
 **Files:** Modify `src/packages/PkgBackup.bas`.
 
-**Interfaces:** Consumes the same Core helpers as Task 4, plus `Core_CfgLong` and Task 3's
-`PkgBackup_SafeFileToken` / `PkgBackup_PruneSnapshots`. Produces `PkgBackup_Snapshot`.
+**Interfaces:** Consumes the same Core helpers as Task 4, plus `Core_CfgLong`,
+`Core_SafeFileName` (from W3, `2026-07-28-w3-format-export-plan.md` Task 2), and Task 3's
+`PkgBackup_PruneSnapshots`. Produces `PkgBackup_Snapshot`.
 
 - [ ] **Step 1: Add the action**
 
@@ -697,7 +704,10 @@ Public Sub PkgBackup_Snapshot(ctx As Object)
         Exit Sub
     End If
 
-    label = PkgBackup_SafeFileToken(Core_Cfg(ctx, "k_backup_snapshot_label"))
+    ' 40 is this caller's cap, not a property of the helper. The rest of the name
+    ' ("SNAPSHOT_" + a 17-character timestamp + the extension) is fixed, so bounding
+    ' the one free-typed segment is what keeps the whole path inside MAX_PATH.
+    label = Core_SafeFileName(Core_Cfg(ctx, "k_backup_snapshot_label"), 40)
     destFolder = root & "Backup" & Application.PathSeparator & "Snapshots" & Application.PathSeparator
     destPath = destFolder & "SNAPSHOT_" & Format(Now, "yyyy-mm-dd_HHnnss") & _
                IIf(Len(label) = 0, "", "_" & label) & PkgBackup_Ext()
@@ -1104,3 +1114,19 @@ this plan), so a reviewer does not have to re-derive that from the diff.
 - **No restore action exists, and none is proposed here.** Repeated deliberately, once more, so
   it cannot be missed by a reader who only reads this section: this wave saves; it does not
   restore.
+- **`Core_SafeFileName` (W3) does not cap length; the package-private helper this plan removed
+  in its favor did (`Left$(s, 40)`).** Checked directly against W3's plan
+  (`2026-07-28-w3-format-export-plan.md`, Task 2, Step 2) before reusing it: the character
+  substitution is a full superset (it also replaces Core's own `[` `]`, which the removed
+  helper left alone, and the two agree on `Trim` and on treating every other bad character
+  identically), so on that axis W3's helper fully covers this wave's need. The one thing it
+  does not do - and says so in its own doc comment ("Does NOT make the name unique or check
+  length") - is truncate. `backup.snapshot`'s `k_backup_snapshot_label` is free-typed on
+  Setup, so an unusually long label now produces an unusually long snapshot file name with
+  nothing in this wave's own code stopping it, where before the 40-character cap kept it
+  bounded. **This gap was found here and closed in W3 rather than carried.** `Core_SafeFileName`
+  now takes `Optional ByVal maxLen As Long = 0`, `0` meaning no cap, so W3's own two call sites
+  keep their unbounded behaviour and `backup.snapshot` passes `40` — the same bound the removed
+  helper had. See `2026-07-28-w3-format-export-plan.md` Task 2 Step 2 for the current signature.
+  **W5 therefore depends on W3's version of that helper, not merely on its existence**; if W3
+  ships without `maxLen`, this call does not compile, which is the failure mode to want.

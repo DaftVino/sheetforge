@@ -11,14 +11,13 @@ that deliberately produces two ids.
 
 **Architecture:** One new package, thin, built entirely on the Core API phases 1-2 and W2-W5
 add (`Core_Refuse`, `Core_IsEngineSheet`, `Core_AskRange`, `Core_DestUsable`, `Core_NewSheet`).
-It also carries one small Core change of its own: `Core_DestUsable` currently refuses a
-destination name only if a sheet by that name **already exists** - it never checks whether the
-name is one the toolkit's own rebuild will claim later (`_Config`, `Macros 3`, `Macros Home`,
-...). This wave is the first to create a sheet from a *user-typed* name (the Table of Contents),
-so it is the first to hit that gap in a way that produces a silent, deferred data-loss trap
-rather than an immediate, obvious failure. Fixed once, in `Core_DestUsable`, so every existing
-and future caller (W2's exceptions report, W4's pivot sheets, W5's snapshot sheet, this wave's
-TOC) inherits the fix from one edit.
+`Core_DestUsable` already refuses a destination name the toolkit's own rebuild will claim later
+(`_Config`, `Macros 3`, `Macros Home`, ...), not only a name that already exists - phase 2
+(`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 3) added that branch ahead of this
+wave, merging long before W6, because every wave that creates a sheet from a *user-typed* name
+benefits from it and this wave is only the first to need it, for the Table of Contents. This
+wave makes no Core change of its own beyond registering the new package with `CoreCandidates()`;
+it consumes the fix rather than adding it.
 
 **Tech stack:** VBA (Excel/Windows, one concatenated `.bas`), PowerShell for the build, Node
 for the syntax check. No test framework - see *Verification*.
@@ -52,7 +51,8 @@ because getting it wrong here is worse than anywhere else:
 - **`workbook.build_toc` writing to a reserved name** (`Macros Home`, `Macros 1`, `_Config`) is
   destroyed unconditionally, alerts suppressed, on the very next Finalize - a defect that would
   not surface until the rebuild *after* the one that created the illusion of success. This is
-  the gap `Core_DestUsable` closes in Task 1.
+  the gap `Core_DestUsable` closes, per phase 2 (`2026-07-28-core-helper-promotion-plan.md`,
+  Task 2 Step 3) - this wave inherits the fix rather than adding it.
 
 ---
 
@@ -67,7 +67,7 @@ because getting it wrong here is worse than anywhere else:
 | 5 | Wrong password on `unprotect_sheets` | **Caught per sheet, not aborted halfway.** Each `Unprotect` call is wrapped in its own error trap; a sheet whose password does not match is added to a "skipped" list and the loop continues. `Core_Done`'s message reports both counts by name, so a partial run is never mistaken for a complete one. |
 | 6 | `Unprotect`'s `Password:=` argument when the config password is blank | **Always passed explicitly, never omitted**, even when it is `""`. Calling `Unprotect` with **no** argument shows Excel's own interactive password box when the sheet carries one - which would surface mid-chain, breaking the quiet convention. An explicit argument (blank or not) never prompts: a mismatch raises error 1004 instead, which the per-sheet trap catches. **Marked as an assumption about Excel's own behaviour** (`CLAUDE.md` §7) - see Unknowns. |
 | 7 | Does `build_toc` create-only, or refresh? | **Refresh in place, using a written marker to prove ownership.** A create-only TOC would refuse on every run after the first - the exact shape of the `import.combine_worksheets` bug the whole refusal pass (phase 1) is named for, except here re-running after adding a tab is the entire point of the feature, not an edge case. The sheet's `A1` holds a fixed sentence (`PkgWorkbook_TocMarker`); on a rerun, if a sheet by the configured name exists and `A1` matches that sentence, its contents are cleared and rebuilt. If a sheet exists with that name and `A1` does **not** match, the action refuses exactly the way `Core_DestUsable` refuses any other name collision - a user's own sheet that happens to share the configured name is never touched. |
-| 8 | Does `Core_DestUsable` need a reserved-name check, and where does it live? | **Yes, in Core, added by this wave's Task 1 - not hardcoded in `PkgWorkbook`.** `Core_DestUsable` today refuses only an *existing* sheet of that name; it has no opinion on a name the engine will claim **later** (`Macros 3` before any rebuild has produced one, `_Config` if it were somehow briefly absent). `Core_IsEngineSheet` already answers "is this name in the reserved family?" as a pure string test with no dependency on whether a sheet currently exists by that name - so the fix is one added call inside `Core_DestUsable`, and every existing and future caller inherits it the moment this PR merges. Hardcoding the reserved family inside `PkgWorkbook` instead would be the exact defect phase 1/2 exist to remove: a second copy of state Core already owns. |
+| 8 | Does `Core_DestUsable` need a reserved-name check, and where does it live? | **Yes, and phase 2 already added it - this wave consumes it rather than adding it.** `Core_DestUsable` used to refuse only an *existing* sheet of that name; it had no opinion on a name the engine would claim **later** (`Macros 3` before any rebuild has produced one, `_Config` if it were somehow briefly absent). `Core_IsEngineSheet` already answers "is this name in the reserved family?" as a pure string test with no dependency on whether a sheet currently exists by that name, so phase 2 added the check as one call inside `Core_DestUsable` (`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 3), and every existing and future caller - including this wave's TOC - inherits it the moment that PR merges. Hardcoding the reserved family inside `PkgWorkbook` instead would still be the exact defect phases 1 and 2 exist to remove: a second copy of state Core already owns. Phase 2's version also checks `ThisWorkbook.Sheets` rather than `Core_SheetExists`, so a name held by a **chart sheet** is refused too - a second refusal this wave did not know about when it was first drafted. |
 | 9 | Is the `build_toc` name-collision refusal classed additive or breaking? | **Additive**, on the same reasoning contract v2.4.0 used for the chain-halt rule (§10): a config value like `k_import_dest = "Macros 3"` was never actually *usable* correctly before this fix - it produced a sheet the very next Finalize destroyed unconditionally. Refusing it now prevents a data-loss trap rather than withdrawing behaviour anyone could rely on. |
 | 10 | `unhide_rows_cols` scope: whole sheet, active sheet, or a picked range? | **The whole active sheet, not a `Core_AskRange` pick.** The catalog names this "Reset visibility **across the sheet**" (singular), matching the classic snippet it replaces (select all cells, Unhide Rows, Unhide Columns) - a range-scoped version would leave hidden rows/columns just outside the pick untouched, which is not "reset," it is "reset some of it." |
 | 11 | `unhide_rows_cols` and an active AutoFilter | **Warned, not silently overridden, not refused.** `Range.Hidden` is the same property for a manually hidden row and a filter-hidden row - there is no way to tell them apart or to unhide only one kind. The action detects `ws.AutoFilterMode` and, only then, shows a Yes/No confirm naming the effect (every filtered-out row reappears) before proceeding; without an active filter it just does the reset and reports the count, like `unhide_sheets`. |
@@ -116,7 +116,7 @@ Copied from `2026-07-28-track2-completion-plan-of-record.md` §4, verbatim.
    placement on a protected sheet, whether `Unprotect Password:=""` really avoids Excel's
    interactive prompt, whether the TOC marker check really distinguishes ownership correctly,
    and whether the AutoFilter warning fires when it should. **These are logged to
-   `docs/designs/2026-07-28-deferred-validation-log.md` in Task 9**, not gated here - per
+   `docs/designs/2026-07-28-deferred-validation-log.md` in Task 8**, not gated here - per
    plan-of-record §3.5, phase 8 is where the owner runs the workbook once, for real.
 
 ---
@@ -125,7 +125,6 @@ Copied from `2026-07-28-track2-completion-plan-of-record.md` §4, verbatim.
 
 | File | Change |
 |---|---|
-| `src/core/Core.bas` | `Core_DestUsable` gains one more refusal branch (reserved/engine name), placed between the bad-character check and the exists check. No signature change. |
 | `src/core/Core.bas` | `CoreCandidates()` gains `c.Add "Workbook"`. |
 | `src/packages/PkgWorkbook.bas` | **New.** Header comment, `PkgWorkbook_Manifest`, five `Public Sub` actions, three `Private` helpers (`PkgWorkbook_FailedNote`, `PkgWorkbook_TocMarker`, `PkgWorkbook_CountHidden`). |
 | `spec/contract.md` | v2.9.0. §7 gets one new "Reserved" normative bullet (Decision 8/9); §8 gains a `Package workbook` subsection; §10 gains the version bullet. |
@@ -134,142 +133,21 @@ Copied from `2026-07-28-track2-completion-plan-of-record.md` §4, verbatim.
 
 ---
 
-### Task 1: Core - `Core_DestUsable` refuses a reserved/engine name
-
-**Owner: Opus.** Core, and the reasoning (Decision 8) is the kind of judgement call that needs
-writing down, not just coding.
-
-**Files:** Modify `src/core/Core.bas` - `Core_DestUsable` (added by phase 2's helper-promotion
-pass; grep `docs/code-map.md` for its current line).
-
-**Interfaces:**
-- Consumes: `Core_IsEngineSheet` (phase 1), `Core_Refuse` (phase 1), `Core_BadSheetChars`,
-  `Core_SheetExists` (all already in `Core_DestUsable`).
-- Produces: no signature change. Every existing caller (`import.combine_worksheets`,
-  `import.combine_workbooks`, `import.delimited_file`, and whatever W2/W4/W5 added) gets the
-  new refusal automatically.
-
-- [ ] **Step 1: Insert the reserved-name check**
-
-Between the bad-character loop and the `Core_SheetExists` check, insert:
-
-```vb
-    ' A name in the toolkit's own reserved family - "_Config", a generated
-    ' "Macros <n>" page, and the rest of Core_IsEngineSheet's list - is refused
-    ' even though no sheet by that name exists YET. Without this, a config value
-    ' like "Macros 3" sails through (nothing exists at that name today) and
-    ' creates a real sheet that the next Finalize deletes unconditionally with
-    ' alerts suppressed (contract section 7, "Reserved") - a silent data-loss
-    ' trap that would not surface until the rebuild AFTER the one that hid it.
-    ' Every caller of Core_DestUsable inherits this the moment this function
-    ' changes: W2's exceptions report, W4's pivot sheets, W5's snapshot sheet and
-    ' W6's Table of Contents all close the same gap from one edit.
-    If Core_IsEngineSheet(destName) Then
-        Core_Refuse ctx, "'" & destName & "' is a name the toolkit itself uses for its own " & _
-               "sheets (Setup, the config store, or a generated Macros page)." & vbCrLf & vbCrLf & _
-               "A sheet created with that name would be overwritten or deleted the next time " & _
-               "the toolkit rebuilds." & vbCrLf & vbCrLf & _
-               "Pick a different name and run this again." & vbCrLf & vbCrLf & _
-               "Nothing has been changed.", title
-        Exit Function
-    End If
-```
-
-The full function afterward, for reference (nothing above the inserted block changes):
-
-```vb
-Public Function Core_DestUsable(ctx As Object, ByVal destName As String, _
-                                ByVal title As String) As Boolean
-    Dim bad As String, i As Long
-    If Len(destName) = 0 Then
-        Core_Refuse ctx, "No name is set for the sheet this creates." & vbCrLf & vbCrLf & _
-               "Fill the destination name in on the Setup tab, Finalize, and run this " & _
-               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", title
-        Exit Function
-    End If
-    If Len(destName) > 31 Then
-        Core_Refuse ctx, "'" & destName & "' is " & Len(destName) & " characters. Excel " & _
-               "sheet names stop at 31." & vbCrLf & vbCrLf & _
-               "Nothing has been changed.", title
-        Exit Function
-    End If
-    bad = Core_BadSheetChars()
-    For i = 1 To Len(bad)
-        If InStr(destName, Mid$(bad, i, 1)) > 0 Then
-            Core_Refuse ctx, "'" & destName & "' contains " & Mid$(bad, i, 1) & ", which " & _
-                   "Excel does not allow in a sheet name." & vbCrLf & vbCrLf & _
-                   "None of these are allowed:  : \ / ? * [ ]" & vbCrLf & vbCrLf & _
-                   "Nothing has been changed.", title
-            Exit Function
-        End If
-    Next i
-    If Core_IsEngineSheet(destName) Then
-        Core_Refuse ctx, "'" & destName & "' is a name the toolkit itself uses for its own " & _
-               "sheets (Setup, the config store, or a generated Macros page)." & vbCrLf & vbCrLf & _
-               "A sheet created with that name would be overwritten or deleted the next time " & _
-               "the toolkit rebuilds." & vbCrLf & vbCrLf & _
-               "Pick a different name and run this again." & vbCrLf & vbCrLf & _
-               "Nothing has been changed.", title
-        Exit Function
-    End If
-    If Core_SheetExists(destName) Then
-        Core_Refuse ctx, "A sheet named '" & destName & "' already exists in this workbook, " & _
-               "and this action will not overwrite it." & vbCrLf & vbCrLf & _
-               "Rename or delete that sheet, then run " & title & " again." & vbCrLf & vbCrLf & _
-               "Nothing has been changed.", title
-        Exit Function
-    End If
-    Core_DestUsable = True
-End Function
-```
-
-- [ ] **Step 2: Add `CoreCandidates` registration**
-
-In `CoreCandidates()`, add one line before `Set CoreCandidates = c`:
-
-```vb
-    c.Add "Workbook"                 ' probes PkgWorkbook_Manifest
-```
-
-This is the two-place registration the whole wave depends on running at all - `build.ps1`
-bundles `PkgWorkbook.bas` by glob whether or not this line exists; only this line makes Core
-ever call it.
-
-- [ ] **Step 3: Verify (static)**
-
-```bash
-grep -n 'Core_IsEngineSheet(destName)' src/core/Core.bas
-grep -n 'c.Add "Workbook"' src/core/Core.bas
-pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
-```
-
-Expected: one hit each, exit 0, no diagnostics. `PkgWorkbook.bas` does not exist until Task 2,
-so this step's build check is really only proving `Core_DestUsable`'s new branch and the
-`CoreCandidates` line compile cleanly against the existing three-to-eight packages already in
-the tree at this point in the sequence.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/core/Core.bas
-git commit -m "fix(core): Core_DestUsable refuses a reserved or engine-owned sheet name before it exists"
-```
-
----
-
-### Task 2: New module - header, manifest, registration proof
+### Task 1: New module - header, manifest, registration proof
 
 **Owner: Opus.** The manifest encodes the frozen ids and the field `usedBy` wiring; getting a
 typo here silently breaks Setup's disclosure rule (§3's "omitting the field entirely remains
 non-conforming" note exists because this exact mistake is easy to make and easy to miss).
 
-**Files:** New `src/packages/PkgWorkbook.bas`.
+**Files:** New `src/packages/PkgWorkbook.bas`. Modify `src/core/Core.bas` - `CoreCandidates()`
+gains one line registering the new package (Step 2 below).
 
 **Interfaces:**
 - Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_AddAction` (all
   existing).
-- Produces: `PkgWorkbook_Manifest(reg As Object)`. Tasks 3-7 add the five action subs it
-  declares as entries.
+- Produces: `PkgWorkbook_Manifest(reg As Object)`. Tasks 2-6 add the five action subs it
+  declares as entries. Also registers `"Workbook"` in `CoreCandidates()` - the two-place
+  registration the whole wave depends on running at all.
 
 - [ ] **Step 1: Write the file header and manifest**
 
@@ -351,37 +229,50 @@ Public Sub PkgWorkbook_Manifest(reg As Object)
 End Sub
 ```
 
-- [ ] **Step 2: Verify field-key and action-id uniqueness (static)**
+- [ ] **Step 2: Register the package in `CoreCandidates()`**
+
+In `CoreCandidates()`, add one line before `Set CoreCandidates = c`:
+
+```vb
+    c.Add "Workbook"                 ' probes PkgWorkbook_Manifest
+```
+
+This is the two-place registration the whole wave depends on running at all - `build.ps1`
+bundles `PkgWorkbook.bas` by glob whether or not this line exists; only this line makes Core
+ever call it.
+
+- [ ] **Step 3: Verify field-key, action-id, and registration (static)**
 
 ```bash
 grep -rn '"k_workbook_toc_name"\|"k_workbook_password"' src/packages/*.bas
 grep -rn '"workbook\.' src/packages/*.bas
+grep -n 'c.Add "Workbook"' src/core/Core.bas
 ```
 
-Expected: every hit is inside `PkgWorkbook.bas` itself - no other package independently
-declared either key or any `workbook.*` id.
+Expected: every field-key/action-id hit is inside `PkgWorkbook.bas` itself - no other package
+independently declared either key or any `workbook.*` id. One hit for the `CoreCandidates` line.
 
-- [ ] **Step 3: Build and syntax-check**
+- [ ] **Step 4: Build and syntax-check**
 
 ```bash
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
 Expected: **build failure**, and this is expected at this point - the manifest declares five
-entry points (`PkgWorkbook_UnhideSheets` etc.) that Tasks 3-7 have not written yet, so
+entry points (`PkgWorkbook_UnhideSheets` etc.) that Tasks 2-6 have not written yet, so
 `build.ps1`'s entry-point resolver has nothing to find. Confirm the failure names the missing
 subs rather than something else; that is the proof the manifest itself is wired correctly.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/packages/PkgWorkbook.bas
-git commit -m "feat(workbook): PkgWorkbook manifest - two fields, five action entries"
+git add src/packages/PkgWorkbook.bas src/core/Core.bas
+git commit -m "feat(workbook): PkgWorkbook manifest - two fields, five action entries; register with CoreCandidates"
 ```
 
 ---
 
-### Task 3: `workbook.unhide_sheets`
+### Task 2: `workbook.unhide_sheets`
 
 **Owner: delegate to codex (sonnet).** Mechanical: one loop, one exclusion, one report.
 
@@ -452,7 +343,7 @@ git commit -m "feat(workbook): workbook.unhide_sheets"
 
 ---
 
-### Task 4: `workbook.protect_sheets`, and the shared failure-note helper
+### Task 3: `workbook.protect_sheets`, and the shared failure-note helper
 
 **Owner: delegate to codex (sonnet).** Mechanical, following the count-then-confirm shape at
 `src/packages/PkgClean.bas:292-310` (`PkgClean_ConfirmBlanks`).
@@ -462,7 +353,7 @@ git commit -m "feat(workbook): workbook.unhide_sheets"
 **Interfaces:**
 - Consumes `Core_IsEngineSheet`, `Core_Cfg`, `Core_SpeedOn`/`Core_SpeedOff`, `Core_Refuse`,
   `Core_Done`, `Core_Fail`.
-- Produces `PkgWorkbook_FailedNote` (private), reused unchanged by Task 5.
+- Produces `PkgWorkbook_FailedNote` (private), reused unchanged by Task 4.
 
 - [ ] **Step 1: Add the action and the shared helper**
 
@@ -566,14 +457,14 @@ git commit -m "feat(workbook): workbook.protect_sheets"
 
 ---
 
-### Task 5: `workbook.unprotect_sheets`
+### Task 4: `workbook.unprotect_sheets`
 
-**Owner: delegate to codex (sonnet).** Mechanical; reuses Task 4's `PkgWorkbook_FailedNote`.
+**Owner: delegate to codex (sonnet).** Mechanical; reuses Task 3's `PkgWorkbook_FailedNote`.
 
 **Files:** Modify `src/packages/PkgWorkbook.bas`.
 
 **Interfaces:** Consumes `Core_IsEngineSheet`, `Core_Cfg`, `Core_SpeedOn`/`Core_SpeedOff`,
-`Core_Done`, `Core_Fail`, and Task 4's `PkgWorkbook_FailedNote`.
+`Core_Done`, `Core_Fail`, and Task 3's `PkgWorkbook_FailedNote`.
 
 - [ ] **Step 1: Add the action**
 
@@ -646,7 +537,7 @@ git commit -m "feat(workbook): workbook.unprotect_sheets"
 
 ---
 
-### Task 6: `workbook.build_toc`
+### Task 5: `workbook.build_toc`
 
 **Owner: delegate to codex (sonnet).** Mechanical, but Step 1 implements the marker-based
 refresh from Decision 7 exactly as specified - do not simplify it back to create-only.
@@ -766,7 +657,7 @@ git commit -m "feat(workbook): workbook.build_toc"
 
 ---
 
-### Task 7: `workbook.unhide_rows_cols`
+### Task 6: `workbook.unhide_rows_cols`
 
 **Owner: delegate to codex (sonnet).** Mechanical, following the confirm-on-surprise shape at
 `src/packages/PkgClean.bas:292-310`, gated on one condition instead of always shown.
@@ -871,14 +762,14 @@ git commit -m "feat(workbook): workbook.unhide_rows_cols"
 
 ---
 
-### Task 8: Contract v2.9.0
+### Task 7: Contract v2.9.0
 
 **Owner: Opus.** Contract work; the reserved-name normative bullet and the additive/breaking
 call (Decision 9) need care, not a template fill-in.
 
 **Files:** Modify `spec/contract.md` - header, §7, §8, §10.
 
-**Interfaces:** Produces the normative text this wave's code (Tasks 1-7) already implements.
+**Interfaces:** Produces the normative text this wave's code (Tasks 1-6) already implements.
 Consumes nothing.
 
 - [ ] **Step 1: Bump the version header**
@@ -979,7 +870,7 @@ git commit -m "spec: contract v2.9.0 - workbook package, and the reserved-name r
 
 ---
 
-### Task 9: Version, changelog, code map, deferred-validation log, and the PR
+### Task 8: Version, changelog, code map, deferred-validation log, and the PR
 
 **Owner: Opus.**
 
@@ -1066,14 +957,15 @@ this is the last wave, with phase 8 next.
   string match, `DrawingObjects:=False`'s effect on a later rebuild, `Unprotect`'s prompt
   behaviour, a hyperlink's `SubAddress` against a hidden sheet, `AutoFilterMode`'s reliability).
   `build.ps1` and the syntax check can only prove the code compiles and is reachable - none of
-  these claims are confirmed until phase 8's real run. Task 9 exists to make sure none of them
+  these claims are confirmed until phase 8's real run. Task 8 exists to make sure none of them
   is silently dropped between now and then.
-- **`Core_DestUsable`'s new check changes behaviour for every existing caller**, not just this
-  wave's TOC action. If W2-W5 shipped a destination-name field whose default or a real
+- **`Core_DestUsable`'s reserved-name check changes behaviour for every existing caller**, not
+  just this wave's TOC action. If W2-W5 shipped a destination-name field whose default or a real
   deployment's configured value happens to collide with the reserved family, that caller starts
   refusing where it previously (silently, incorrectly) succeeded. This is the intended fix
-  (Decision 9), but it means Task 1's diff should be reviewed with W2-W5's actual shipped field
-  defaults in hand, not assumed safe from this plan alone.
+  (Decision 9), but it means phase 2's `Core_DestUsable` diff
+  (`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 3) should be reviewed with W2-W5's
+  actual shipped field defaults in hand, not assumed safe from this plan alone.
 - **The TOC marker is a plain sentence in cell A1, not a hidden or protected cell.** A user who
   edits or deletes that cell by hand (encouraged not to, by the sentence itself) turns the next
   run into a refusal ("not built by this action") rather than a silent misfire - a deliberate
@@ -1088,5 +980,5 @@ this is the last wave, with phase 8 next.
 - **Not confirmed by this plan: whether `ws.Protect` on an already-protected sheet reliably
   raises an error** (rather than silently no-op'ing or silently changing its parameters) for the
   per-sheet failure tracking in `workbook.protect_sheets` to behave as designed. Believed true
-  from ordinary VBA behaviour; logged in Task 9 alongside the `Unprotect`-prompt assumption
+  from ordinary VBA behaviour; logged in Task 8 alongside the `Unprotect`-prompt assumption
   rather than asserted as fact.

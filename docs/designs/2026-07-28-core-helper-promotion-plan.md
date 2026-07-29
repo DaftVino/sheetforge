@@ -3,11 +3,11 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development`
 > to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give Core the fourteen helpers W2–W6 would otherwise each re-invent, and leave
+**Goal:** Give Core the fifteen helpers W2–W6 would otherwise each re-invent, and leave
 every package private carrying its package prefix — so the flat namespace stops being a
 landmine and `CLAUDE.md` rule 4 is true rather than aspirational.
 
-**Architecture:** Almost a pure refactor. **14 new `Core_*` procedures**, plus one
+**Architecture:** Almost a pure refactor. **15 new `Core_*` procedures**, plus one
 (`IsAllDigits`, added by phase 1) renamed and published as `Core_IsDigits`. Their old call
 sites in `PkgClean` and `PkgImport` change name only. Three helpers whose prompt text was
 baked to one caller gain a parameter for it. Every remaining unprefixed package private is
@@ -20,8 +20,14 @@ move; if a diff changes anything else a user could see, it is wrong.
 
 1. `Core_AskHasHeader`'s dialog title stops being hardcoded `"Remove Duplicates"`.
 2. `Core_AskCols`'s prompt and title stop being hardcoded to Remove Duplicates.
-3. `Core_DestUsable` **also refuses a name taken by a chart sheet**, which the version it
-   replaces did not — see Task 2 Step 3.
+3. `Core_DestUsable` **also refuses a name taken by a chart sheet, and an engine-owned name
+   that does not exist yet** — neither of which the version it replaces refused. See Task 2
+   Step 3; both are fixes for silent data loss, and both are new refusals on inputs that
+   previously ran.
+4. `Core_ResolveColumn` **returns an index where `PkgClean_ResolveFormatCol` returned a
+   `Range`** — the one promotion whose call site changes shape rather than only its name.
+   Nothing a user sees changes; it is listed here because "verbatim move" is the rule this
+   plan is checked against, and this is the exception.
 
 **Tech stack:** VBA (Excel/Windows, one concatenated `.bas`), PowerShell for the build, Node
 for the syntax check. No test framework — see *Verification*.
@@ -53,6 +59,7 @@ what produced this pass.
 | `IsBlankVal` | `PkgClean.bas:696` | `PkgClean` + `validate.missing_fields` |
 | `PkgClean_NarrowToUsed` | `PkgClean.bas:582` | every action that takes a range |
 | `PkgClean_IsAlpha` | `PkgClean.bas:496` | `PkgClean` + any column-letter parser |
+| `PkgClean_ResolveFormatCol` | `PkgClean.bas:470` | `PkgClean` + W2 `validate.scan` + W4 `enrich.*` — **three** |
 | `IsAllDigits` | added by phase 1, private in Core | already Core's; only needs publishing |
 | `PkgImport_DestUsable` | `PkgImport.bas:451` | + W2 report, W4 pivots, W5 snapshot, W6 TOC |
 | the add-sheet-and-name recipe | **duplicated in-file** at `PkgImport.bas:192` and `:415` | same four |
@@ -130,7 +137,7 @@ That is why this phase carries no run-time-only claims into the phase-8 validati
 
 | File | Change |
 |---|---|
-| `src/core/Core.bas` | **+14 `Core_*` procedures**, in two new sections; `IsAllDigits` (phase 1) becomes `Core_IsDigits`. Net `Function` count rises by 14. |
+| `src/core/Core.bas` | **+15 `Core_*` procedures**, in two new sections; `IsAllDigits` (phase 1) becomes `Core_IsDigits`. Net `Function` count rises by 15. |
 | `src/packages/PkgClean.bas` | 8 helpers deleted, call sites renamed; 3 remaining privates gain the `PkgClean_` prefix. |
 | `src/packages/PkgImport.bas` | 5 helpers deleted or shrunk, call sites renamed; the in-file duplicated sheet-creation recipe collapses to one `Core_NewSheet` call. |
 | `src/packages/PkgImportExport.bas` | 5 privates gain the `PkgImportExport_` prefix. |
@@ -302,8 +309,8 @@ git commit -m "feat(core): Core_AskRange, Core_AskHasHeader, Core_AskCols, Core_
 - Consumes additionally: `Core_IsEngineSheet` (phase 1) — `Core_DestUsable` refuses an
   engine-owned name with it.
 - Produces: `Core_CleanText`, `Core_IsBlank`, `Core_IsAlpha`, `Core_IsDigits`,
-  `Core_NarrowToUsed`, `Core_BadSheetChars`, `Core_DestUsable`, `Core_NewSheet`,
-  `Core_SafeSheetName`, `Core_ResolveFolder`, `Core_FolderExists`.
+  `Core_NarrowToUsed`, `Core_ResolveColumn`, `Core_BadSheetChars`, `Core_DestUsable`,
+  `Core_NewSheet`, `Core_SafeSheetName`, `Core_ResolveFolder`, `Core_FolderExists`.
 
 - [ ] **Step 1: Publish phase 1's `IsAllDigits`**
 
@@ -335,10 +342,56 @@ Public Function Core_IsAlpha(ByVal s As String) As Boolean
     Dim i As Long, ch As String
     If Len(s) = 0 Then Exit Function
     For i = 1 To Len(s)
-        ch = UCase$(Mid$(s, i, 1))
+        ch = UCase(Mid$(s, i, 1))
         If ch < "A" Or ch > "Z" Then Exit Function
     Next i
     Core_IsAlpha = True
+End Function
+
+' A column inside rng, named either by its SPREADSHEET LETTER ("C") or by its
+' HEADER TEXT ("Amount"). Returns the column's position WITHIN rng, counting from
+' 1 at rng's left edge - or 0 when the spec does not resolve inside rng, so the
+' caller reports a bad column rather than acting on the wrong one.
+'
+' Returns an INDEX, not a Range, even though the PkgClean function it is promoted
+' from returned a Range. The index is the primitive: a caller wanting the column
+' itself writes rng.Columns(idx), and a caller reading a bulk .Value2 array - which
+' is how every engine here reads a real dataset - needs the number and would only
+' convert a Range straight back into one. Going the other way is not symmetrical,
+' and 0-means-no beats testing Is Nothing on a function that also has a "found it
+' but it is outside your range" answer.
+'
+' The letter reading wins a tie, so a range whose header literally reads "A"
+' cannot be addressed by name. That is documented in the consuming field's help
+' text rather than resolved, because a heuristic that guessed would be worse.
+'
+' Header comparison is case- and space-insensitive via StrComp vbTextCompare:
+' a user typing "amount" for a column headed "Amount " must not be told their
+' column does not exist.
+Public Function Core_ResolveColumn(rng As Range, ByVal spec As String) As Long
+    Dim s As String, absCol As Long, i As Long, hdr As String
+    s = Trim(spec)
+    If Len(s) = 0 Then Exit Function
+
+    If Len(s) <= 3 And Core_IsAlpha(s) Then
+        On Error Resume Next
+        absCol = rng.Parent.Range(s & "1").Column
+        On Error GoTo 0
+        If absCol > 0 Then
+            If absCol >= rng.Column And absCol <= rng.Column + rng.Columns.Count - 1 Then
+                Core_ResolveColumn = absCol - rng.Column + 1
+            End If
+            Exit Function
+        End If
+    End If
+
+    For i = 1 To rng.Columns.Count
+        hdr = Trim(CStr(rng.Cells(1, i).Value))
+        If StrComp(hdr, s, vbTextCompare) = 0 Then
+            Core_ResolveColumn = i
+            Exit Function
+        End If
+    Next i
 End Function
 
 ' Excel TRIM (collapse runs of spaces) + CLEAN (strip non-printing characters).
@@ -554,7 +607,7 @@ End Function
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: exit 0, `Core + 3 package(s)`, no diagnostics. `Function` is now up by 14 from the
+Expected: exit 0, `Core + 3 package(s)`, no diagnostics. `Function` is now up by 15 from the
 phase-1 baseline and `Sub` unchanged; nothing has been deleted yet, so both packages still
 hold their own copies and **the build passing here is the proof the new names collide with
 nothing.**
@@ -588,6 +641,27 @@ Across the whole file, with no other change:
 | `IsBlankVal(` | `Core_IsBlank(` |
 | `PkgClean_NarrowToUsed(` | `Core_NarrowToUsed(` |
 | `PkgClean_IsAlpha(` | `Core_IsAlpha(` |
+`PkgClean_ResolveFormatCol` is **the one promotion that is not a verbatim move**, because
+`Core_ResolveColumn` returns an index where it returned a `Range`. Its single call site in
+`PkgClean_StandardizeFormats` changes shape:
+
+```vb
+' was:
+        Set tgt = PkgClean_ResolveFormatCol(rng, cols(i))
+        If tgt Is Nothing Then
+' becomes:
+        idx = Core_ResolveColumn(rng, cols(i))
+        If idx = 0 Then
+            Set tgt = Nothing
+        Else
+            Set tgt = rng.Columns(idx)
+        End If
+        If tgt Is Nothing Then
+```
+
+Declare `idx As Long` with the other locals at the top of the procedure, **not**
+mid-procedure. Everything downstream of `tgt` is untouched — this changes how the column is
+found, not what is done to it, and the formats applied must be identical.
 
 `AskHasHeader` and `AskKeyCols` gain arguments rather than only a name, so they are done by
 hand:
@@ -607,10 +681,15 @@ If Not Core_AskCols(rng, keys, _
 **Passing `"Remove Duplicates"` explicitly is the point** — the string that used to be
 hardcoded inside the helper is now supplied by the one action it was ever right for.
 
-- [ ] **Step 2: Delete the eight now-dead privates**
+- [ ] **Step 2: Delete the nine now-dead privates**
 
 `AskRange` (603), `AskHasHeader` (626), `AskKeyCols` (645), `ParseCols` (676), `CleanText`
-(692), `IsBlankVal` (696), `PkgClean_NarrowToUsed` (582), `PkgClean_IsAlpha` (496).
+(692), `IsBlankVal` (696), `PkgClean_NarrowToUsed` (582), `PkgClean_IsAlpha` (496),
+`PkgClean_ResolveFormatCol` (470).
+
+**Nine, not eight** — `PkgClean_ResolveFormatCol` was added to this task after drafting W4
+showed it has a third consumer. Promoting it while leaving `PkgClean`'s copy in place would
+have left a permanent duplicate pair, which is the thing this phase exists to remove.
 
 **Their explanatory comments moved into Core with them in Tasks 1 and 2 — do not leave an
 orphaned comment block behind, and do not copy a comment into both places.**
@@ -630,7 +709,7 @@ Expected: **no output.** The `[^_[:alnum:]]` guard is what stops `Core_ParseCols
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: exit 0, no diagnostics. `Function` falls by 8 from Task 2's build.
+Expected: exit 0, no diagnostics. `Function` falls by 9 from Task 2's build.
 
 - [ ] **Step 5: Commit**
 
