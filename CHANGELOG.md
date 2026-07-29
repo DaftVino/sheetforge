@@ -6,6 +6,49 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-28
+
+### Fixed
+
+- **A chain no longer reports success for work it did not do.** This is the whole release.
+
+  When a step *refuses* — it checked, found the world not ready, and stopped having changed
+  nothing — the chain now stops there and tells you which step refused, why, and how many
+  steps did not run. Before, it asked whether to continue, and answering yes ran every
+  later step against whatever was already on the sheet.
+
+  That was not a hypothetical. **Combine All Worksheets refuses on every run after the
+  first**, because the sheet it creates now exists. So a daily chain of combine → clean →
+  clean → clean showed a dialog, cleaned *last* period's numbers, and reported `4/4 ok`.
+  A wrong number in a finance deliverable with a tick beside it is the worst thing this
+  toolkit could produce, and it is the thing this release removes.
+
+  A step that genuinely *fails* still asks. The difference is deliberate: a failure may be
+  incidental to one step and you are placed to judge, but a refusal means that step's output
+  does not exist, so everything after it would be working on stale data.
+
+- **Refusals stop showing a fake error number.** A refusal is not an error, so the summary
+  line no longer reads `X #0 A sheet named 'Master' already exists` — which told you your
+  macro had malfunctioned when it had done exactly the right thing.
+
+- **The Import / Export actions were not reporting their refusals at all.** All five of them
+  showed a message and returned without telling the engine anything had gone wrong, so inside
+  a chain each was ticked green beside a step that did nothing. They now report like every
+  other action. If you have a chain containing one of these, it will now stop where it
+  previously carried on.
+
+- **Two refusal messages now name what they are talking about on their first line** — the
+  folder that was not found, and how many column headers were missing. The chain summary
+  quotes only the first line, so "This folder was not found:" with the path underneath told
+  you nothing useful.
+
+### Changed
+
+- **Contract v2.4.0.** A refusal is now a distinct outcome from a failure, alongside success;
+  an implementation must expose a single call that both records it and shows its reason; and a
+  chain must stop at one. Classed additive: no stored value changes meaning, and `SCHEMA_VER`
+  stays `"v2.0"`, so every existing configuration keeps working unchanged.
+
 ## [0.10.0] - 2026-07-28
 
 ### Added
