@@ -66,14 +66,14 @@ because getting it wrong here is worse than anywhere else:
 | 4 | Where does the password come from? | **Config (`k_workbook_password`, text, advanced, default blank), not a per-run prompt.** Stated plainly rather than implied: this is not a secret. It sits in a cell on the hidden `_Config` sheet, in plain text, exactly like every other Setup answer - anyone who can reach that sheet (or the config store on disk) can read it. It only stops accidental edits from the ribbon, the same as Excel's own Protect Sheet with no server-side enforcement behind it. A per-run prompt would not fix this (the same password gets typed by the same people either way) and it would break the quiet-chain convention (an interactive prompt cannot be suppressed - contract §6). Storing it in config is consistent with everything else on Setup and is honestly no worse. |
 | 5 | Wrong password on `unprotect_sheets` | **Caught per sheet, not aborted halfway.** Each `Unprotect` call is wrapped in its own error trap; a sheet whose password does not match is added to a "skipped" list and the loop continues. `Core_Done`'s message reports both counts by name, so a partial run is never mistaken for a complete one. |
 | 6 | `Unprotect`'s `Password:=` argument when the config password is blank | **Always passed explicitly, never omitted**, even when it is `""`. Calling `Unprotect` with **no** argument shows Excel's own interactive password box when the sheet carries one - which would surface mid-chain, breaking the quiet convention. An explicit argument (blank or not) never prompts: a mismatch raises error 1004 instead, which the per-sheet trap catches. **Marked as an assumption about Excel's own behaviour** (`CLAUDE.md` §7) - see Unknowns. |
-| 7 | Does `build_toc` create-only, or refresh? | **Refresh in place, using a written marker to prove ownership.** A create-only TOC would refuse on every run after the first - the exact shape of the `import.combine_worksheets` bug the whole refusal pass (phase 1) is named for, except here re-running after adding a tab is the entire point of the feature, not an edge case. The sheet's `A1` holds a fixed sentence (`PkgWorkbook_TocMarker`); on a rerun, if a sheet by the configured name exists and `A1` matches that sentence, its contents are cleared and rebuilt. If a sheet exists with that name and `A1` does **not** match, the action refuses exactly the way `Core_DestUsable` refuses any other name collision - a user's own sheet that happens to share the configured name is never touched. |
-| 8 | Does `Core_DestUsable` need a reserved-name check, and where does it live? | **Yes, and phase 2 already added it - this wave consumes it rather than adding it.** `Core_DestUsable` used to refuse only an *existing* sheet of that name; it had no opinion on a name the engine would claim **later** (`Macros 3` before any rebuild has produced one, `_Config` if it were somehow briefly absent). `Core_IsEngineSheet` already answers "is this name in the reserved family?" as a pure string test with no dependency on whether a sheet currently exists by that name, so phase 2 added the check as one call inside `Core_DestUsable` (`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 3), and every existing and future caller - including this wave's TOC - inherits it the moment that PR merges. Hardcoding the reserved family inside `PkgWorkbook` instead would still be the exact defect phases 1 and 2 exist to remove: a second copy of state Core already owns. Phase 2's version also checks `ThisWorkbook.Sheets` rather than `Core_SheetExists`, so a name held by a **chart sheet** is refused too - a second refusal this wave did not know about when it was first drafted. |
+| 7 | Does `build_toc` create-only, or refresh? | **Create-only. Refuses on any pre-existing sheet by that name, including this action's own prior output.** An earlier draft of this plan refreshed in place, proving ownership with a fixed sentence written to `A1` on the first run and compared on later runs. Review rejected that: a plain, editable cell value is collision detection, not provenance - any user sheet whose `A1` happens to equal the same sentence would be silently cleared, and a sheet that is *supposed* to be the prior TOC but had its `A1` edited or cleared by hand would wrongly be treated as foreign. A real ownership test - a hidden defined name, a custom document property, anything not visible as ordinary cell content - would work, but it is new engine state this wave declines to add for one field on one action. So the trade is taken openly instead: `build_toc` now calls `Core_DestUsable` unconditionally (see Task 5), which refuses **any** existing sheet by that name exactly the way it refuses any other destination collision, with no exception for the sheet this action built last time. Rebuilding the Table of Contents after adding, removing, or renaming a tab means deleting the old sheet by hand first, then running the action again - stated in the field help text and the completion message, not left for the user to discover. |
+| 8 | Does `Core_DestUsable` need a reserved-name check, and where does it live? | **Yes, and phase 2 already added it - this wave consumes it rather than adding it.** `Core_DestUsable` used to refuse only an *existing* sheet of that name; it had no opinion on a name the engine would claim **later** (`Macros 3` before any rebuild has produced one, `_Config` if it were somehow briefly absent). `Core_IsEngineSheet` already answers "is this name in the reserved family?" as a pure string test with no dependency on whether a sheet currently exists by that name, so phase 2 added the check as one call inside `Core_DestUsable` (`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 3), and every existing and future caller - including this wave's TOC - inherits it the moment that PR merges. Hardcoding the reserved family inside `PkgWorkbook` instead would still be the exact defect phases 1 and 2 exist to remove: a second copy of state Core already owns. Phase 2's version also checks `ThisWorkbook.Sheets` rather than `Core_SheetExists`, so a name held by a **chart sheet** is refused too - a second refusal this wave did not know about when it was first drafted. `build_toc` (Task 5) calls `Core_DestUsable` unconditionally, on every run, whether or not a sheet by the configured name currently exists - an earlier draft called it only on the create path and special-cased an existing sheet with its own marker check, which meant the reserved-name refusal was skipped whenever a sheet already happened to occupy the name. Calling it first, before any branch, means there is no branch left for that check to miss, and it makes the reserved-name test and the collision test the same call everywhere else in the toolkit already makes them. |
 | 9 | Is the `build_toc` name-collision refusal classed additive or breaking? | **Additive**, on the same reasoning contract v2.4.0 used for the chain-halt rule (§10): a config value like `k_import_dest = "Macros 3"` was never actually *usable* correctly before this fix - it produced a sheet the very next Finalize destroyed unconditionally. Refusing it now prevents a data-loss trap rather than withdrawing behaviour anyone could rely on. |
 | 10 | `unhide_rows_cols` scope: whole sheet, active sheet, or a picked range? | **The whole active sheet, not a `Core_AskRange` pick.** The catalog names this "Reset visibility **across the sheet**" (singular), matching the classic snippet it replaces (select all cells, Unhide Rows, Unhide Columns) - a range-scoped version would leave hidden rows/columns just outside the pick untouched, which is not "reset," it is "reset some of it." |
 | 11 | `unhide_rows_cols` and an active AutoFilter | **Warned, not silently overridden, not refused.** `Range.Hidden` is the same property for a manually hidden row and a filter-hidden row - there is no way to tell them apart or to unhide only one kind. The action detects `ws.AutoFilterMode` and, only then, shows a Yes/No confirm naming the effect (every filtered-out row reappears) before proceeding; without an active filter it just does the reset and reports the count, like `unhide_sheets`. |
 | 12 | `unhide_rows_cols` and an engine sheet | **Refused if the active sheet is engine-owned.** Setup and the generated `Macros <n>` pages rely on rows/columns hidden on purpose as part of their own layout (the button-page grid, admin rows); unhiding them exposes the toolkit's internal layout, not something the user can use. |
 | 13 | Does `build_toc` list hidden sheets? | **No.** A hyperlink's `SubAddress` cannot navigate to a hidden sheet, so a link to one is a dead click that looks like a bug. Only sheets where `Visible = xlSheetVisible` are listed, and the completion message says so. |
-| 14 | Safety story per action (one line each, per `CLAUDE.md`'s bar) | `unhide_sheets`: non-destructive and reversible, no confirm, engine sheets excluded unconditionally. `protect_sheets`: preview-and-confirm (count + which sheets are excluded and why) before locking editing broadly. `unprotect_sheets`: non-destructive, no confirm, per-sheet failure reporting instead of an all-or-nothing abort. `build_toc`: additive-only on a fresh name, refuse-on-collision otherwise; the only content it ever destroys is its own prior output, proven by the marker, never a user's. `unhide_rows_cols`: non-destructive and reversible, confirm gated specifically on the one case (an active filter) where the result looks like something broke. |
+| 14 | Safety story per action (one line each, per `CLAUDE.md`'s bar) | `unhide_sheets`: non-destructive and reversible, no confirm, engine sheets excluded unconditionally. `protect_sheets`: preview-and-confirm (count + which sheets are excluded and why) before locking editing broadly. `unprotect_sheets`: non-destructive, no confirm, per-sheet failure reporting instead of an all-or-nothing abort. `build_toc`: create-only; refuses on any pre-existing sheet by the configured name, including its own prior output, so it never clears content it cannot prove is its own. `unhide_rows_cols`: non-destructive and reversible, confirm gated specifically on the one case (an active filter) where the result looks like something broke. |
 
 ---
 
@@ -114,10 +114,10 @@ Copied from `2026-07-28-track2-completion-plan-of-record.md` §4, verbatim.
 4. **What the build genuinely cannot see**: whether `Core_IsEngineSheet` actually excludes
    `_Config` at run time, whether `DrawingObjects:=False` actually preserves a rebuild's control
    placement on a protected sheet, whether `Unprotect Password:=""` really avoids Excel's
-   interactive prompt, whether the TOC marker check really distinguishes ownership correctly,
-   and whether the AutoFilter warning fires when it should. **These are logged to
-   `docs/designs/2026-07-28-deferred-validation-log.md` in Task 8**, not gated here - per
-   plan-of-record §3.5, phase 8 is where the owner runs the workbook once, for real.
+   interactive prompt, whether `Core_DestUsable`'s reserved-name refusal actually fires against a
+   real value typed into Setup, and whether the AutoFilter warning fires when it should. **These
+   are logged to `docs/designs/2026-07-28-deferred-validation-log.md` in Task 8**, not gated
+   here - per plan-of-record §3.5, phase 8 is where the owner runs the workbook once, for real.
 
 ---
 
@@ -126,7 +126,7 @@ Copied from `2026-07-28-track2-completion-plan-of-record.md` §4, verbatim.
 | File | Change |
 |---|---|
 | `src/core/Core.bas` | `CoreCandidates()` gains `c.Add "Workbook"`. |
-| `src/packages/PkgWorkbook.bas` | **New.** Header comment, `PkgWorkbook_Manifest`, five `Public Sub` actions, three `Private` helpers (`PkgWorkbook_FailedNote`, `PkgWorkbook_TocMarker`, `PkgWorkbook_CountHidden`). |
+| `src/packages/PkgWorkbook.bas` | **New.** Header comment, `PkgWorkbook_Manifest` (built incrementally: Task 1 declares the package and its two fields with zero actions; Tasks 2-6 each add one `Core_AddAction` line in the same task that adds the handler it names, so every commit's build is green), five `Public Sub` actions, two `Private` helpers (`PkgWorkbook_FailedNote`, `PkgWorkbook_CountHidden`). |
 | `spec/contract.md` | v2.9.0. §7 gets one new "Reserved" normative bullet (Decision 8/9); §8 gains a `Package workbook` subsection; §10 gains the version bullet. |
 | `docs/designs/2026-07-28-deferred-validation-log.md` | Gains this wave's run-time-only claims. |
 | `VERSION`, `CHANGELOG.md`, `docs/code-map.md` | v0.17.0. |
@@ -143,13 +143,15 @@ non-conforming" note exists because this exact mistake is easy to make and easy 
 gains one line registering the new package (Step 2 below).
 
 **Interfaces:**
-- Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField`, `Core_AddAction` (all
-  existing).
-- Produces: `PkgWorkbook_Manifest(reg As Object)`. Tasks 2-6 add the five action subs it
-  declares as entries. Also registers `"Workbook"` in `CoreCandidates()` - the two-place
+- Consumes: `Core_DeclarePackage`, `Core_AddSection`, `Core_AddField` (all existing).
+- Produces: `PkgWorkbook_Manifest(reg As Object)` - declaring the package and its two fields
+  ONLY, no actions yet. Each of Tasks 2-6 adds one `Core_AddAction` line to this same `Sub`,
+  in the same task that adds the handler it names, so every commit's build stays green - no
+  task ever commits a manifest entry whose Sub does not exist yet, or a Sub the manifest does
+  not yet know about. Also registers `"Workbook"` in `CoreCandidates()` - the two-place
   registration the whole wave depends on running at all.
 
-- [ ] **Step 1: Write the file header and manifest**
+- [ ] **Step 1: Write the file header and the manifest's package/field declarations**
 
 ```vb
 Attribute VB_Name = "PkgWorkbook"
@@ -187,13 +189,13 @@ Public Sub PkgWorkbook_Manifest(reg As Object)
     Core_AddSection reg, "TABLE OF CONTENTS"
     Core_AddField reg, "k_workbook_toc_name", "Name for the Table of Contents sheet", "text", "Contents", _
         "simple", _
-        "A sheet by this name is created the first run and refreshed in place on every later " & _
-        "run - it is never treated as a sheet you already own, so a rerun after adding a tab " & _
-        "is the normal way to use this. If the name is already taken by a sheet this action " & _
-        "did not build, or by a name the toolkit itself reserves (Setup, the config sheets, or " & _
-        "a generated Macros page), the action stops and asks for a different name. Kind is " & _
-        "text, not sheet, because a sheet field is validated to already EXIST and this one " & _
-        "must not.", _
+        "A sheet by this name is created the first run. On a later run, if a sheet by this " & _
+        "name already exists - including this action's own sheet from a prior run - the " & _
+        "action stops and asks for a different name; it never overwrites an existing sheet, " & _
+        "so to rebuild the Table of Contents, delete the old one by hand first, then run this " & _
+        "again. The same refusal applies to a name the toolkit itself reserves (Setup, the " & _
+        "config sheets, or a generated Macros page). Kind is text, not sheet, because a sheet " & _
+        "field is validated to already EXIST and this one must not.", _
         "workbook.build_toc"
 
     Core_AddSection reg, "PROTECTION"
@@ -205,27 +207,9 @@ Public Sub PkgWorkbook_Manifest(reg As Object)
         "from the ribbon, the same protection Excel's own Protect Sheet provides on its own.", _
         "workbook.protect_sheets,workbook.unprotect_sheets"
 
-    Core_AddAction reg, "workbook.unhide_sheets", "Unhide All Worksheets", "PkgWorkbook_UnhideSheets", _
-        "Makes every hidden or very-hidden worksheet visible again. Setup and the toolkit's " & _
-        "own internal sheets - including the hidden config store - are never touched.", _
-        "Workbook Housekeeping"
-    Core_AddAction reg, "workbook.protect_sheets", "Protect All Sheets", "PkgWorkbook_ProtectSheets", _
-        "Locks every sheet you own against editing, with the password above (or no password " & _
-        "if it is blank). Setup and the toolkit's own internal sheets are left unprotected, so " & _
-        "a later rebuild can still manage its own buttons on them.", _
-        "Workbook Housekeeping"
-    Core_AddAction reg, "workbook.unprotect_sheets", "Unprotect All Sheets", "PkgWorkbook_UnprotectSheets", _
-        "Unlocks every sheet you own, using the password above. A sheet locked with a " & _
-        "different password is reported by name rather than stopping the rest.", _
-        "Workbook Housekeeping"
-    Core_AddAction reg, "workbook.build_toc", "Build Table of Contents", "PkgWorkbook_BuildToc", _
-        "Creates, or refreshes, one sheet listing every visible tab, each linked to jump " & _
-        "straight to it.", _
-        "Workbook Housekeeping"
-    Core_AddAction reg, "workbook.unhide_rows_cols", "Unhide All Rows & Columns", "PkgWorkbook_UnhideRowsCols", _
-        "Resets row and column visibility on the active sheet. Warns first if an AutoFilter " & _
-        "on that sheet would also lose its filtered-out rows.", _
-        "Workbook Housekeeping"
+    ' Tasks 2-6 each insert one Core_AddAction line here, immediately above this
+    ' End Sub, in the same task that adds the handler it names - so this Sub and
+    ' the handlers it points at are never out of step at any commit.
 End Sub
 ```
 
@@ -249,8 +233,11 @@ grep -rn '"workbook\.' src/packages/*.bas
 grep -n 'c.Add "Workbook"' src/core/Core.bas
 ```
 
-Expected: every field-key/action-id hit is inside `PkgWorkbook.bas` itself - no other package
-independently declared either key or any `workbook.*` id. One hit for the `CoreCandidates` line.
+Expected: both field-key hits are inside `PkgWorkbook.bas` itself - no other package
+independently declared either key. The action-id grep has **no hits yet**: this task declares
+no `workbook.*` action, on purpose - each of Tasks 2-6 adds one action id together with its
+handler, and confirms that one id in its own Step 3, not this one. One hit for the
+`CoreCandidates` line.
 
 - [ ] **Step 4: Build and syntax-check**
 
@@ -258,16 +245,18 @@ independently declared either key or any `workbook.*` id. One hit for the `CoreC
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: **build failure**, and this is expected at this point - the manifest declares five
-entry points (`PkgWorkbook_UnhideSheets` etc.) that Tasks 2-6 have not written yet, so
-`build.ps1`'s entry-point resolver has nothing to find. Confirm the failure names the missing
-subs rather than something else; that is the proof the manifest itself is wired correctly.
+Expected: **exit 0.** The manifest declares zero actions at this point, which is a valid,
+buildable package - there is nothing for `build.ps1`'s entry-point resolver to fail to find.
+`Core + N package(s)` already includes `PkgWorkbook.bas`: `build.ps1` counts every `Pkg*.bas`
+file it finds on disk, not registered actions, so `N` rises the moment this file exists and
+`CoreCandidates()` names it, regardless of how many actions its manifest declares yet. No
+diagnostics from the syntax checker.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/packages/PkgWorkbook.bas src/core/Core.bas
-git commit -m "feat(workbook): PkgWorkbook manifest - two fields, five action entries; register with CoreCandidates"
+git commit -m "feat(workbook): PkgWorkbook manifest - two fields, no actions yet; register with CoreCandidates"
 ```
 
 ---
@@ -279,9 +268,21 @@ git commit -m "feat(workbook): PkgWorkbook manifest - two fields, five action en
 **Files:** Modify `src/packages/PkgWorkbook.bas`.
 
 **Interfaces:** Consumes `Core_IsEngineSheet`, `Core_SpeedOn`/`Core_SpeedOff`, `Core_Done`,
-`Core_Fail`.
+`Core_Fail`, `Core_AddAction`. Produces this task's own manifest entry - see Step 1.
 
-- [ ] **Step 1: Add the action**
+- [ ] **Step 1: Add the manifest entry, then the action**
+
+Insert into `PkgWorkbook_Manifest`, immediately above the `End Sub` (replacing Task 1's
+placeholder comment or the previous task's last `Core_AddAction` line, whichever is there):
+
+```vb
+    Core_AddAction reg, "workbook.unhide_sheets", "Unhide All Worksheets", "PkgWorkbook_UnhideSheets", _
+        "Makes every hidden or very-hidden worksheet visible again. Setup and the toolkit's " & _
+        "own internal sheets - including the hidden config store - are never touched.", _
+        "Workbook Housekeeping"
+```
+
+Then add the handler below the manifest:
 
 ```vb
 '================================================================
@@ -331,8 +332,8 @@ End Sub
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: still fails (four entries remain missing), but the failure list drops
-`PkgWorkbook_UnhideSheets`.
+Expected: **exit 0.** The one action declared so far resolves to a `Sub` with a matching name;
+no diagnostics from the syntax checker.
 
 - [ ] **Step 3: Commit**
 
@@ -352,10 +353,23 @@ git commit -m "feat(workbook): workbook.unhide_sheets"
 
 **Interfaces:**
 - Consumes `Core_IsEngineSheet`, `Core_Cfg`, `Core_SpeedOn`/`Core_SpeedOff`, `Core_Refuse`,
-  `Core_Done`, `Core_Fail`.
-- Produces `PkgWorkbook_FailedNote` (private), reused unchanged by Task 4.
+  `Core_Done`, `Core_Fail`, `Core_AddAction`.
+- Produces `PkgWorkbook_FailedNote` (private), reused unchanged by Task 4. Also produces this
+  task's own manifest entry - see Step 1.
 
-- [ ] **Step 1: Add the action and the shared helper**
+- [ ] **Step 1: Add the manifest entry, then the action and the shared helper**
+
+Insert into `PkgWorkbook_Manifest`, immediately above the `End Sub`, after Task 2's line:
+
+```vb
+    Core_AddAction reg, "workbook.protect_sheets", "Protect All Sheets", "PkgWorkbook_ProtectSheets", _
+        "Locks every sheet you own against editing, with the password above (or no password " & _
+        "if it is blank). Setup and the toolkit's own internal sheets are left unprotected, so " & _
+        "a later rebuild can still manage its own buttons on them.", _
+        "Workbook Housekeeping"
+```
+
+Then add the handler and helper below the manifest:
 
 ```vb
 '================================================================
@@ -405,7 +419,13 @@ Public Sub PkgWorkbook_ProtectSheets(ctx As Object)
         Else
             doneCount = doneCount + 1
         End If
-        On Error GoTo 0
+        ' Restore the procedure's own handler, NOT "On Error GoTo 0". GoTo 0
+        ' would disable error handling entirely for the rest of this Sub - so a
+        ' later, genuinely unexpected error (not this per-sheet Protect failure,
+        ' which is already caught above) would bypass Core_Fail and leave
+        ' Core_SpeedOn's ScreenUpdating/Events/Calculation changes unrestored,
+        ' the same failure Core_Fail's own handler exists to prevent.
+        On Error GoTo Fail
     Next ws
     Core_SpeedOff
 
@@ -445,8 +465,7 @@ End Function
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: still fails (three entries remain missing); the failure list drops
-`PkgWorkbook_ProtectSheets`.
+Expected: **exit 0.** Both actions declared so far resolve; no diagnostics.
 
 - [ ] **Step 3: Commit**
 
@@ -464,9 +483,21 @@ git commit -m "feat(workbook): workbook.protect_sheets"
 **Files:** Modify `src/packages/PkgWorkbook.bas`.
 
 **Interfaces:** Consumes `Core_IsEngineSheet`, `Core_Cfg`, `Core_SpeedOn`/`Core_SpeedOff`,
-`Core_Done`, `Core_Fail`, and Task 3's `PkgWorkbook_FailedNote`.
+`Core_Done`, `Core_Fail`, `Core_AddAction`, and Task 3's `PkgWorkbook_FailedNote`. Produces this
+task's own manifest entry - see Step 1.
 
-- [ ] **Step 1: Add the action**
+- [ ] **Step 1: Add the manifest entry, then the action**
+
+Insert into `PkgWorkbook_Manifest`, immediately above the `End Sub`, after Task 3's line:
+
+```vb
+    Core_AddAction reg, "workbook.unprotect_sheets", "Unprotect All Sheets", "PkgWorkbook_UnprotectSheets", _
+        "Unlocks every sheet you own, using the password above. A sheet locked with a " & _
+        "different password is reported by name rather than stopping the rest.", _
+        "Workbook Housekeeping"
+```
+
+Then add the handler below the manifest:
 
 ```vb
 '================================================================
@@ -501,7 +532,10 @@ Public Sub PkgWorkbook_UnprotectSheets(ctx As Object)
                 Else
                     doneCount = doneCount + 1
                 End If
-                On Error GoTo 0
+                ' Restore the procedure's own handler, NOT "On Error GoTo 0" -
+                ' see the identical comment in workbook.protect_sheets (Task 3)
+                ' for why GoTo 0 here would leave a later real error unhandled.
+                On Error GoTo Fail
             End If
         End If
     Next ws
@@ -525,8 +559,7 @@ End Sub
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: still fails (two entries remain missing); the failure list drops
-`PkgWorkbook_UnprotectSheets`.
+Expected: **exit 0.** All three actions declared so far resolve; no diagnostics.
 
 - [ ] **Step 3: Commit**
 
@@ -539,19 +572,36 @@ git commit -m "feat(workbook): workbook.unprotect_sheets"
 
 ### Task 5: `workbook.build_toc`
 
-**Owner: delegate to codex (sonnet).** Mechanical, but Step 1 implements the marker-based
-refresh from Decision 7 exactly as specified - do not simplify it back to create-only.
+**Owner: delegate to codex (sonnet).** Mechanical; Step 1 implements the create-only refusal
+from Decision 7 exactly as specified. An earlier draft of this plan refreshed an existing sheet
+in place, proving ownership with a marker sentence written to `A1`; review rejected that (a
+plain cell value cannot prove the sheet is this action's own prior output rather than a user's
+sheet with matching text), so **do not reintroduce a marker or a refresh branch** - `Core_DestUsable`
+alone decides whether the destination name is usable, called unconditionally, with no branch on
+whether a sheet by that name currently exists.
 
 **Files:** Modify `src/packages/PkgWorkbook.bas`.
 
-**Interfaces:** Consumes `Core_Cfg`, `Core_SheetExists`, `Core_DestUsable`, `Core_NewSheet`,
-`Core_IsEngineSheet`, `Core_SpeedOn`/`Core_SpeedOff`, `Core_Refuse`, `Core_Done`, `Core_Fail`.
+**Interfaces:** Consumes `Core_Cfg`, `Core_DestUsable`, `Core_NewSheet`, `Core_IsEngineSheet`,
+`Core_SpeedOn`/`Core_SpeedOff`, `Core_Refuse`, `Core_Done`, `Core_Fail`, `Core_AddAction`.
+Produces this task's own manifest entry - see Step 1.
 
-- [ ] **Step 1: Add the action and its marker helper**
+- [ ] **Step 1: Add the manifest entry, then the action**
+
+Insert into `PkgWorkbook_Manifest`, immediately above the `End Sub`, after Task 4's line:
+
+```vb
+    Core_AddAction reg, "workbook.build_toc", "Build Table of Contents", "PkgWorkbook_BuildToc", _
+        "Creates one sheet listing every visible tab, each linked to jump straight to it. " & _
+        "Refuses if a sheet by that name already exists - delete it by hand first to rebuild.", _
+        "Workbook Housekeeping"
+```
+
+Then add the handler below the manifest:
 
 ```vb
 '================================================================
-' ACTION - Build (or refresh) a Table of Contents sheet
+' ACTION - Build a Table of Contents sheet
 '================================================================
 Public Sub PkgWorkbook_BuildToc(ctx As Object)
     Dim destName As String, ws As Worksheet, dest As Worksheet
@@ -567,34 +617,25 @@ Public Sub PkgWorkbook_BuildToc(ctx As Object)
         Exit Sub
     End If
 
-    If Core_SheetExists(destName) Then
-        Set dest = ThisWorkbook.Worksheets(destName)
-        ' Only a sheet THIS action built before is refreshed in place. Anything
-        ' else sharing the configured name - a user's own sheet, or a leftover
-        ' from before the name was changed - is refused exactly the way
-        ' Core_DestUsable refuses any other collision, so a rerun can never
-        ' overwrite a sheet it did not build. A create-only version would
-        ' refuse on every run after the first - the exact shape of bug the
-        ' refusal pass (phase 1) is named for, except here rerunning after
-        ' adding a tab is the entire point of the feature.
-        If dest.Range("A1").Value <> PkgWorkbook_TocMarker() Then
-            Core_Refuse ctx, "A sheet named '" & destName & "' already exists, and it was not " & _
-                   "built by this action." & vbCrLf & vbCrLf & _
-                   "Rename it, or change 'Name for the Table of Contents sheet' on the Setup " & _
-                   "tab, and run this again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
-            Exit Sub
-        End If
-        Core_SpeedOn
-        dest.Cells.Clear
-    Else
-        If Not Core_DestUsable(ctx, destName, TITLE) Then Exit Sub
-        Core_SpeedOn
-        Set dest = Core_NewSheet(destName)
-    End If
+    ' Core_DestUsable is called unconditionally, on EVERY run, whether or not a
+    ' sheet by this name currently exists - it refuses both a name in the
+    ' reserved family (Core_IsEngineSheet, checked even when no sheet by that
+    ' name exists yet - see the plan's Decision 8) and any existing sheet,
+    ' INCLUDING this action's own sheet from a prior run (Decision 7: there is
+    ' no reliable way to tell "my own prior output" apart from "a user's sheet
+    ' that happens to share the name" without adding new engine state, so this
+    ' action does not try - it refuses either way, the same as any other
+    ' destination-name field). An earlier draft special-cased an existing
+    ' sheet onto a refresh-in-place branch and called Core_DestUsable only on
+    ' the create branch; that let the reserved-name check be skipped whenever
+    ' a sheet already occupied the name. Calling it first, before any branch,
+    ' means there is no branch left for that check to miss.
+    If Not Core_DestUsable(ctx, destName, TITLE) Then Exit Sub
 
-    dest.Range("A1").Value = PkgWorkbook_TocMarker()
+    Core_SpeedOn
+    Set dest = Core_NewSheet(destName)
+    dest.Range("A1").Value = "Table of Contents"
     dest.Range("A1").Font.Bold = True
-    dest.Range("A1").Font.Italic = True
     rowOut = 2
     For Each ws In ThisWorkbook.Worksheets
         If Not Core_IsEngineSheet(ws.name) And StrComp(ws.name, destName, vbTextCompare) <> 0 Then
@@ -603,8 +644,13 @@ Public Sub PkgWorkbook_BuildToc(ctx As Object)
             ' link to one is a dead click that reads as a bug in this action
             ' rather than as the sheet being hidden on purpose.
             If ws.Visible = xlSheetVisible Then
+                ' An embedded apostrophe in a sheet name must be DOUBLED inside
+                ' the quoted SubAddress - the same doubling rule spec/contract.md
+                ' section 6 already documents for anchored placements. An
+                ' un-doubled apostrophe here breaks the quoting and the link
+                ' either fails to create or points at the wrong sheet.
                 dest.Hyperlinks.Add Anchor:=dest.Cells(rowOut, 1), Address:="", _
-                    SubAddress:="'" & ws.name & "'!A1", TextToDisplay:=ws.name
+                    SubAddress:="'" & Replace(ws.name, "'", "''") & "'!A1", TextToDisplay:=ws.name
                 rowOut = rowOut + 1
                 n = n + 1
             End If
@@ -619,24 +665,14 @@ Public Sub PkgWorkbook_BuildToc(ctx As Object)
     Else
         Core_Done ctx, "Built '" & destName & "' with " & n & " link(s)." & vbCrLf & vbCrLf & _
                "A hidden sheet is not listed - linking to one that cannot be navigated to would " & _
-               "defeat the point of hiding it. Run this again after adding, removing, or " & _
-               "renaming a tab; the list is rebuilt from scratch each time, not appended to.", TITLE
+               "defeat the point of hiding it. This action does not refresh an existing sheet: " & _
+               "to rebuild after adding, removing, or renaming a tab, delete '" & destName & _
+               "' by hand first, then run this again.", TITLE
     End If
     Exit Sub
 Fail:
     Core_Fail ctx, "workbook.build_toc", Err
 End Sub
-
-' The fixed value written to A1 of a Table of Contents sheet this action built,
-' so a rerun can tell "my own prior output, safe to clear and rebuild" apart
-' from "someone else's sheet that happens to share the configured name" - the
-' distinction Core_DestUsable draws for a brand-new name, extended here to the
-' refresh case Core_DestUsable does not have to handle, because it never
-' overwrites anything. Deliberately human-readable rather than a hidden
-' technical token: the user sees exactly why this cell holds what it holds.
-Private Function PkgWorkbook_TocMarker() As String
-    PkgWorkbook_TocMarker = "SheetForge Table of Contents - rebuilt automatically each run. Do not edit this sheet by hand."
-End Function
 ```
 
 - [ ] **Step 2: Build and syntax-check**
@@ -645,8 +681,7 @@ End Function
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: still fails (one entry remains missing); the failure list drops
-`PkgWorkbook_BuildToc`.
+Expected: **exit 0.** All four actions declared so far resolve; no diagnostics.
 
 - [ ] **Step 3: Commit**
 
@@ -665,9 +700,21 @@ git commit -m "feat(workbook): workbook.build_toc"
 **Files:** Modify `src/packages/PkgWorkbook.bas`.
 
 **Interfaces:** Consumes `Core_IsEngineSheet`, `Core_SpeedOn`/`Core_SpeedOff`, `Core_Refuse`,
-`Core_Done`, `Core_Fail`.
+`Core_Done`, `Core_Fail`, `Core_AddAction`. Produces this task's own manifest entry - see Step 1.
 
-- [ ] **Step 1: Add the action and its counting helper**
+- [ ] **Step 1: Add the manifest entry, then the action and its counting helper**
+
+Insert into `PkgWorkbook_Manifest`, immediately above the `End Sub`, after Task 5's line - this
+is the fifth and last entry:
+
+```vb
+    Core_AddAction reg, "workbook.unhide_rows_cols", "Unhide All Rows & Columns", "PkgWorkbook_UnhideRowsCols", _
+        "Resets row and column visibility on the active sheet. Warns first if an AutoFilter " & _
+        "on that sheet would also lose its filtered-out rows.", _
+        "Workbook Housekeeping"
+```
+
+Then add the handler and helper below the manifest:
 
 ```vb
 '================================================================
@@ -679,6 +726,18 @@ Public Sub PkgWorkbook_UnhideRowsCols(ctx As Object)
     Const TITLE As String = "Unhide All Rows & Columns"
     On Error GoTo Fail
 
+    ' TypeName is checked BEFORE assigning to a Worksheet-typed variable. A
+    ' chart sheet (or any other non-worksheet sheet type) as the active sheet
+    ' would make "Set ws = ActiveSheet" itself raise a generic type-mismatch
+    ' error - a confusing crash rather than the plain refusal this action
+    ' gives every other unsupported case.
+    If TypeName(ActiveSheet) <> "Worksheet" Then
+        Core_Refuse ctx, "The active sheet is not a worksheet (for example, a chart sheet), " & _
+               "so there are no rows or columns to reset." & vbCrLf & vbCrLf & _
+               "Switch to the worksheet you want to reset, then run this again." & vbCrLf & _
+               vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
     Set ws = ActiveSheet
     If Core_IsEngineSheet(ws.name) Then
         Core_Refuse ctx, "'" & ws.name & "' is one of the toolkit's own sheets, not a work " & _
@@ -820,7 +879,7 @@ subsection follows the same shape as `Package import` at line ~710):
 
 | key | kind | tier | default | semantics |
 |---|---|---|---|---|
-| `k_workbook_toc_name` | text | simple | `Contents` | Name of the Table of Contents sheet. A conforming implementation MUST create this sheet on first run and refresh it in place (clear and rewrite) on later runs, using a marker it writes and checks to prove the sheet is its own prior output - it MUST NOT overwrite a sheet by that name it did not build, and MUST NOT refuse solely because a sheet by that name already exists (the create-only shape refuses on every run after the first). Kind is `text`, not `sheet`, for the same reason as `k_import_dest` (§8): a `sheet` field is validated to already exist, and this one must not. |
+| `k_workbook_toc_name` | text | simple | `Contents` | Name of the Table of Contents sheet. A conforming implementation MUST create this sheet on first run and MUST refuse on any later run where a sheet by that name already exists, WITHOUT exception for a sheet the implementation itself built on a prior run - a plain cell value cannot prove that provenance without adding new engine state, so this field is create-only by design, not merely by omission. Rebuilding after adding, removing, or renaming a tab requires deleting the previous sheet by hand first, then running the action again. Kind is `text`, not `sheet`, for the same reason as `k_import_dest` (§8): a `sheet` field is validated to already exist, and this one must not. |
 | `k_workbook_password` | text | advanced | *(blank)* | Password used by `workbook.protect_sheets` and `workbook.unprotect_sheets`. Blank means protect with no password. **Not a secret** - stored as plain text in the config store, like every other field; it deters accidental edits, the same as Excel's own Protect Sheet, and provides no confidentiality. |
 
 **Actions**
@@ -830,7 +889,7 @@ subsection follows the same shape as `Package import` at line ~710):
 | `workbook.unhide_sheets` | Unhide All Worksheets | Set every hidden or very-hidden worksheet to visible, EXCLUDING every sheet the implementation's engine owns (the Setup surface, the config store and its staging sheet, the package-enable sheet, every generated button page). The engine-owned config store MUST NOT be unhidden by this action under any configuration. |
 | `workbook.protect_sheets` | Protect All Sheets | Protect every sheet NOT owned by the engine, with `k_workbook_password` (or no password if blank). An implementation MUST choose protection parameters that do not block its own future ability to remove and replace its own placed controls on a protected surface (Excel reference: `DrawingObjects:=False`) - protecting with the platform's own default MUST NOT be assumed safe. Engine-owned sheets MUST NOT be protected by this action, so a later rebuild retains its own access to them. |
 | `workbook.unprotect_sheets` | Unprotect All Sheets | Unprotect every protected sheet NOT owned by the engine, using `k_workbook_password`. A sheet whose protection does not accept that password MUST be reported by name as not unprotected; the action MUST NOT stop partway and MUST attempt every remaining sheet regardless of one sheet's failure. |
-| `workbook.build_toc` | Build Table of Contents | Create or refresh (§8 field semantics above) a sheet named `k_workbook_toc_name` listing every VISIBLE sheet not owned by the engine and not the Table of Contents sheet itself, each as a same-workbook hyperlink to that sheet. A hidden sheet MUST NOT be listed (a link to it cannot be navigated to). The destination name MUST be refused per the reserved-name rule (§7) and per an existing-and-not-mine collision, exactly as any other engine-created destination sheet. |
+| `workbook.build_toc` | Build Table of Contents | Create (§8 field semantics above) a sheet named `k_workbook_toc_name` listing every VISIBLE sheet not owned by the engine and not the Table of Contents sheet itself, each as a same-workbook hyperlink to that sheet, with an embedded apostrophe in a sheet name DOUBLED per the anchored-placement quoting rule (§6). A hidden sheet MUST NOT be listed (a link to it cannot be navigated to). The destination-name check MUST be performed unconditionally, before any other branch, and MUST refuse per the reserved-name rule (§7) and per any existing sheet of that name - including the implementation's own prior output - exactly as any other engine-created destination sheet. |
 | `workbook.unhide_rows_cols` | Unhide All Rows & Columns | On the ACTIVE sheet only, set every row and every column to visible. MUST refuse if the active sheet is engine-owned (an engine-owned surface may hide rows/columns as part of its own generated layout). Because a filter-hidden row and a manually hidden row are not distinguishable, an implementation MUST warn, and obtain confirmation, before unhiding on a sheet with an active AutoFilter; outside that case no confirmation is required. |
 ````
 
@@ -883,7 +942,8 @@ House style: state what changed for the user, and the failure each safety choice
 match the tone of the `[0.10.0]` entry already in `CHANGELOG.md`. Cover: the five new actions;
 that `_Config`/`_Config_staged` are never unhidden; that protection deliberately leaves the
 engine's own sheets alone so a rebuild keeps working; that the password is plainly not a secret;
-that the Table of Contents refreshes in place rather than refusing on every rerun.
+that the Table of Contents is create-only and refuses on any pre-existing sheet by that name,
+including its own prior output - so rebuilding it means deleting the old sheet by hand first.
 
 - [ ] **Step 2: Refresh the code map**
 
@@ -913,8 +973,8 @@ cannot confirm it:
 - `workbook.unprotect_sheets`'s explicit `Password:=` argument avoids Excel's own interactive
   password prompt on a protected sheet, rather than showing it. Marked as an assumption in the
   plan (`CLAUDE.md` §7); this is the item that assumption is about.
-- `workbook.build_toc`'s marker check correctly distinguishes "my own prior TOC, safe to clear"
-  from "someone else's sheet with the same configured name" against a real second run.
+- `workbook.build_toc`'s hyperlinks navigate correctly to a sheet whose name contains an
+  embedded apostrophe, against a real doubled-apostrophe `SubAddress`.
 - `workbook.unhide_rows_cols`'s AutoFilter warning fires when, and only when, `AutoFilterMode`
   is genuinely True on a real filtered sheet.
 - `Select Case LCase(<Const>)` inside `Core_IsEngineSheet` (phase 1) compiles and behaves as
@@ -945,8 +1005,9 @@ the untracked `.vscode/`.
 Not stacked on any other wave's branch - branch from `main` after W5 has merged. State in the
 PR body, in one line each: which sheets `unhide_sheets` will never touch and why; that
 `protect_sheets` deliberately excludes the engine's own sheets and why; that the password is
-plainly not a secret; that `build_toc` refreshes rather than refusing on every rerun; and that
-this is the last wave, with phase 8 next.
+plainly not a secret; that `build_toc` is create-only and refuses on any pre-existing sheet by
+that name, including its own prior output, because no ownership test short of new engine state
+can tell the two apart; and that this is the last wave, with phase 8 next.
 
 ---
 
@@ -966,12 +1027,15 @@ this is the last wave, with phase 8 next.
   (Decision 9), but it means phase 2's `Core_DestUsable` diff
   (`2026-07-28-core-helper-promotion-plan.md`, Task 2 Step 3) should be reviewed with W2-W5's
   actual shipped field defaults in hand, not assumed safe from this plan alone.
-- **The TOC marker is a plain sentence in cell A1, not a hidden or protected cell.** A user who
-  edits or deletes that cell by hand (encouraged not to, by the sentence itself) turns the next
-  run into a refusal ("not built by this action") rather than a silent misfire - a deliberate
-  fail-closed choice, but it means a curious user poking at the TOC sheet can make the action
-  stop working until they either restore the marker or rename the sheet. Not a defect; stated so
-  it is not read as one when it happens.
+- **`build_toc` has no refresh-in-place: it cannot rebuild an existing Table of Contents.**
+  Review rejected the earlier marker-based ownership test (a fixed sentence written to `A1`
+  and compared on later runs) because any user sheet whose `A1` happened to match it would be
+  silently cleared - collision detection, not provenance - and this wave declined to add new
+  engine state (a hidden defined name or similar) to build a real one for a single field on a
+  single action. The accepted trade: every run after the first refuses on the configured name,
+  including against the action's own prior output, until the old sheet is deleted by hand. Not
+  a defect; stated so it is not read as one when it happens, and revisitable later if a real
+  ownership mechanism is added to Core for another wave's benefit too.
 - **`PkgWorkbook_CountHidden` bounds its count to `UsedRange`.** The unhide operation itself
   covers the whole sheet (`Rows.EntireRow.Hidden = False`), so nothing is left hidden - but a
   column hidden far outside the used range is unhidden without being counted in the completion

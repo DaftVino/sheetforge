@@ -55,10 +55,10 @@ is; none is left to be discovered by running it.
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Does `importexport.export` keep its own copy of the flatten logic, or call the new engine? | **It calls `Core_FreezeValues` (Task 2).** The alternative - a second, hand-written copy for `export.freeze_values` - is the cross-package duplicate the standards forbid outright, not a judgement call. `PkgImportExport.bas`'s ~30-line flatten loop (`:357-390`) collapses to a three-line `For Each ws ... Core_FreezeValues ws.UsedRange ... Next`, with the spill/legacy-array/formula behavior moved verbatim, not rewritten. |
-| 2 | Does `format.report_title` inserting rows violate "format changes no value"? | **No stored VALUE changes; a row COORDINATE does, and that is presentation, not data.** Every cell keeps its own value; what moves is which row number holds it. Excel's own `Rows.Insert` auto-adjusts formulas, named ranges and print areas on that sheet - this is native host behavior the action relies on, not something it re-implements, and is logged as a run-time-only claim (Task 14). The action still asks before inserting (Decision 3), because a shift is a real, visible change even though no value is reinterpreted. |
+| 1 | Does `importexport.export` keep its own copy of the flatten logic, or call the new engine? | **It calls `Core_FreezeValues` (Task 2).** The alternative - a second, hand-written copy for `export.freeze_values` - is the cross-package duplicate the standards forbid outright, not a judgement call. `PkgImportExport.bas`'s ~30-line flatten loop (`:357-390`) collapses to a three-line `For Each ws ... Core_FreezeValues ws.UsedRange, True ... Next`. This is NOT a verbatim code move - `Core_FreezeValues` also computes an actual-conversion count and a failure count the original loop never did, and the `True` argument (`reevalUsedRange`) exists specifically because the original re-read `ws.UsedRange` fresh before each of its two passes, which a single captured `Range` parameter cannot do on its own. For THIS caller, which ignores the return value and passes `True`, the flatten behavior applied to the workbook is equivalent to the original loop's - see `Core_FreezeValues`'s header comment (Task 2) for the exact, itemized list of differences and why each is acceptable. |
+| 2 | Does `format.report_title` inserting rows violate "format changes no value"? | **Yes, in one narrow, disclosed place - and the plan says so rather than pretending otherwise.** The action writes ONE new stored value: the typed title text, into the newly inserted, merged title cell. Every value that already existed on the sheet keeps its own value but moves to a new row address, and a formula whose RESULT depends on its own row position (`ROW()`, or an `INDIRECT()` string built from a row number) can therefore return a different result after the shift, even though no formula's stored TEXT is rewritten. This still belongs in the `format` domain, not `export`/`clean`, because the one new value is the entire declared purpose of the action - writing a title - disclosed up front in the confirm prompt and again in the completion message, not a side effect discovered by running it. Excel's own `Rows.Insert` auto-adjusts formulas, named ranges and print areas on that sheet - this is native host behavior the action relies on, not something it re-implements, and is logged as a run-time-only claim (Task 14). The action still asks before inserting (Decision 3), because a shift - and a new stored value - is a real, visible change. |
 | 3 | Which of the five `format.*` actions need a preview-and-confirm, and which can run silently? | **Split by what gets overwritten.** `format.style_headers` and `format.print_layout` overwrite only what the action itself is unambiguously for (the header row's own styling; this sheet's own print setup) and run without a confirm, matching `clean.standardize_formats`'s no-confirm precedent for pure formatting. `format.report_title` (shifts every row below the insert point), `format.table_style` (replaces existing fill/border formatting across the whole picked range) and `format.conditional_highlight` (clears existing conditional formatting first) each show what will happen and ask Yes/No, default No, before doing it - the same bar `PkgClean_RemoveBlanks` set for a destructive, non-obviously-reversible change. |
-| 4 | Are `export.pdf` / `export.per_sheet` allowed to overwrite an existing file? | **No - refuse, don't confirm.** This extends `Core_DestUsable`'s established "refuse rather than overwrite" philosophy from sheets to files: nothing in this toolkit destroys something it did not create in the same run. `export.per_sheet` checks **every** target file before writing **any** of them and refuses the whole batch on the first collision, so a batch export is all-or-nothing, never half-overwritten. |
+| 4 | Are `export.pdf` / `export.per_sheet` allowed to overwrite an existing file? | **No - refuse, don't confirm.** This extends `Core_DestUsable`'s established "refuse rather than overwrite" philosophy from sheets to files: nothing in this toolkit destroys something it did not create in the same run. `export.per_sheet` checks **every** target file for a PRE-EXISTING collision, and every target path against every OTHER target path for a collision WITHIN the batch itself (sanitizing is many-to-one - two different, both-legal sheet names can produce the identical file name), BEFORE writing **any** file, and refuses the whole batch, naming every collision, if even one exists. That refusal is genuinely all-or-nothing. The WRITE itself is not transactional, though: files are written one at a time, and a failure partway through (a locked file, a full disk) leaves every file already written on disk - there is no rollback. The failure message states how many files were written before the error, so a rerun does not have to guess. |
 | 5 | Do the new export actions read `k_export_base` / `k_export_offset` / `k_export_tabs` from `PkgImportExport`'s manifest? | **No - new keys (`k_export_folder`, `k_export_date_offset`, `k_export_pdf_base`, `k_export_persheet_format`), never those three.** Two independent reasons, not one: (a) the brief forbids reusing or shadowing another package's keys outright, and (b) reading `Core.bas:471` shows why that rule is not just etiquette. `Core_Cfg` reads the config-sheet VALUE globally (`ReadScalar` is a flat key lookup, no package scoping) but falls back to the DECLARED DEFAULT only via `FieldDefaultReg(ctx("reg"), key)` - and `ctx("reg")` is the CALLING package's own manifest (`FindActionOwner` resolves it by the action id, `NewCtx` stores it once). A `PkgExport` action reading `k_export_base` would get the right value once a user has typed one into Setup, and silently get `""` - never `PkgImportExport`'s declared `"My Report"` default - the moment the cell is blank. That is a landmine that only misfires on an unconfigured deployment, which is exactly the case a first run needs to behave correctly. New keys under the new package's own manifest sidestep it entirely. |
 | 6 | Does `export.per_sheet` skip only engine sheets, or more? | **Engine sheets (required) and non-visible sheets (this wave's addition).** A hidden settings/lookup tab is not itself a deliverable, and exporting it by name would put internal thresholds straight into a file meant to leave the building. Stated as a deliberate widening of the brief's minimum, not an oversight. |
 | 7 | `format.conditional_highlight` needs a per-cell rule (column, condition, comparison value, color) - four pieces of data. Does its config table get a fourth column? | **No - `table` fields are capped at three columns.** `Core_CfgTable(ctx, key, a, b, c)` only ever reads three (contract §3: "up to 3 columns are read (C, D, E)"); a fourth was never wired anywhere in Core. Condition and its comparison value are folded into one free-text cell (`"greater_than 1000"`, `"contains VIP"`, `"blank"`), parsed on the first space. Documented with worked examples in the field's `help` text, matching the precedent `k_clean_formats` already set for a field whose shape needs explaining. |
@@ -180,7 +180,7 @@ never wrote.
 |---|---|---|
 | `format.conditional_highlight` | Highlight by Rule | Prompt for a range, then whether its first row is a header. Read `k_format_highlight_rules`; if empty, refuse naming where to configure it. Otherwise, before changing anything, show the range and the rule count and ask to proceed. On yes: clear any existing native conditional formatting in the picked range, then for each rule, resolve its Column against the range and set a static fill color (§ above - not a live conditional-formatting rule) on every data-row cell in that column matching the rule's condition. A rule whose Column resolves to nothing MUST be reported by name, not silently dropped. Changes cell fill only; no value changes. |
 | `format.style_headers` | Style Header Row | Prompt for a range. Bold and fill the range's first row, then autofit every column in the range. Overwrites any formatting already on that row. No confirmation - this is unambiguously what the action is for. |
-| `format.report_title` | Add Report Title | Refuse if the active sheet is engine-owned. Prompt for title text (run-time input, not stored config - §3's "range is not a kind" precedent extended to free text); refuse if left blank. Show the row count that will be inserted and ask to proceed, noting that formulas and defined names on that sheet follow the shift automatically (native host behavior, §9). On yes: insert that many rows at row 1, merge and center the title text across the sheet's used width, and style it. No stored value changes - every cell keeps its own value; only its row position moves. |
+| `format.report_title` | Add Report Title | Refuse if the active sheet is engine-owned. Prompt for title text (run-time input, not stored config - §3's "range is not a kind" precedent extended to free text); refuse if left blank. Show the row count that will be inserted and ask to proceed, noting that formulas and defined names on that sheet follow the shift automatically (native host behavior, §9) and that a formula whose result depends on its own row (`ROW()`, an `INDIRECT()` built from a row number) can return a different result after the shift. On yes: insert that many rows at row 1, merge and center the title text across the sheet's used width, and style it. This DOES write one new stored value - the title text, into the merged title cell; every value that already existed on the sheet keeps its own value and only its row position moves. |
 | `format.table_style` | Apply House Table Style | Prompt for a range. Show what will happen (existing fill/border formatting in the range is replaced with a fixed banded-row + thin-border house style) and ask to proceed. On yes: apply it. No value changes. |
 | `format.print_layout` | Prep for Print | Refuse if the active sheet is engine-owned. Set that sheet to landscape orientation, fit-to-one-page-wide, a fixed narrow-margin preset, and a repeating first print row. Fixed preset, no configuration. No confirmation - touches print setup only, no cell. |
 ````
@@ -215,7 +215,7 @@ unconfigured deployment.
 |---|---|---|
 | `export.freeze_values` | Freeze Formulas to Values | Prompt for a range. Count its formula cells (including dynamic-array spill anchors); refuse if none. Show the count and ask to proceed, stating this cannot be undone. On yes: convert every formula in the range - including spills and legacy CSE arrays - to a static value, using the same flattening behavior `importexport.export` already applies per sheet (§ Core_FreezeValues). Promoted from being embedded inside `importexport.export` to a standalone, range-scoped action; `importexport.export`'s own behavior is unchanged. |
 | `export.pdf` | Export to PDF | Resolve the export folder; refuse if the workbook has never been saved and no folder is configured, or if the configured folder does not exist. Ask whether to export the whole workbook, one sheet, or a range (workbook / sheet / range); an unrecognised answer is refused, naming the three accepted tokens. Build the dated output path (`k_export_date_offset` + `k_export_pdf_base`); refuse rather than overwrite if a file already exists at that path. For "sheet", refuse if the named sheet does not exist or is engine-owned. For "range", the picked range temporarily becomes the target sheet's print area for the export and is restored to its prior value immediately after, whether the export succeeds or fails. Writes one PDF. |
-| `export.per_sheet` | Export Each Tab Separately | Validate `k_export_persheet_format` is `pdf` or `xlsx`; refuse otherwise. Resolve and validate the export folder as `export.pdf` does. Build the list of every VISIBLE, non-engine-owned sheet (§ Decision 6 - hidden sheets are excluded too, on top of the required engine-sheet exclusion); refuse if none. Check every target file path for an existing collision BEFORE writing any file; refuse the WHOLE batch, naming every colliding path, if even one exists - this action never partially overwrites. Otherwise show the full file list and ask to proceed. On yes: write one file per sheet, named `<date> <sheet name>.<ext>`. The `xlsx` path flattens every formula in a full workbook copy (via `Core_FreezeValues`, same technique `importexport.export` already relies on) before isolating each sheet, so a sheet with a cross-sheet formula does not export with a broken reference. |
+| `export.per_sheet` | Export Each Tab Separately | Validate `k_export_persheet_format` is `pdf` or `xlsx`; refuse otherwise. Resolve and validate the export folder as `export.pdf` does. Build the list of every VISIBLE, non-engine-owned sheet (§ Decision 6 - hidden sheets are excluded too, on top of the required engine-sheet exclusion); refuse if none. Check every target file path for an existing collision, AND every target path against every other target path for a collision WITHIN this batch (sanitizing is many-to-one - two different, both-legal sheet names can produce the identical file name); refuse the WHOLE batch, naming every collision, if even one exists - no file is written until every target is clear. That refusal is all-or-nothing; the write itself is not transactional - it proceeds file by file, and a failure partway through leaves the files already written in place, with the failure message stating how many succeeded before the error. Otherwise show the full file list and ask to proceed. On yes: write one file per sheet, named `<date> <sheet name>.<ext>`. The `xlsx` path flattens every formula in a full workbook copy (via `Core_FreezeValues`, same technique `importexport.export` already relies on) before isolating each sheet, so a sheet with a cross-sheet formula does not export with a broken reference. |
 ````
 
 - [ ] **Step 5: Add two appendix bullets to §9**
@@ -244,14 +244,19 @@ added):
   are unchanged. **Additive by the two-axes rule:** no existing `key`, action `id`, `kind` or
   encoding is touched or reinterpreted; every new field and action is new surface on an
   already-`active` domain (§7, v2.3.0). `SCHEMA_VER` does **not** move - it stays `"v2.0"`.
-  **One judgement call worth stating:** `format.report_title` inserts rows on the sheet it
-  targets, which moves every value below the insert point to a different cell address. This
-  is classed as presentation, not a value change, because no cell's stored VALUE is
-  reinterpreted - only its row coordinate - and because the domain's own definition (§7)
-  already anticipates "print layout" as changing no value; a row shift is the same kind of
-  layout fact. A platform whose row-insert does not auto-adjust formulas and defined names
-  the way Excel's does MUST perform the equivalent adjustment itself, or refuse the action -
-  silently breaking a reference is not a conforming realization of this semantics.
+  **One judgement call worth stating, honestly rather than softened:** `format.report_title`
+  DOES write a stored value - the title text goes into the newly inserted, merged title cell
+  - and it moves every value that already existed on the sheet below the insert point to a
+  new row address. A formula whose RESULT depends on its own row (`ROW()`, or an
+  `INDIRECT()` string built from a row number) can therefore return a different result after
+  the shift, even though the formula's own stored text is untouched. This still belongs
+  under the `format` domain, not `export`/`clean`, because every value that existed on the
+  sheet before the action ran keeps its own value - the ONE new value is the title text
+  itself, which is the entire declared purpose of the action, disclosed in its own confirm
+  prompt and completion message, not a side effect discovered later. A platform whose
+  row-insert does not auto-adjust formulas and defined names the way Excel's does MUST
+  perform the equivalent adjustment itself, or refuse the action - silently breaking a
+  reference is not a conforming realization of this semantics.
 ````
 
 - [ ] **Step 7: Verify**
@@ -278,8 +283,10 @@ body - exactly the "Core / migration" trigger.
 
 **Interfaces:**
 - Consumes: nothing new (`Range.SpecialCells`, `Range.HasSpill`/`HasArray` are native Excel).
-- Produces: `Core_FreezeValues(rng As Range) As Long`, `Core_SafeFileName(raw As String) As String`.
-  Tasks 10 and 12 (`PkgExport`) consume both; Task 2's own Step 3 consumes `Core_FreezeValues`.
+- Produces: `Core_FreezeValues(rng As Range, Optional reevalUsedRange As Boolean = False,
+  Optional failedCount As Long = 0) As Long`, `Core_SafeFileName(raw As String, Optional
+  maxLen As Long = 0) As String`. Tasks 10 and 12 (`PkgExport`) consume both; Task 2's own
+  Step 3 consumes `Core_FreezeValues`.
 
 - [ ] **Step 1: Add `Core_FreezeValues`**
 
@@ -292,10 +299,46 @@ body - exactly the "Core / migration" trigger.
 ' first turns it into an ordinary value block the second pass can walk past
 ' safely.
 '
-' Moved here UNCHANGED from importexport.export (2026-07-28 W3 plan) so
-' export.freeze_values can call the exact engine that action already relies
-' on, instead of a second, untested copy of the same 30 lines - the
-' cross-package duplicate CLAUDE.md rule 4 forbids.
+' Extracted from importexport.export (2026-07-28 W3 plan) - NOT moved
+' unchanged. Three deliberate differences from that shipped loop, called
+' out explicitly because this is a shipped action used for a finance
+' deliverable:
+'
+'   1. This function returns the number of formula cells it ACTUALLY
+'      converted (counted area by area, in pass 2), and reports any area
+'      whose conversion raised an error via the `failedCount` out-param
+'      instead of silently swallowing it. The original loop had no caller
+'      that needed a count; export.freeze_values does (Task 10), so this
+'      is new surface, not a behavior-preserving copy of what already ran.
+'
+'   2. Pass 2 searches the exact `rng` the caller passed in, UNLESS
+'      `reevalUsedRange` is True, in which case it re-reads
+'      rng.Worksheet.UsedRange fresh before pass 2. The original always
+'      called ws.UsedRange fresh before EACH of its two passes
+'      (PkgImportExport.bas, pre-refactor :373 and :392) - two separate
+'      property reads - so if pass 1 changed the sheet's used bounds, pass
+'      2 saw the new bounds. A caller that hands this function a whole
+'      sheet's used range (importexport.export's own refactor below, and
+'      export.per_sheet's xlsx path, Task 12) passes
+'      reevalUsedRange:=True to keep that exact original behavior.
+'      export.freeze_values (Task 10) hands this function a user-PICKED,
+'      already-confirmed range and must NOT have pass 2 silently widen
+'      that to the sheet's current UsedRange - it leaves reevalUsedRange
+'      at its default, False.
+'
+'   3. The error handling around the one risky statement (`ar.Value =
+'      ar.Value`) is `On Error Resume Next` / `On Error GoTo 0`, scoped to
+'      THIS function - it is not the calling Sub's `On Error GoTo Fail`.
+'      This is safe and behaviorally equivalent for every caller: VBA
+'      error handling is scoped per procedure, so a callee's own `On
+'      Error` statements never alter or disable a caller's error handler.
+'      (This is a different situation from the bug fixed in
+'      PkgExport_FreezeValues and PkgFormat_PrintLayout below, where a Sub
+'      disabled its OWN `Fail:` routing - this function never had a
+'      `Fail:` label to disable.)
+'
+' Everything else - the two-pass order, the spill/array flatten logic
+' itself - is copied verbatim.
 '
 ' PRECONDITION: Application.Calculation must be xlCalculationAutomatic when
 ' this runs - it reads live formula results via .Value. This was written and
@@ -304,42 +347,69 @@ body - exactly the "Core / migration" trigger.
 ' importexport.export always has. This function does not manage Calculation
 ' itself, so two callers running back to back never fight over restoring it.
 '
-' Returns the number of formula cells it found (before flattening), so a
-' caller can report "N formula(s) converted" without a second pass of its own.
-Public Function Core_FreezeValues(rng As Range) As Long
+' reevalUsedRange: when True, pass 2 searches the CURRENT
+' rng.Worksheet.UsedRange instead of the exact `rng` passed in - see
+' difference #2 above. Only the whole-sheet callers pass True.
+'
+' failedCount: ByRef out-parameter. On return, the number of formula cells
+' whose conversion to a static value raised an error and were left as live
+' formulas. A caller that reports a completion count MUST check this and
+' say so when it is nonzero - see export.freeze_values (Task 10).
+Public Function Core_FreezeValues(rng As Range, _
+                                  Optional ByVal reevalUsedRange As Boolean = False, _
+                                  Optional ByRef failedCount As Long = 0) As Long
     Dim fRange As Range, ar As Range, cel As Range, sp As Range, sv As Variant
+    Dim target As Range, converted As Long, failed As Long
     If rng Is Nothing Then Exit Function
-    On Error Resume Next
-    Set fRange = rng.SpecialCells(xlCellTypeFormulas)
-    On Error GoTo 0
-    If fRange Is Nothing Then Exit Function
-    Core_FreezeValues = fRange.Cells.Count
+    Set target = rng
 
-    For Each cel In fRange.Cells
-        If cel.HasSpill Then
-            Set sp = cel.SpillingToRange
-            sv = sp.Value
-            cel.ClearContents
-            sp.Value = sv
-        ElseIf cel.HasArray Then
-            Set sp = cel.CurrentArray
-            sv = sp.Value
-            sp.ClearContents
-            sp.Value = sv
-        End If
-    Next cel
+    On Error Resume Next
+    Set fRange = target.SpecialCells(xlCellTypeFormulas)
+    On Error GoTo 0
+    If Not fRange Is Nothing Then
+        For Each cel In fRange.Cells
+            If cel.HasSpill Then
+                Set sp = cel.SpillingToRange
+                sv = sp.Value
+                cel.ClearContents
+                sp.Value = sv
+            ElseIf cel.HasArray Then
+                Set sp = cel.CurrentArray
+                sv = sp.Value
+                sp.ClearContents
+                sp.Value = sv
+            End If
+        Next cel
+    End If
+
+    If reevalUsedRange Then
+        On Error Resume Next
+        Set target = rng.Worksheet.UsedRange
+        On Error GoTo 0
+        If target Is Nothing Then Set target = rng
+    End If
 
     Set fRange = Nothing
     On Error Resume Next
-    Set fRange = rng.SpecialCells(xlCellTypeFormulas)
+    Set fRange = target.SpecialCells(xlCellTypeFormulas)
     On Error GoTo 0
     If Not fRange Is Nothing Then
         For Each ar In fRange.Areas
             On Error Resume Next
+            Err.Clear
             ar.Value = ar.Value
+            If Err.Number = 0 Then
+                converted = converted + ar.Cells.Count
+            Else
+                failed = failed + ar.Cells.Count
+                Err.Clear
+            End If
             On Error GoTo 0
         Next ar
     End If
+
+    failedCount = failed
+    Core_FreezeValues = converted
 End Function
 ```
 
@@ -392,9 +462,13 @@ loop) with:
 ```vb
     ' Flatten dynamic-array SPILLS, legacy CSE ARRAYS, and ordinary formulas
     ' to static values - Core_FreezeValues, shared with export.freeze_values
-    ' (2026-07-28 W3 plan). Behavior is unchanged; only the code moved.
+    ' (2026-07-28 W3 plan). reevalUsedRange:=True matches this loop's
+    ' original behavior of reading ws.UsedRange fresh before EACH of the
+    ' two passes (see Core_FreezeValues's header, difference #2, for why
+    ' this matters here and why export.freeze_values - a range-scoped
+    ' action, Task 10 - does NOT pass True).
     For Each ws In newWb.Worksheets
-        Core_FreezeValues ws.UsedRange
+        Core_FreezeValues ws.UsedRange, True
     Next ws
 ```
 
@@ -613,15 +687,24 @@ Public Sub PkgFormat_ReportTitle(ctx As Object)
         Exit Sub
     End If
 
-    lastCol = ws.UsedRange.Columns.Count
+    ' UsedRange.Columns.Count is a WIDTH (e.g. 3 for a used range D:F), not the
+    ' absolute last column index - adding UsedRange.Column (the FIRST used
+    ' column) recovers the actual last column so the merge spans the real
+    ' data instead of always starting at A.
+    lastCol = ws.UsedRange.Column + ws.UsedRange.Columns.Count - 1
     If lastCol < 1 Then lastCol = 1
 
     If MsgBox("This inserts " & ROWS_INSERTED & " row(s) at the top of '" & ws.name & _
               "' and shifts everything currently there down by " & ROWS_INSERTED & " row(s)." & _
               vbCrLf & vbCrLf & _
               "Formulas and defined names on this sheet follow the shift automatically - " & _
-              "that is Excel's own row-insert behavior, not something this macro adds." & _
-              vbCrLf & vbCrLf & "Insert the title block?", _
+              "that is Excel's own row-insert behavior, not something this macro adds. A " & _
+              "formula whose RESULT depends on its own row (ROW(), or an INDIRECT() built " & _
+              "from a row number) can return a different result after the shift, even " & _
+              "though its formula text does not change." & vbCrLf & vbCrLf & _
+              "The title text you type becomes a new stored value in the inserted title " & _
+              "cell; every other cell keeps its own value and only moves." & vbCrLf & vbCrLf & _
+              "Insert the title block?", _
               vbExclamation + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
 
     Core_SpeedOn
@@ -640,8 +723,11 @@ Public Sub PkgFormat_ReportTitle(ctx As Object)
     Core_SpeedOff
 
     Core_Done ctx, "Inserted a title block on '" & ws.name & "'." & vbCrLf & vbCrLf & _
-           "Everything that was on this sheet moved down " & ROWS_INSERTED & " row(s); no " & _
-           "value changed, only its row position.", TITLE
+           "Everything that was already on this sheet kept its own value and moved down " & _
+           ROWS_INSERTED & " row(s). The title text itself is a new stored value, in the " & _
+           "merged cell above it, and any formula whose result depends on row position " & _
+           "(ROW(), an INDIRECT() built from a row number) may now return a different " & _
+           "result.", TITLE
     Exit Sub
 Fail:
     Core_Fail ctx, "format.report_title", Err
@@ -851,9 +937,22 @@ Private Function PkgFormat_ApplyRule(colRng As Range, ByVal startRow As Long, _
             Case "contains"
                 hit = (InStr(1, CStr(c.Value), val, vbTextCompare) > 0)
             Case "greater_than"
-                hit = IsNumeric(c.Value) And IsNumeric(val) And (CDbl(c.Value) > CDbl(val))
+                ' VBA's And does NOT short-circuit - both operands are always
+                ' evaluated, so a single `IsNumeric(...) And CDbl(...)`
+                ' expression still calls CDbl on a non-numeric cell and
+                ' raises. Nested Ifs guarantee CDbl only runs once both
+                ' sides are confirmed numeric.
+                If IsNumeric(c.Value) Then
+                    If IsNumeric(val) Then
+                        hit = (CDbl(c.Value) > CDbl(val))
+                    End If
+                End If
             Case "less_than"
-                hit = IsNumeric(c.Value) And IsNumeric(val) And (CDbl(c.Value) < CDbl(val))
+                If IsNumeric(c.Value) Then
+                    If IsNumeric(val) Then
+                        hit = (CDbl(c.Value) < CDbl(val))
+                    End If
+                End If
         End Select
         If hit Then
             c.Interior.Color = fillColor
@@ -972,9 +1071,13 @@ Public Sub PkgFormat_PrintLayout(ctx As Object)
         .BottomMargin = Application.InchesToPoints(0.5)
         .HeaderMargin = Application.InchesToPoints(0.2)
         .FooterMargin = Application.InchesToPoints(0.2)
+        ' Narrow Resume Next to this ONE statement (some sheet states reject
+        ' PrintTitleRows) and restore the Sub's own Fail: routing right
+        ' after - never On Error GoTo 0, which would leave every statement
+        ' below unhandled inside a procedure that has a Fail: label.
         On Error Resume Next
         .PrintTitleRows = "$1:$1"
-        On Error GoTo 0
+        On Error GoTo Fail
     End With
     Core_SpeedOff
 
@@ -997,9 +1100,11 @@ Expected: **still fails** - `CoreCandidates()` does not yet probe `PkgFormat_Man
 (Task 13), so the build's entry-point resolver cannot find any of these five `entry` values
 declared anywhere it checks... actually it CAN: the resolver checks source text, not the
 candidate list (the candidate list is a runtime-only concern). Expected here: **exit 0**, no
-diagnostics, `Core + 3 package(s)` still (the glob-discovered `PkgFormat.bas` is bundled, but
-still un-probed until Task 13 - the build succeeding does not mean the package runs; that is
-exactly the two-place-registration trap Task 13 exists to close).
+diagnostics, `Core + 4 package(s)` (build.ps1 counts `Pkg*.bas` files on disk, not
+`CoreCandidates()` entries - `PkgFormat.bas` has existed on disk since Task 3, so it is
+counted here even though it is still un-probed until Task 13; the build succeeding does not
+mean the package runs - that is exactly the two-place-registration trap Task 13 exists to
+close).
 
 - [ ] **Step 3: Commit**
 
@@ -1080,8 +1185,10 @@ Public Sub PkgExport_Manifest(reg As Object)
         "rather than overwriting a same-named file that is already there."
     Core_AddAction reg, "export.per_sheet", "Export Each Tab Separately", "PkgExport_PerSheet", _
         "Save every visible, non-toolkit sheet as its own dated PDF or .xlsx file. Shows " & _
-        "the full file list and asks before writing anything; refuses the whole batch " & _
-        "rather than overwriting even one file that is already there."
+        "the full file list and asks before writing anything; refuses the whole batch up " & _
+        "front - naming every collision, whether with an existing file or another sheet in " & _
+        "the same batch - rather than writing until something breaks. Once writing starts, " & _
+        "a failure partway through leaves the files already written; it is not rolled back."
 End Sub
 ```
 
@@ -1119,7 +1226,7 @@ git commit -m "feat(export): PkgExport manifest and fields"
 ' ACTION - Freeze formulas (incl. spills) in a picked range to values
 '================================================================
 Public Sub PkgExport_FreezeValues(ctx As Object)
-    Dim rng As Range, cnt As Long
+    Dim rng As Range, cnt As Long, converted As Long, failCount As Long
     Const TITLE As String = "Freeze Formulas to Values"
     On Error GoTo Fail
 
@@ -1134,9 +1241,14 @@ Public Sub PkgExport_FreezeValues(ctx As Object)
     End If
 
     cnt = 0
+    ' Narrow Resume Next to this ONE statement and restore this Sub's own
+    ' Fail: routing immediately after - never On Error GoTo 0. GoTo 0 here
+    ' would leave every statement below (including the destructive freeze)
+    ' unhandled for the rest of the procedure, which is exactly the bug
+    ' this action shipped with in an earlier draft of this plan.
     On Error Resume Next
     cnt = rng.SpecialCells(xlCellTypeFormulas).Cells.Count
-    On Error GoTo 0
+    On Error GoTo Fail
     If cnt = 0 Then
         Core_Refuse ctx, "There are no formulas inside " & Core_RangeRef(rng) & " to freeze." & _
                vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
@@ -1155,11 +1267,23 @@ Public Sub PkgExport_FreezeValues(ctx As Object)
     ' restores whatever was there before this action ran.
     Application.Calculation = xlCalculationAutomatic
     Application.CalculateFull
-    Core_FreezeValues rng
+    ' This is a user-PICKED range, already confirmed above - reevalUsedRange
+    ' stays False (the default) so pass 2 cannot silently widen past what
+    ' the user was shown and asked to convert (see Core_FreezeValues's
+    ' header, Task 2, difference #2).
+    converted = Core_FreezeValues(rng, False, failCount)
     Core_SpeedOff
 
-    Core_Done ctx, "Converted " & cnt & " formula(s) inside " & Core_RangeRef(rng) & " to " & _
-           "static values." & vbCrLf & vbCrLf & "This cannot be undone with Ctrl+Z.", TITLE
+    If failCount > 0 Then
+        Core_Done ctx, "Converted " & converted & " formula(s) inside " & Core_RangeRef(rng) & _
+               " to static values." & vbCrLf & vbCrLf & failCount & " formula(s) could NOT " & _
+               "be converted and are still live formulas - re-run this action, or convert " & _
+               "them by hand (select the cell(s), Ctrl+C, Paste Special > Values)." & vbCrLf & _
+               vbCrLf & "This cannot be undone with Ctrl+Z for the ones that DID convert.", TITLE
+    Else
+        Core_Done ctx, "Converted " & converted & " formula(s) inside " & Core_RangeRef(rng) & _
+               " to static values." & vbCrLf & vbCrLf & "This cannot be undone with Ctrl+Z.", TITLE
+    End If
     Exit Sub
 Fail:
     Core_Fail ctx, "export.freeze_values", Err
@@ -1232,7 +1356,13 @@ Public Sub PkgExport_Pdf(ctx As Object)
         Exit Sub
     End If
 
-    baseName = Core_SafeFileName(Core_Cfg(ctx, "k_export_pdf_base"))
+    ' k_export_pdf_base is free text with no length limit of its own (Task
+    ' 1, field table). 100 leaves comfortable room for the "yyyy-mm-dd "
+    ' prefix (11 chars) and ".pdf" suffix (4 chars) inside a typical
+    ' folder's remaining budget under Windows' MAX_PATH, so an overlong
+    ' base name is truncated here instead of failing SaveAs as a generic,
+    ' unexplained macro error.
+    baseName = Core_SafeFileName(Core_Cfg(ctx, "k_export_pdf_base"), 100)
     outPath = folderPath & Format(Date + Core_CfgLong(ctx, "k_export_date_offset"), "yyyy-mm-dd") & _
               " " & baseName & ".pdf"
     If Len(Dir(outPath)) > 0 Then
@@ -1329,7 +1459,9 @@ git commit -m "feat(export): export.pdf"
 
 **Files:** Modify `src/packages/PkgExport.bas`.
 
-**Interfaces:** Consumes everything Task 11 does, plus `Core_FreezeValues`, `Core_FileName`.
+**Interfaces:** Consumes everything Task 11 does, plus `Core_FreezeValues`, `Core_FileName`,
+and a late-bound `Scripting.Dictionary` (`CreateObject("Scripting.Dictionary")`, no project
+reference needed) for the within-batch duplicate-path check in Step 1.
 Produces `PkgExport_OneSheetWorkbook` (private).
 
 - [ ] **Step 1: Add the action**
@@ -1342,6 +1474,7 @@ Public Sub PkgExport_PerSheet(ctx As Object)
     Dim fmt As String, ext As String, folderPath As String, dateStr As String
     Dim ws As Worksheet, targets As Collection, paths As Collection
     Dim i As Long, existing As String, listMsg As String, n As Long
+    Dim seen As Object, dupMsg As String
     Const TITLE As String = "Export Each Tab Separately"
     On Error GoTo Fail
 
@@ -1382,6 +1515,9 @@ Public Sub PkgExport_PerSheet(ctx As Object)
         If ws.Visible = xlSheetVisible Then
             If Not Core_IsEngineSheet(ws.name) Then
                 targets.Add ws
+                ' No maxLen cap here (contrast Task 11's k_export_pdf_base
+                ' call) - ws.name is already bounded to 31 characters by
+                ' Excel itself, so there is nothing unbounded to cap.
                 paths.Add folderPath & dateStr & " " & Core_SafeFileName(ws.name) & ext
             End If
         End If
@@ -1393,8 +1529,38 @@ Public Sub PkgExport_PerSheet(ctx As Object)
         Exit Sub
     End If
 
-    ' Check EVERY target file before writing ANY of them - a batch action
-    ' either runs in full or refuses in full, never half-overwrites.
+    ' Detect duplicate target paths WITHIN this batch before checking the
+    ' disk. Core_SafeFileName's sanitization is many-to-one (every illegal
+    ' character becomes "-"), so two different, both-legal sheet names -
+    ' e.g. "A""B" and "A<B" - can sanitize to the identical file name. The
+    ' existing-file check below only catches files already on disk; a
+    ' collision created BY THIS BATCH would otherwise let the second write
+    ' silently overwrite the first, since Core_SpeedOn disables
+    ' DisplayAlerts and Excel's own overwrite prompt never fires. Refuse by
+    ' name before anything is written, same as the existing-file check.
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
+    For i = 1 To paths.Count
+        If seen.Exists(CStr(paths(i))) Then
+            dupMsg = dupMsg & vbCrLf & "   '" & targets(i).name & "' and '" & _
+                seen(CStr(paths(i))) & "' both sanitize to: " & Core_FileName(CStr(paths(i)))
+        Else
+            seen.Add CStr(paths(i)), targets(i).name
+        End If
+    Next i
+    If Len(dupMsg) > 0 Then
+        Core_Refuse ctx, "These sheet names sanitize to the same file name, so this batch " & _
+               "would overwrite its own output:" & dupMsg & vbCrLf & vbCrLf & "Rename one of " & _
+               "each pair so the exported files stay distinct, then run this again." & vbCrLf & _
+               vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    ' Check EVERY target file for a PRE-EXISTING collision before writing
+    ' ANY of them. This upfront refusal is all-or-nothing: nothing is
+    ' written if even one target collides. The write itself, below, is NOT
+    ' transactional - see the Fail: handler for what happens if it fails
+    ' partway through.
     For i = 1 To paths.Count
         If Len(Dir(CStr(paths(i)))) > 0 Then existing = existing & vbCrLf & "   " & paths(i)
     Next i
@@ -1413,6 +1579,11 @@ Public Sub PkgExport_PerSheet(ctx As Object)
               vbCrLf & vbCrLf & listMsg & vbCrLf & vbCrLf & "Continue?", _
               vbExclamation + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
 
+    ' Both preflight checks above are all-or-nothing (nothing is written if
+    ' any collision exists). The write loop itself is NOT: it proceeds file
+    ' by file, and there is no rollback if a later file fails - the Fail:
+    ' handler below reports how many succeeded before the error, using the
+    ' same `n` this loop increments, so a rerun does not have to guess.
     Core_SpeedOn
     If fmt = "pdf" Then
         For i = 1 To targets.Count
@@ -1431,6 +1602,11 @@ Public Sub PkgExport_PerSheet(ctx As Object)
     Core_Done ctx, "Wrote " & n & " file(s) to:" & vbCrLf & "   " & folderPath, TITLE
     Exit Sub
 Fail:
+    If n > 0 Then
+        Err.Description = Err.Description & vbCrLf & vbCrLf & n & " file(s) were already " & _
+            "written to " & folderPath & " before this failed, and were NOT removed - this " & _
+            "batch is not transactional. Check the folder before re-running."
+    End If
     Core_Fail ctx, "export.per_sheet", Err
 End Sub
 ```
@@ -1461,8 +1637,11 @@ Private Sub PkgExport_OneSheetWorkbook(ByVal sheetName As String, ByVal outPath 
     Set newWb = Application.ActiveWorkbook
     newWb.Application.CalculateFull
 
+    ' reevalUsedRange:=True - this is a whole-sheet flatten, same as
+    ' importexport.export's own call (Task 2, Step 3); see
+    ' Core_FreezeValues's header, difference #2, for why.
     For Each ws In newWb.Worksheets
-        Core_FreezeValues ws.UsedRange
+        Core_FreezeValues ws.UsedRange, True
     Next ws
 
     For i = newWb.Worksheets.Count To 1 Step -1
@@ -1493,8 +1672,10 @@ End Sub
 pwsh build/build.ps1 && node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
 ```
 
-Expected: exit 0, no diagnostics, `Core + 3 package(s)` (unchanged - `PkgFormat`/`PkgExport`
-are bundled but not yet probed; Task 13 closes that gap).
+Expected: exit 0, no diagnostics, `Core + 5 package(s)` (`PkgFormat.bas` has existed on disk
+since Task 3 and `PkgExport.bas` since Task 9 - build.ps1 counts `Pkg*.bas` files on disk, not
+`CoreCandidates()` entries, so both are already counted here even though neither is probed
+yet; Task 13 closes that gap).
 
 - [ ] **Step 4: Commit**
 
@@ -1652,9 +1833,12 @@ untracked `.vscode/`.
 Not stacked on any prior phase's branch. Branch from `main` after phase 3 (W2) has merged.
 
 **The PR body must state, in one line, the freeze-values promotion decision** (Core engine,
-`importexport.export` now calls it, behavior unchanged) - a reviewer reading two new
-2000+-line-equivalent packages needs the one sentence that says what to check the shared logic
-*against*.
+`importexport.export` now calls it with `reevalUsedRange:=True` to preserve its original
+fresh-UsedRange-per-pass behavior; `export.freeze_values` calls it with the default `False`
+because it targets a user-picked range, not a whole sheet - see `Core_FreezeValues`'s header
+comment, Task 2, for the three concrete differences from the pre-extraction loop) - a
+reviewer reading two new 2000+-line-equivalent packages needs the one sentence that says what
+to check the shared logic *against*.
 
 ---
 

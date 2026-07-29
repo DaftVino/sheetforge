@@ -69,7 +69,7 @@ Public Sub PkgImport_CombineWorksheets(ctx As Object)
     ' cheapest failure should be the earliest one, and a refusal after the user
     ' has answered questions reads as a bug.
     destName = Trim(Core_Cfg(ctx, "k_import_dest"))
-    If Not PkgImport_DestUsable(ctx, destName, TITLE) Then Exit Sub
+    If Not Core_DestUsable(ctx, destName, TITLE, "Name for the combined sheet this creates") Then Exit Sub
 
     Set sources = New Collection
     For Each ws In ThisWorkbook.Worksheets
@@ -107,9 +107,9 @@ Public Sub PkgImport_CombineWorkbooks(ctx As Object)
     On Error GoTo Fail
 
     destName = Trim(Core_Cfg(ctx, "k_import_dest"))
-    If Not PkgImport_DestUsable(ctx, destName, TITLE) Then Exit Sub
+    If Not Core_DestUsable(ctx, destName, TITLE, "Name for the combined sheet this creates") Then Exit Sub
 
-    folderPath = PkgImport_ResolveFolder(Core_Cfg(ctx, "k_import_folder"))
+    folderPath = Core_ResolveFolder(Core_Cfg(ctx, "k_import_folder"))
     If Len(folderPath) = 0 Then
         ' Blank config AND an unsaved workbook: there is no "this workbook's folder" yet.
         ' Caught explicitly, because otherwise it reaches Dir() as an empty path and
@@ -120,7 +120,7 @@ Public Sub PkgImport_CombineWorkbooks(ctx As Object)
                "Nothing has been changed.", TITLE
         Exit Sub
     End If
-    If Not PkgImport_FolderExists(folderPath) Then
+    If Not Core_FolderExists(folderPath) Then
         ' The path is ON the first line, not under it. That line is also what the chain
         ' summary quotes (Core's FirstLine trims the rest), and "This folder was not
         ' found:" with the folder on the next line tells a user reading the summary
@@ -191,9 +191,7 @@ Private Sub PkgImport_CombineEngine(sources As Collection, ByVal destName As Str
 
     Set headerMap = CreateObject("Scripting.Dictionary")
     headerMap.CompareMode = 1                    ' vbTextCompare: "Amount" matches "amount"
-    Set dest = ThisWorkbook.Worksheets.Add( _
-        After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-    dest.name = destName
+    Set dest = Core_NewSheet(destName)
     destRow = 2                                  ' row 1 is the master header, grown as we learn it
     destCols = 0
 
@@ -372,7 +370,7 @@ Public Sub PkgImport_DelimitedFile(ctx As Object)
     If VarType(picked) = vbBoolean Then Exit Sub                  ' user cancelled
 
     destName = PkgImport_SheetNameFor(CStr(picked))
-    If Not PkgImport_DestUsable(ctx, destName, TITLE) Then Exit Sub
+    If Not Core_DestUsable(ctx, destName, TITLE, "Name for the combined sheet this creates") Then Exit Sub
 
     Core_SpeedOn
     PkgImport_ImportDelimited CStr(picked), destName, _
@@ -414,9 +412,7 @@ Private Sub PkgImport_ImportDelimited(ByVal fullPath As String, ByVal destName A
     On Error GoTo ImportFail
 
     Set wbTxt = PkgImport_OpenDelimited(fullPath, delim, qual)
-    Set dest = ThisWorkbook.Worksheets.Add( _
-        After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-    dest.name = destName
+    Set dest = Core_NewSheet(destName)
     Set src = wbTxt.Worksheets(1)
     ' Dimensions come from UsedRange, the same thing being copied. Reading them off
     ' column A / row 1 instead would misreport any file whose first column or header
@@ -445,46 +441,6 @@ End Sub
 ' one flat namespace (design section 3.3), even though these are Private.
 '================================================================
 
-' A destination name this package may create. It REFUSES rather than
-' overwrites: the library snippet this replaces opened with
-' ThisWorkbook.Worksheets("Master").Delete under On Error Resume Next,
-' which silently destroys whatever the user had on that sheet. Nothing in
-' this package deletes a sheet it did not create in the same run.
-Private Function PkgImport_DestUsable(ctx As Object, ByVal destName As String, _
-                                      ByVal title As String) As Boolean
-    Dim bad As String, i As Long
-    If Len(destName) = 0 Then
-        Core_Refuse ctx, "No name is set for the sheet this creates." & vbCrLf & vbCrLf & _
-               "Fill in 'Name for the combined sheet this creates' on the Setup tab, " & _
-               "Finalize, and run this again." & vbCrLf & vbCrLf & _
-               "Nothing has been changed.", title
-        Exit Function
-    End If
-    If Len(destName) > 31 Then
-        Core_Refuse ctx, "'" & destName & "' is " & Len(destName) & " characters. Excel sheet names " & _
-               "stop at 31." & vbCrLf & vbCrLf & "Nothing has been changed.", title
-        Exit Function
-    End If
-    bad = ":\/?*[]"
-    For i = 1 To Len(bad)
-        If InStr(destName, Mid$(bad, i, 1)) > 0 Then
-            Core_Refuse ctx, "'" & destName & "' contains " & Mid$(bad, i, 1) & ", which Excel does not " & _
-                   "allow in a sheet name." & vbCrLf & vbCrLf & _
-                   "None of these are allowed:  : \ / ? * [ ]" & vbCrLf & vbCrLf & _
-                   "Nothing has been changed.", title
-            Exit Function
-        End If
-    Next i
-    If Core_SheetExists(destName) Then
-        Core_Refuse ctx, "A sheet named '" & destName & "' already exists in this workbook, and this " & _
-               "action will not overwrite it." & vbCrLf & vbCrLf & _
-               "Rename or delete that sheet, then run " & title & " again." & vbCrLf & vbCrLf & _
-               "Nothing has been changed.", title
-        Exit Function
-    End If
-    PkgImport_DestUsable = True
-End Function
-
 ' Names what the combine actually read, when that is not what the caption implies.
 ' "Opened read-only and closed without saving" is true of files THIS run opened; a
 ' source that was already open was read in its unsaved on-screen state and left alone.
@@ -499,36 +455,6 @@ Private Function PkgImport_OpenSourcesNote(ByVal alreadyOpen As Long) As String
         "their CURRENT on-screen contents, including any edits not yet saved. They " & _
         "were left open and untouched. The rest were opened read-only and closed " & _
         "without saving."
-End Function
-
-' Blank means the folder this workbook is saved in - contract section 9's
-' "data location", and the answer in the overwhelming majority of cases.
-' Returns a path ending in a separator, or "" when the workbook has never been
-' saved and no folder was configured (the caller reports that case by name).
-Private Function PkgImport_ResolveFolder(ByVal raw As String) As String
-    Dim p As String
-    p = Trim(raw)
-    If Len(p) = 0 Then p = ThisWorkbook.Path
-    If Len(p) = 0 Then Exit Function                 ' workbook never saved
-    If Right$(p, 1) <> Application.PathSeparator Then p = p & Application.PathSeparator
-    PkgImport_ResolveFolder = p
-End Function
-
-' Folder existence, via FileSystemObject rather than Dir(path, vbDirectory).
-' Dir's behaviour with a trailing separator is not something to bet a refusal dialog
-' on, and it also returns a non-empty result for a FILE, so a path pointing at a
-' workbook would read as a valid folder. Late-bound: no reference to add, and no
-' VBIDE trust dependency (CLAUDE.md rule 3).
-Private Function PkgImport_FolderExists(ByVal folderPath As String) As Boolean
-    Dim fso As Object, p As String
-    p = folderPath
-    If Len(p) > 3 Then
-        If Right$(p, 1) = Application.PathSeparator Then p = Left$(p, Len(p) - 1)
-    End If
-    On Error Resume Next
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    If Not fso Is Nothing Then PkgImport_FolderExists = fso.FolderExists(p)
-    On Error GoTo 0
 End Function
 
 ' Every workbook in the folder except this one. Collects names FIRST and
@@ -568,20 +494,14 @@ Private Function PkgImport_WorkbookPaths(ByVal folderPath As String) As Collecti
     Set PkgImport_WorkbookPaths = out
 End Function
 
-' A sheet name from a file name: drop the extension, replace the characters
-' Excel forbids, and cut to 31. It does NOT make the name unique - a clash is
-' reported by PkgImport_DestUsable and refused, exactly like a combine's.
+' A sheet name from a file name: drop the extension, then hand the rest to Core to
+' sanitise and cut to 31. It does NOT make the name unique - a clash is reported by
+' Core_DestUsable and refused, exactly like a combine's.
 Private Function PkgImport_SheetNameFor(ByVal fullPath As String) As String
-    Dim nm As String, bad As String, i As Long
+    Dim nm As String
     nm = Core_FileName(fullPath)
     If InStrRev(nm, ".") > 1 Then nm = Left$(nm, InStrRev(nm, ".") - 1)
-    bad = ":\/?*[]"
-    For i = 1 To Len(bad)
-        nm = Replace(nm, Mid$(bad, i, 1), "-")
-    Next i
-    nm = Trim(nm)
-    If Len(nm) > 31 Then nm = Left$(nm, 31)
-    PkgImport_SheetNameFor = nm
+    PkgImport_SheetNameFor = Core_SafeSheetName(nm)
 End Function
 
 ' Open a delimited file with the separator and qualifier the deployment

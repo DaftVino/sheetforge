@@ -87,3 +87,118 @@ a chain halt.
   previously showed a message and returned **without** setting the failed flag, so a chain
   ticked them green — Task 4b. This is a behaviour change to shipped actions and is the one
   item here that touches something the owner has used before.
+
+---
+
+## W2 — Validate & Reconcile (v0.13.0, contract v2.5.0)
+
+- **`validate.reconcile` reports a duplicate key instead of pairing rows.** Build A and B
+  where one key appears twice on side A and once on side B, with different values. Expected:
+  one `Duplicate key` row naming counts 2 and 1, and **no `Differs` rows for that key**.
+  *Failure looks like:* a `Differs` row, which means rows were paired by position — a
+  difference the data does not contain. *Why:* this is the wrong-number-in-a-finance-report
+  case the action exists to avoid.
+- **A blank key is reported, never matched.** Give A and B one row each whose key cells are
+  empty. Expected: two `Empty key` rows. *Failure looks like:* a match, or a `Differs`.
+- **A repeated header stops the run before comparing.** Give range A two columns both headed
+  `Amount`. Expected: a refusal naming `Amount` and side A, and **no report sheet created**.
+- **Colouring is undoable and scoped.** Run `validate.highlight_duplicates` on a range where
+  some cells already carry a fill. Expected: the pre-filled cells keep their own colour and
+  are reported as skipped; only the newly marked cells are left selected; clearing the fill
+  on that selection restores the sheet exactly. *Failure looks like:* a pre-existing fill
+  overwritten, or the whole picked range selected afterwards — which would strip fills the
+  action deliberately did not set.
+- **Every confirm dialog cancels cleanly.** Cancel each of the five actions at its
+  confirmation. Expected: nothing coloured, no sheet created, no completion message.
+- **Colour legibility on a dark Excel theme.** The three highlight colours against a dark
+  theme. *Why:* pairs with the outstanding track-1 reskin item — same untested assumption,
+  same palette origin.
+
+---
+
+## W3 — Format & Present, plus export (v0.14.0, contract v2.6.0)
+
+- **`importexport.export` still produces the same file it did before the refactor.** Run it on
+  a workbook containing a dynamic-array spill, a legacy CSE array, and ordinary formulas.
+  Expected: byte-for-byte the same flattening as v0.13.0 — every formula frozen, spills
+  expanded to static values, formatting and conditional formatting intact. *Failure looks
+  like:* a `#SPILL!`, a surviving formula, or a lost array. *Why:* the flatten engine moved out
+  of this shipped action into Core. **This is the highest-risk item in W3** — it is the most
+  sophisticated routine in the codebase and it produces a finance deliverable.
+- **`export.per_sheet` refuses a name collision instead of overwriting.** Create two sheets
+  named `A"B` and `A<B` — both legal in Excel, both sanitising to `A-B`. Expected: a refusal
+  naming both, and **no files written at all**. *Failure looks like:* one file, silently
+  holding the second sheet.
+- **`export.per_sheet` emits no `Setup.pdf` or `_Config.pdf`.** *Why:* `Core_IsEngineSheet`.
+- **A partly-written batch reports how far it got.** Make the destination unwritable partway
+  through. Expected: the failure names how many files were already written. *Why:* the write
+  loop is sequential with no rollback, and the plan no longer claims otherwise.
+- **`format.report_title` asks before inserting rows, and a formula using `ROW()` below the
+  title reflects its new position afterwards.** *Why:* this is the action that admits it
+  changes values; the item exists to confirm the admission is the true one.
+
+---
+
+## W4 — Summarize & Enrich (v0.15.0, contract v2.7.0)
+
+- **`enrich.join` does not merge two distinct keys.** Put `AB  CD` (two internal spaces) and
+  `AB CD` (one) in the reference table as separate keys, and both in the target. Expected: they
+  match their own rows, independently. *Failure looks like:* both target rows getting the same
+  reference values. *Why:* an earlier version normalised keys with a function that collapses
+  internal whitespace. **This is the wrong-numbers-in-a-finance-deliverable case for W4.**
+- **The duplicate-key count is distinct keys, not occurrences.** Put one key in the reference
+  table **four** times. Expected: the report says **1** duplicated key, not 3.
+- **`summarize.refresh_pivots` reports a pivot it could not refresh.** Delete a pivot's source
+  range, then run it. Expected: that pivot is named as failed and is **not** counted as
+  refreshed. *Failure looks like:* a clean "all refreshed" message.
+- **`summarize.build_pivot` refuses a source with a duplicate or blank header**, before
+  building anything.
+- **A failed `build_pivot` leaves no half-built sheet behind**, and reports the original error
+  rather than a cleanup error.
+
+---
+
+## W5 — Protect & Back Up (v0.16.0, contract v2.8.0)
+
+- **Pruning leaves a lookalike file alone.** Put a file named `SNAPSHOT_notes.txt` and another
+  named `SNAPSHOT_2020-01-01_000000.xlsm` in the Snapshots folder, then run `backup.snapshot`
+  enough times to trigger pruning. Expected: the `.txt` **still exists**; the old dated `.xlsm`
+  is gone. *Failure looks like:* the `.txt` deleted. *Why:* a prefix match is not proof the
+  action wrote the file. **This is the destroys-user-data item for W5.**
+- **`backup.archive_output` refuses rather than overwrites**, and refuses a file open in this
+  Excel instance. Try both.
+- **A cross-volume move that fails reports which files exist.** Archive to a different drive
+  and interrupt it (remove the drive, or make the destination read-only mid-run). Expected: the
+  error names whether the source still exists and whether the destination was created. *Failure
+  looks like:* a generic error leaving you unsure whether your file survived.
+- **`backup.month_end_version` names the file correctly on 1 January** and on the 1st of a
+  month. *Why:* prior-month-end on 1 Jan is 31 Dec of the previous year.
+- **`backup.snapshot` as step 1 of a destructive chain runs quietly** and the later steps still
+  run. *Why:* this is the intended flagship usage.
+
+---
+
+## W6 — Workbook housekeeping (v0.17.0, contract v2.9.0)
+
+- **`workbook.unhide_sheets` leaves `_Config` hidden.** Run it on a workbook with `_Config`
+  present and a user sheet hidden. Expected: the user sheet is visible, **`_Config` and
+  `_Config_staged` are still hidden**, and the count reports how many were left alone.
+  *Failure looks like:* `_Config` visible. **This is the most important item in W6** — it is
+  the one that exposes engine internals to a finance user.
+- **`workbook.protect_sheets` does not strand the toolkit's buttons.** Protect everything, then
+  run Finalize / rebuild the button pages. Expected: the rebuild completes and the buttons are
+  replaced normally. *Failure looks like:* an error about removing controls, or duplicated
+  buttons stacking up. *Why:* Excel's `Protect` defaults to protecting DrawingObjects, and the
+  contract forbids the engine unprotecting a sheet to work around it — so `DrawingObjects:=False`
+  is the only thing preventing a permanent stranding.
+- **`workbook.unprotect_sheets` with a wrong password names the sheets that refused** and does
+  not stop halfway leaving some unprotected.
+- **`workbook.build_toc` refuses a reserved name.** Set the TOC name to `Macros 1` and run it.
+  Expected: a refusal naming the reason. *Failure looks like:* a sheet created that the next
+  Finalize deletes without warning.
+- **`workbook.build_toc` refuses rather than clearing an existing sheet of that name**, even
+  one it created itself on a previous run.
+- **A TOC link works for a sheet whose name contains an apostrophe.** *Why:* the sheet name is
+  embedded in a quoted `SubAddress` and the apostrophe has to be doubled.
+- **`workbook.unhide_rows_cols` refuses on an active chart sheet** rather than raising a type
+  mismatch, and states what an active AutoFilter means for the result.

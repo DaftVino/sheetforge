@@ -479,6 +479,43 @@ if ($idProblems.Count -gt 0) {
     exit 1
 }
 
+# --- guard: a package private must carry its package prefix ---------------------
+# The bundle is ONE module, so an unprefixed Private in a package reserves that
+# name against every other package - and the duplicate-procedure guard below then
+# fails a build for a collision whose cause is invisible in the failing file. This
+# says so at the point the name is introduced instead. Core is exempt: it IS the
+# shared namespace, and its privates are the ones packages must not shadow.
+#
+# Enumerated from disk, NOT from $pkgFiles. $pkgFiles honours -Packages, so a
+# `build.ps1 -Packages PkgImportExport` would not look at PkgClean at all - and a
+# guard that only fires on a full build is a guard someone will route around
+# without meaning to. $asciiCandidates is built the same way, for the same reason.
+$prefixCandidates = @(
+    Get-ChildItem -LiteralPath $pkgDir -Filter 'Pkg*.bas' | Sort-Object Name |
+        ForEach-Object { $_.FullName }
+)
+$prefixProblems = New-Object System.Collections.ArrayList
+foreach ($f in $prefixCandidates) {
+    $leaf = Split-Path $f -Leaf
+    if ($leaf -notmatch '^(Pkg[A-Za-z0-9]+)\.bas$') { continue }
+    $expected = $matches[1] + '_'
+    $lines = Get-Content -LiteralPath $f
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $code = Get-VbaCodePortion $lines[$i]
+        if ($code -match '(?i)^\s*Private\s+(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)') {
+            $nm = $matches[1]
+            if (-not $nm.StartsWith($expected, [System.StringComparison]::Ordinal)) {
+                [void]$prefixProblems.Add("${leaf}:$($i + 1): private procedure '$nm' does not start with '$expected'. The bundle is one flat namespace, so an unprefixed private reserves that name against every other package. Rename it '$expected$nm', or promote it to Core if another package needs it.")
+            }
+        }
+    }
+}
+if ($prefixProblems.Count -gt 0) {
+    Write-Host "BUILD FAILED - unprefixed package private(s):" -ForegroundColor Red
+    $prefixProblems | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 1
+}
+
 # --- guard: every Sub/Function/Property name must be unique across all modules ---
 # NOTE: Property Get/Let/Set sharing a name would false-positive here; this
 # codebase uses none. Add kind to the key if that changes.
