@@ -1,23 +1,21 @@
-<div style="text-align: center;">
-  <img src="docs/assets/sheetforge-logo.png" alt="sheetforge" width="240">
+<div align="center">
+  <img src="docs/assets/sheetforge-logo.png" alt="SheetForge logo" width="200">
+  <h1>SheetForge</h1>
 </div>
 
-# SheetForge
-
-A reusable, config-driven Excel/VBA macro toolkit: one required Core module (config engine, Setup-sheet renderer, button builder, Core_Run dispatcher, package registry) plus thin package modules (ImportExport, Clean, Reconcile). Non-technical and power users configure automations via a Setup page; each deployment ships one concatenated .bas. Runs on Excel/Windows for a multi-entity franchise finance team, with a later Apps Script port planned against a language-neutral spec.
+SheetForge is an Excel toolkit for repeatable importing, cleanup, validation, formatting, summarizing, backup, export, and workbook tasks. It ships 51 actions across ten packages, all chosen and configured on a Setup tab in your workbook instead of in code. SheetForge runs only in desktop Excel on Windows because it is written in VBA.
 
 ## Install
 
-```
-n/a
-```
+There is no installer or add-in, and nothing to run. Download the single `.bas` file from the repository's [Releases page](../../releases), import it into your own Excel workbook, and follow the short [setup guide](docs/setup-guide.md).
 
 ## Usage
 
-TODO — replace before the first release.
+On the Setup tab, switch on the actions you need and fill in their options. SheetForge builds the workbook buttons from those choices, so day-to-day use does not require editing VBA.
 
 ## Docs
 
+- Setup guide: `docs/setup-guide.md`
 - Architecture: `docs/architecture.md`
 - Workflow quick reference: `docs/quick-ref-workflow.md`
 - Decisions: `docs/adr/`
