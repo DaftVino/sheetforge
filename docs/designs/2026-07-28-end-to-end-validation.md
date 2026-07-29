@@ -13,7 +13,8 @@ because the next person reads it as passed.
 second can hand you a wrong number that looks right; the rest degrade gracefully. If you only
 have an hour, the hour belongs to §2 and §3.
 
-Source: `2026-07-28-deferred-validation-log.md`, 40 claims accumulated across seven phases.
+Source: `2026-07-28-deferred-validation-log.md`, 40 claims accumulated across seven phases,
+plus the claims the Macros Home phase added as it was built — **79 items in total**.
 Sequencing: `2026-07-28-track2-completion-plan-of-record.md`.
 
 ---
@@ -87,9 +88,14 @@ These are the items where a failure costs you something you cannot get back.
   single most valuable item in this document.** Repeat it for **Update Ref_Master**.
 
 - [ ] **2.2 — Snapshot pruning leaves a lookalike file alone.**
-  Put two files in the Snapshots folder: `SNAPSHOT_notes.txt` (anything) and
-  `SNAPSHOT_2020-01-01_000000.xlsm`. Run **Snapshot Before a Risky Step**
-  enough times to exceed the keep count.
+  **Setup first**, or you cannot do this item: on the Setup tab fill in
+  *Folder to write backup and snapshot files into* (`k_backup_folder`) and set *Snapshots to
+  keep* (`k_backup_snapshot_keep`) to **2** — it defaults to 20, and 21 runs is not a test.
+  Finalize. Snapshots are written to **`<that folder>\Backup\Snapshots\`**, two levels down;
+  the folders are created on the first run, so run the action once and let it build them.
+  Now put two files in that `Snapshots` folder: `SNAPSHOT_notes.txt` (any content) and
+  `SNAPSHOT_2020-01-01_000000.xlsm` (copy any workbook and rename it). Run **Snapshot Before a
+  Risky Step** three more times.
   *Expected:* the `.txt` **still exists**; the old dated `.xlsm` is gone.
   *Failure:* the `.txt` deleted.
   *Why:* pruning deletes files. Matching the `SNAPSHOT_` prefix alone is not proof this
@@ -124,10 +130,16 @@ These are the items where a failure costs you something you cannot get back.
   is wrong the stranding is permanent.
 
 - [ ] **2.7 — `Build Table of Contents` refuses an existing sheet and a reserved name.**
-  Run it twice; then set its name to `Macros 1` and run again.
-  *Expected:* the second run refuses rather than clearing; the reserved name is refused by
-  name.
-  *Failure:* a sheet cleared, or a sheet created that the next Finalize silently deletes.
+  Run it twice. Then — **this is the part that is easy to get wrong** — the destination name is
+  not a prompt, it is the Setup field *Name for the Table of Contents sheet*
+  (`k_workbook_toc_name`, default `Contents`). Change that field to `Macros 1`, click
+  **Finalize Setup Tab**, and only then run the action again. The action reads the *saved*
+  config, so without the Finalize you have simply run the first test a third time.
+  *Expected:* the second run refuses rather than clearing; the third refuses the reserved name,
+  naming it.
+  *Failure:* a sheet cleared, or a sheet created that the next Finalize silently deletes. Also
+  a failure: a third run whose refusal message names `Contents` rather than `Macros 1` — that
+  means the new name never reached the action and the reserved-name path was never exercised.
 
 - [ ] **2.8 — `Add A Back To Contents Link To Every Sheet` never overwrites.**
   First run `Build Table of Contents` so a `Contents` sheet exists. Then put a value in `A1`
@@ -227,9 +239,17 @@ These are the items where a failure costs you something you cannot get back.
 - [ ] **2.21 — `Alt+F8` lists exactly three names.**
   *Expected:* `Core_BuildSetup`, `Core_FinalizeSetup`, `Core_CompleteSetup` — and nothing
   else.
-  *Failure:* `Core_SpeedOn` or `Core_SpeedOff` still listed. Running either leaves Excel with
-  calculation and screen updating switched off and nothing on screen saying so, which then
-  looks like the toolkit broke the workbook.
+  *Failure:* **any fourth name at all.** Write down whatever it is; the name identifies the
+  cause on its own.
+  - `Core_SpeedOn` or `Core_SpeedOff` — running either leaves Excel with calculation and
+    screen updating switched off and nothing on screen saying so, which then looks like the
+    toolkit broke the workbook.
+  - `Core_BuildControlPanel` — it was `Public` until a dry-run caught it, and it is the reason
+    this item's failure clause is open-ended rather than naming two suspects. It rebuilds the
+    `Macros <n>` pages from state that Finalize prepares, so a user who picks it out of this
+    list gets a panel built from a stale registry.
+  *Why:* this list is the only inventory of macro names a non-technical user ever sees, and
+  `docs/setup-guide.md` tells them to pick from it. Every extra name is one they must rule out.
 
   **Assumption, flagged per rule 7:** that a macro can delete the sheet hosting the button
   that invoked it. Nothing in this codebase has ever exercised that. `Setup Menu` is deleted
@@ -293,9 +313,14 @@ These are the items where a failure costs you something you cannot get back.
   *Expected:* that pivot is named as failed and is **not** counted as refreshed.
   *Failure:* a clean "all refreshed" message.
 
-- [ ] **3.10 — `Export Dashboard` still produces the same file it always did.**
+- [ ] **3.10 — `Export Dashboard (.xlsx)` still produces the same file it always did.**
   Run it on a workbook containing a dynamic-array spill, a legacy CSE array, and ordinary
-  formulas. Compare against a file exported by v0.13.0 or earlier.
+  formulas. Compare against a file exported by v0.13.0 or earlier. **You need that older file
+  before you start** — either one you already exported and kept, or one you make now:
+  `git stash && git checkout v0.13.0 && pwsh build/build.ps1`, import that bundle into a
+  scratch copy of the workbook, export, then `git checkout feat/macros-home` and rebuild.
+  **If you have neither, record this item UNTESTED rather than guessing** — a comparison
+  against nothing is not a pass.
   *Expected:* the same flattening — every formula frozen, spills expanded to static values,
   formatting and conditional formatting intact.
   *Failure:* a `#SPILL!`, a surviving formula, or a lost array.
@@ -343,7 +368,7 @@ These are the items where a failure costs you something you cannot get back.
   *Why:* 4.1 and 4.2 are a **pair** — together they prove suppression is conditional rather
   than broken. Either alone passes on a build that broke the other.
 - [ ] **4.3 — A step that FAILS still asks.** Point `k_import_folder` at a folder holding a
-  zero-byte `.xlsx`; run a chain starting with Combine All Workbooks.
+  zero-byte `.xlsx`; run a chain starting with **Combine All Workbooks in a Folder**.
   *Expected:* a Continue/Stop prompt. *Failure:* the chain stops without asking.
   *Why:* the asymmetry is the design. If failures stop too, the distinction was never built.
 - [ ] **4.4 — The chain summary from 3.1 contains no `#0`.**
@@ -353,7 +378,7 @@ These are the items where a failure costs you something you cannot get back.
   *Why:* a refusal has no error number, and `#0` beside a reason tells you the macro
   malfunctioned when it did exactly the right thing.
 - [ ] **4.5 — An Import/Export refusal stops a chain.** Clear `k_export_tabs`, run a chain
-  containing Export Dashboard. *Expected:* the chain stops and says so.
+  containing **Export Dashboard (.xlsx)**. *Expected:* the chain stops and says so.
 - [ ] **4.6 — Highlighting is undoable and scoped.** Run **Highlight Duplicates** on a range
   where some cells already carry a fill. *Expected:* pre-filled cells keep their colour and are
   reported as skipped; **only the newly marked cells are left selected**; clearing the fill on
@@ -361,7 +386,7 @@ These are the items where a failure costs you something you cannot get back.
   *Failure:* a pre-existing fill overwritten, or the whole picked range selected afterwards.
 - [ ] **4.7 — Every confirm dialog cancels cleanly.** Cancel each action at its confirmation.
   *Expected:* nothing changed, no sheet created, no completion message.
-- [ ] **4.8 — `Add a Report Title` asks before inserting rows**, and a formula using `ROW()`
+- [ ] **4.8 — `Add Report Title` asks before inserting rows**, and a formula using `ROW()`
   below the title reflects its new position afterwards.
   *Why:* this is the action that **admits** it changes values. The item confirms the admission
   is the true one.
@@ -433,8 +458,9 @@ These are the items where a failure costs you something you cannot get back.
   *Failure:* `(no steps!)` or `[UNKNOWN]` in the Finalize report.
 
 - [ ] **4.22 — A chain authored in the OLD format still finalizes.**
-  Type `Remove Duplicates [clean.dupes]` on one line and `Trim Spaces [clean.trim]` on the
-  next, into a chain's Steps cell. Finalize.
+  Type `Remove Duplicates [clean.dupes]` on one line and `Trim & Clean Text [clean.trim]` on
+  the next, into a chain's Steps cell. Finalize. (Those are the two captions as the old format
+  actually stored them — the parser reads the id in brackets, not the caption.)
   *Expected:* accepted, and after Finalize the cell has been **rewritten** as
   `clean.dupes, clean.trim`.
   *Failure:* `[UNKNOWN]` against either step.
@@ -486,6 +512,9 @@ These are the items where a failure costs you something you cannot get back.
   *Failure:* the reminder text showing when nothing is switched on.
   *Why:* this is the item that proves the formula excludes blanks and matches `Off`
   correctly. If it fires here it fires forever, from first import, and means nothing.
+  **Run 4.29 and 4.30 as a pair, in that order.** On its own 4.29 would pass on a build that
+  never wrote the formula at all — a blank cell is also what "no formula" looks like. 4.30 is
+  what proves the cell is a live formula; 4.29 is what proves it is the *right* one.
 
 - [ ] **4.30 — Setting one action to `Button` makes the reminder appear immediately, before
   Finalize.** Change a single Availability dropdown and do not click anything else.
@@ -508,8 +537,9 @@ These are the items where a failure costs you something you cannot get back.
 ### New in this phase — the header notes
 
 - [ ] **4.34 — All four headers carry a readable note.** Hover each of these on the Setup tab:
-  **Availability** and **Placement** in the Action Catalog, **Steps** and **Placement** in the
-  Chains block, and **Column types** on the import table.
+  **Availability** and **Placement** in the Action Catalog, **Steps (action ids, separated by
+  commas)** and **Placement** in the Chains block, and **Column types** on the import table.
+  Those are the header cells' full text — the Chains one is not a bare `Steps`.
   *Expected:* a note appears on each, and the text is **not clipped** — you can read the last
   sentence.
   *Failure:* a missing note, or one cut off mid-sentence.
@@ -562,7 +592,7 @@ These are the items where a failure costs you something you cannot get back.
 
 ## Result
 
-- Items passed: ____ / 41
+- Items passed: ____ / 79
 - Items recorded **UNTESTED**: ____
 - Anything that failed, with what you saw:
 
