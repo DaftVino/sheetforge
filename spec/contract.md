@@ -1,6 +1,6 @@
 # SheetForge portable contract
 
-**Contract version: 2.9.0** (2026-07-28) · SemVer, independent of the
+**Contract version: 2.10.0** (2026-07-29) · SemVer, independent of the
 repo `VERSION` and of per-package versions. Full history in §10.
 
 This is the **language-neutral source of truth** for SheetForge's config schema
@@ -51,11 +51,22 @@ field is the following record:
   "tier":     "\"simple\" | \"advanced\"  (see §4)",
   "default":  "string — scalar default (kinds text/int/sheet/file/bool)",
   "headers":  "string — column header(s); list = one header, table = \"|\"-delimited",
+  "headerNotes": "string — optional per-column note, \"|\"-delimited, positionally matching headers (v2.10.0)",
   "defaults": ["ordered seed rows for kind list/table; see §3"],
   "help":     "string — optional plain-language note shown under the field",
   "usedBy":   "string — optional comma-separated action ids this field configures (v1.2.0)"
 }
 ```
+
+- **`headerNotes` (v2.10.0, optional).** A per-column explanation of what the
+  column accepts, attached to the column's own header rather than printed as
+  more prose above the block. Positionally matched to `headers`; an empty entry
+  means no note for that column. It exists because a `table` field's headers are
+  **package-supplied**, so the engine cannot annotate them without knowing which
+  packages exist — which is the layering rule this contract keeps. A platform
+  whose surface has no per-cell annotation MAY render these anywhere it likes,
+  or not at all: no behaviour depends on them, and a port is not obliged to
+  invent a tooltip mechanism to conform.
 
 - **`key` uniqueness is contract-critical.** The runtime config is a single flat
   key→value store shared by all enabled packages, so every `key` must be unique
@@ -224,7 +235,7 @@ actions into one button:
   no action id may use it.
 - **label** — the button caption; freely editable without changing identity.
 - **steps** — an ordered list of **action ids** (not captions). Stored as an
-  id-list joined by a delimiter that cannot occur in an id (reference: newline).
+  id-list joined by a delimiter that cannot occur in an id (reference: comma).
 - **semantics** — run steps in list order; each step's completion dialog is
   suppressed; on a step failure the engine prompts the user Continue/Stop; one
   combined summary is shown at the end. Chains resolve + validate at activate time.
@@ -297,7 +308,7 @@ An action is one thing a package *does* (it becomes a button). Each action is:
 | Field | Meaning |
 |---|---|
 | `id` | Dotted `<domain>.<operation>` token, globally unique (`import.combine_worksheets`, `clean.dupes`). The domain is a controlled user-facing vocabulary, **not** the package that implements it — see §7 for the vocabulary table and the full rule. |
-| `caption` | Button label (may carry an ordinal, e.g. `"2.  Import Source Data"`). |
+| `caption` | Button label. Free display text, not an identifier: it MAY be changed without a breaking-change bump, and MAY carry an ordinal where a deployment's actions run in a fixed order. The reference implementation's `importexport` captions carried one until v2.10.0 and no longer do (§10). |
 | `help` | Plain-language description shown on/near the button. |
 | `category` | Optional display category (v1.2.0). Defaults to the package `name`. Groups actions on an index surface where a platform provides one (§6), and heads the columns of a button page; deliberately decoupled from the package, so two packages may feed one category and one package may span several. |
 | `availability` | Deployment config, not manifest data (v1.2.0): one of `button`, `chains-only`, `off`. **Defaults to `off` (v2.1.0)** — an action arrives switched off and is turned on deliberately. This changes no stored value's meaning: a stored `button` still reads as `button`. The default applies only where nothing was ever stored. For the pre-v1.2.0 legacy case the default is pinned separately and does NOT follow this row — see §5. |
@@ -553,25 +564,29 @@ window; 125% scaling — common — fits about 5.7); a platform with different
 real estate MAY choose its own capacities but MUST apply the same rule and
 the same ordering.
 
-**Index surface (v1.2.0, amended v1.2.0 pre-freeze):** a platform **MAY** generate
-an index surface. It is **not required**: the Excel reference implementation built one
-and then withdrew it before release, because at the scale a real deployment runs —
-a handful of actions and one or two chains — an index is clutter rather than
-navigation. **When a platform does provide one**, it lists one entry per built page
-with its title, its button count and a link; a **button catalog** (caption,
-description, and the page each button is on) covering every action whose
-`availability` placed it as a button — an action that is `off` or `chains-only` has
-no button and no page, so it does not appear in this catalog; it remains listed on
-the authoring surface (§6, per-action availability), which is where it stays
-discoverable; a link to the admin surface; and a legend explaining the placement
-code and availability.
+**Index surface (v1.2.0; withdrawn pre-freeze; restored v2.10.0):** a platform
+**MAY** generate an index surface. It remains **not required**. The Excel reference
+implementation built one, withdrew it before release, and **generates one again as of
+v2.10.0** on a `Macros Home` sheet (§7).
+
+**When a platform does provide one**, it lists one entry per built page with its
+title, its button count and a link; an **action catalog**; a link to the admin
+surface; and a legend explaining the placement code and availability.
+
+**The action catalog covers EVERY registered action (v2.10.0, normative), each shown
+with its current `availability`** — not only those `availability` placed as buttons.
+An action that is `off` or `chains-only` has no button and no page, so its entry
+carries no page link; it MUST still be listed, with its state and its description.
+
+This reverses the v1.2.0 scoping, which covered only actions placed as buttons, and
+the reversal is normative rather than cosmetic: **every action arrives `off`** (§6,
+v2.1.0), so a button-only catalog is *empty on a fresh deployment* — precisely when a
+reader most needs to learn what the toolkit does. A catalog that is blank until the
+user already knows enough to switch something on is not an index.
 
 **Page-to-page navigation is required regardless, and is unconditional:** every
 built page MUST carry links to its previous and next page. Only the index itself,
 and the per-page link back to it, are optional.
-
-The reference implementation's withdrawn index was a `Macros Home` sheet. That name
-stays **reserved** (§7) against a future restore.
 
 **Description legibility (v1.2.0, normative for grid platforms):** an action's
 `help` text is displayed with its button and MUST NOT be clipped. Reference
@@ -670,13 +685,13 @@ manifest-assembly time.
   reserve both: staged-then-swap needs somewhere to stage.
 - **Reserved:** the display category `Chains` (engine-generated, holds chain
   buttons) and, in the Excel reference implementation, the sheet name
-  `Macros Home`. A platform substitutes its own index surface name. The name
-  stays reserved even though the reference implementation withdrew its index
-  before release (§6) — and as of that withdrawal the engine **deletes
-  `Macros Home` unconditionally with alerts suppressed on every rebuild**, the
-  same treatment `Macros` and `Macros <n>` get below, so that a stale index left
-  by an earlier build cannot survive: a package or a user relying on that name
-  for anything else loses it silently.
+  `Macros Home`. A platform substitutes its own index surface name. The
+  reference implementation **generates this sheet on every rebuild** (v2.10.0,
+  restoring the index it had withdrawn before release — §6). It is now rebuilt
+  rather than swept, but the consequence for a squatter is unchanged: a sheet of
+  that name is replaced by the generated index, so a package or a user relying
+  on the name for anything else loses it silently, exactly as under the
+  unconditional-delete rule this replaces.
 - **Reserved (v1.2.0):** in the Excel reference implementation, the sheet name
   `Macros` (the pre-v0.4.0 single default page, retired) and every `Macros <n>`
   (the generated page tabs) — the engine deletes these unconditionally with
@@ -746,10 +761,10 @@ Demo default rows (`|`-delimited): `IN_Data1|Source File A|T,T,T,T,T,T,T,T,N,N,N
 
 | id | caption | semantics |
 |---|---|---|
-| `importexport.clear` | `1.  Clear Input Tabs` | Delete data from row 2 down on every input tab; keep headers + formatting. |
-| `importexport.import` | `2.  Import Source Data` | Clear the input tabs, then for each `k_import` row import the newest matching source file (prefix rule, §3), coercing each column per its type-map codes. One confirmation dialog. |
-| `importexport.updateMaster` | `3.  Update Ref_Master` | Refresh `k_master_dest` from the newest `k_master_prefix` file: read `k_master_sheet`, copy the `k_master_cols` columns in order, keep the first column as text. |
-| `importexport.export` | `4.  Export Dashboard (.xlsx)` | Write a **values-only** snapshot of the `k_export_tabs` (in order) to a dated file (§ base/offset). Flatten dynamic-array spills, legacy CSE arrays, and formulas to static values; keep formatting, filters, and conditional formatting; break external links. |
+| `importexport.clear` | `Clear Input Tabs` | Delete data from row 2 down on every input tab; keep headers + formatting. |
+| `importexport.import` | `Import Source Data` | Clear the input tabs, then for each `k_import` row import the newest matching source file (prefix rule, §3), coercing each column per its type-map codes. One confirmation dialog. |
+| `importexport.updateMaster` | `Update Ref_Master` | Refresh `k_master_dest` from the newest `k_master_prefix` file: read `k_master_sheet`, copy the `k_master_cols` columns in order, keep the first column as text. |
+| `importexport.export` | `Export Dashboard (.xlsx)` | Write a **values-only** snapshot of the `k_export_tabs` (in order) to a dated file (§ base/offset). Flatten dynamic-array spills, legacy CSE arrays, and formulas to static values; keep formatting, filters, and conditional formatting; break external links. |
 | `importexport.suggestTypes` | Suggest Import Types | Setup helper: after the input tabs + source prefixes are filled, open each matched source file, sample it, and write a **suggested** type-map for review (never applied silently; ID/code columns flagged to stay `T`). |
 
 ### Package `import` — "Bring Data In" (v1.0.0, contract v2.3.0)
@@ -786,6 +801,8 @@ v2.2.0. It now declares exactly one:
 | key | kind | tier | default | semantics |
 |---|---|---|---|---|
 | `k_clean_formats` | table | simple | **none** | Column-to-number-format map for `clean.standardize_formats`. Two columns: **Column** (a column letter, or a header name matched against the first row of the range the caller picks) and **Number format** (a platform number-format string). A row whose Column resolves to nothing inside the picked range MUST be reported, not silently skipped. `usedBy` `clean.standardize_formats`. |
+| `k_clean_split_delimiter` | text | simple | `COMMA` | Delimiter `clean.split_column` splits on. Either one literal character, or one of the named tokens `COMMA`, `TAB`, `SEMICOLON`, `PIPE`, `SPACE` - the named tokens exist because a tab and a space cannot be typed unambiguously into a config cell, and because a literal pipe cannot appear in this document's own tables. An unrecognised multi-character value MUST be refused at run time, naming the accepted tokens. `usedBy` `clean.split_column`. |
+| `k_clean_split_destination` | text | simple | `SOURCE` | Where `clean.split_column` writes its fields. `SOURCE` replaces the picked column in place; a worksheet column letter writes there instead and leaves the picked column unchanged. Any other value MUST be refused at run time. `usedBy` `clean.split_column`. |
 
 `k_clean_formats` header: `Column (letter or header name)|Number format`.
 
@@ -839,6 +856,8 @@ time (see §3, `range` note).
 | `clean.unmerge_fill` | Unmerge & Fill Down | Prompt for a range; unmerge every merged block **wholly inside** it and write the block's value into every cell it covered. A block crossing the selection's edge MUST be left alone and reported — unmerging it would change cells the caller did not select. A merge anchor holding a formula MUST keep its formula; the cells it covered receive the computed value. |
 | `clean.standardize_formats` | Standardize Formats | Prompt for a range; apply each `k_clean_formats` row's number format to that row's column **within the picked range only**. Changes formatting, never a stored value. A mapping row that resolves to no column in the picked range MUST be reported by name, not silently dropped. With no rows configured, the action MUST stop and say where to configure them (see the field's no-defaults rule above, which is what makes this state observable). |
 | `clean.text_to_numbers` | Convert Text to Numbers | Prompt for a range; convert text that represents a number into a real number, using **the same coercion the import action uses** (§8, column-type code `N`) rather than a second implementation. Formula cells are never touched. Text the coercion cannot parse is left exactly as it is. The completion report MUST state how many cells changed. **Known limitation, stated because it is visible to the user:** the `N` coercion strips a trailing `%`, so `12%` becomes the number `12`, not `0.12`. |
+| `clean.split_column` | Split One Column Into Many | Prompt for a range; refuse unless it is exactly one column. Resolve `k_clean_split_delimiter` and `k_clean_split_destination`, refusing each separately and by field name. Refuse if the picked column contains any formula - splitting replaces a formula with text and that is not recoverable. Determine the widest row's field count; refuse if the delimiter appears in no row, and refuse if the output would extend past the sheet's last column. **Before writing anything, refuse if any destination cell outside the source column already holds content**, naming the first such address - this action MUST NOT overwrite existing data even when the user configured the destination themselves. Every output field MUST be written as text, so an identifier like `00123` keeps its leading zeros. |
+| `clean.change_case` | Change Case | Prompt for a range, then for the case to apply: upper, lower, or title case. Both prompts MUST offer a cancel that changes nothing. Convert only constant text cells inside the range's used extent; formula cells, numbers, errors and blanks MUST be left exactly as they are, and the completion report MUST state how many formula cells were skipped, because a user who expected them converted cannot tell otherwise. |
 
 ### Package `validate` — "Validate & Reconcile" (v1.0.0, contract v2.5.0)
 
@@ -897,6 +916,7 @@ Presentation only (§7): every action changes how a report looks and never a sto
 | key | kind | tier | default | semantics |
 |---|---|---|---|---|
 | `k_format_highlight_rules` | table | simple | **none** | Rules for `format.conditional_highlight`. Three columns: **Column** (a column letter, or a header name matched against the first row of the picked range - same resolution rule as `k_clean_formats`) - **Condition** (`greater_than <value>`, `less_than <value>`, `equal_to <value>`, `contains <value>`, or `blank`, one operator plus its comparison value in one cell) - **Fill color** (one of `red`, `yellow`, `green`, `orange`, `blue`, `gray`). A row whose Column resolves to nothing inside the picked range MUST be reported, not silently skipped. Rules are evaluated top to bottom; a cell matching more than one rule takes the LAST match. `usedBy` `format.conditional_highlight`. |
+| `k_format_chart_style` | int | simple | `10` | The platform's built-in chart-style identifier applied by `format.chart_style`. The accepted range is the host's, not this contract's - an implementation MUST validate against what its own host accepts and MUST NOT hard-code a range copied from another platform or an older host version. `usedBy` `format.chart_style`. |
 
 `k_format_highlight_rules` header: `Column (letter or header)|Condition|Fill color`.
 
@@ -915,6 +935,8 @@ never wrote.
 | `format.report_title` | Add Report Title | Refuse if the active sheet is engine-owned. Prompt for title text (run-time input, not stored config - §3's "range is not a kind" precedent extended to free text); refuse if left blank. Show the row count that will be inserted and ask to proceed, noting that formulas and defined names on that sheet follow the shift automatically (native host behavior, §9) and that a formula whose result depends on its own row (`ROW()`, an `INDIRECT()` built from a row number) can return a different result after the shift. On yes: insert that many rows at row 1, merge and center the title text across the sheet's used width, and style it. This DOES write one new stored value - the title text, into the merged title cell; every value that already existed on the sheet keeps its own value and only its row position moves. |
 | `format.table_style` | Apply House Table Style | Prompt for a range. Show what will happen (existing fill/border formatting in the range is replaced with a fixed banded-row + thin-border house style) and ask to proceed. On yes: apply it. No value changes. |
 | `format.print_layout` | Prep for Print | Refuse if the active sheet is engine-owned. Set that sheet to landscape orientation, fit-to-one-page-wide, a fixed narrow-margin preset, and a repeating first print row. Fixed preset, no configuration. No confirmation - touches print setup only, no cell. |
+| `format.highlight_special` | Highlight Comments, Formulas and Blanks | Refuse if the active sheet is engine-owned or is not a worksheet. Mark cells carrying comments, cells carrying formulas, and blank cells inside the used extent, each in a distinct fill. **The marking MUST be reversible and MUST be applied by a mechanism the action can distinguish as its own** - a direct fill is forbidden, because removing it could not tell the action's own marking apart from the user's formatting and would destroy the latter. Running the action again removes only its own marking, leaving every other fill and every unrelated rule intact; it MUST confirm before adding and before removing. **A comment marking is a snapshot, not a live rule** where the host has no comment predicate; an implementation in that position MUST say so in its completion report rather than let the user infer that the highlight tracks the comment. |
+| `format.chart_style` | Apply One Style To All Charts | Apply `k_format_chart_style` to every chart in the deployment, embedded or standalone, EXCLUDING charts on engine-owned sheets. Refuse if the configured identifier is not one the host accepts. Report the count styled and, separately, the count the host refused, naming each refusal in the log. Changes only the chart's visual preset - never its data, type, titles, series formulas, size or position. With no eligible chart the action MUST report that plainly rather than reporting success over zero charts. |
 
 ### Package `export` - "Export" (v1.0.0, contract v2.6.0)
 
@@ -930,10 +952,12 @@ unconfigured deployment.
 
 | key | kind | tier | default | semantics |
 |---|---|---|---|---|
-| `k_export_folder` | text | simple | *(blank)* | Folder exported files are written to. **Blank means the deployment's data location** (§9), same convention as `k_import_folder`. `usedBy` `export.pdf, export.per_sheet`. |
-| `k_export_date_offset` | int | advanced | `-1` | Days to shift the date placed in front of an exported file's name. Same semantics as `importexport`'s `k_export_offset`, under its own key (§ above). `usedBy` `export.pdf, export.per_sheet`. |
+| `k_export_folder` | text | simple | *(blank)* | Folder exported files are written to. **Blank means the deployment's data location** (§9), same convention as `k_import_folder`. `usedBy` `export.pdf, export.per_sheet, export.split_by_value, export.email`. |
+| `k_export_date_offset` | int | advanced | `-1` | Days to shift the date placed in front of an exported file's name. Same semantics as `importexport`'s `k_export_offset`, under its own key (§ above). `usedBy` `export.pdf, export.per_sheet, export.split_by_value, export.email`. |
 | `k_export_pdf_base` | text | simple | `Report` | Base name for `export.pdf`'s single dated PDF -> `<date> <base>.pdf`. `usedBy` `export.pdf`. |
 | `k_export_persheet_format` | text | simple | `pdf` | File type `export.per_sheet` writes: `pdf` or `xlsx`. Any other stored value MUST be refused at run time, naming the two accepted tokens. `usedBy` `export.per_sheet`. |
+| `k_export_email_to` | text | simple | *(blank)* | Recipient the `export.email` draft is addressed to. Blank MUST be refused at run time rather than producing an unaddressed draft. **Not validated as an address** - the mail client is the authority on what it will accept, and a contract-level pattern would reject valid internal addresses. |
+| `k_export_email_subject` | text | simple | *(blank)* | Subject line of the `export.email` draft. Blank MUST be refused at run time. |
 
 **Actions**
 
@@ -942,6 +966,9 @@ unconfigured deployment.
 | `export.freeze_values` | Freeze Formulas to Values | Prompt for a range. Count its formula cells (including dynamic-array spill anchors); refuse if none. Show the count and ask to proceed, stating this cannot be undone. On yes: convert every formula in the range - including spills and legacy CSE arrays - to a static value, using the same flattening behavior `importexport.export` already applies per sheet (§ Core_FreezeValues). Promoted from being embedded inside `importexport.export` to a standalone, range-scoped action; `importexport.export`'s own behavior is unchanged. |
 | `export.pdf` | Export to PDF | Resolve the export folder; refuse if the workbook has never been saved and no folder is configured, or if the configured folder does not exist. Ask whether to export the whole workbook, one sheet, or a range (workbook / sheet / range); an unrecognised answer is refused, naming the three accepted tokens. Build the dated output path (`k_export_date_offset` + `k_export_pdf_base`); refuse rather than overwrite if a file already exists at that path. For "sheet", refuse if the named sheet does not exist or is engine-owned. For "range", the picked range temporarily becomes the target sheet's print area for the export and is restored to its prior value immediately after, whether the export succeeds or fails. Writes one PDF. |
 | `export.per_sheet` | Export Each Tab Separately | Validate `k_export_persheet_format` is `pdf` or `xlsx`; refuse otherwise. Resolve and validate the export folder as `export.pdf` does. Build the list of every VISIBLE, non-engine-owned sheet (§ Decision 6 - hidden sheets are excluded too, on top of the required engine-sheet exclusion); refuse if none. Check every target file path for an existing collision, AND every target path against every other target path for a collision WITHIN this batch (sanitizing is many-to-one - two different, both-legal sheet names can produce the identical file name); refuse the WHOLE batch, naming every collision, if even one exists - no file is written until every target is clear. That refusal is all-or-nothing; the write itself is not transactional - it proceeds file by file, and a failure partway through leaves the files already written in place, with the failure message stating how many succeeded before the error. Otherwise show the full file list and ask to proceed. On yes: write one file per sheet, named `<date> <sheet name>.<ext>`. The `xlsx` path flattens every formula in a full workbook copy (via `Core_FreezeValues`, same technique `importexport.export` already relies on) before isolating each sheet, so a sheet with a cross-sheet formula does not export with a broken reference. |
+| `export.split_by_value` | Save Each Group As Its Own File | Prompt for a range, whether its first row is a header, and which column groups the rows. Resolve and validate the export folder exactly as `export.pdf` does. Build one output path per distinct value in the grouping column, named through the platform's safe-file-name reduction. **Check every target path against the file system AND against every other target in the same batch** - the safe-name reduction is many-to-one, so two distinct group values can collide - and refuse the WHOLE batch naming every collision before writing anything. Then show the file list and ask to proceed. Each file receives that group's rows as values only, plus the header row when one was declared. The source range MUST NOT be modified. The write is not transactional: a failure partway leaves the files already written, and the failure message MUST state how many were written and where. |
+| `export.email` | Email A Sheet As An Attachment | Refuse a blank `k_export_email_to` or `k_export_email_subject`, each by field name. Resolve and validate the export folder as `export.pdf` does. Prompt for the sheet to send; refuse a name that does not exist, is not a worksheet, or is engine-owned. Refuse rather than overwrite an existing file at the target path. **Write the attachment file FIRST, before contacting the mail client** (normative ordering). Then open a DRAFT addressed from config with the file attached, and **MUST NOT send it** - the user sends. **When the mail client cannot be reached** - absent, or blocked by policy - the action MUST refuse with a message naming the full path of the file it already wrote, and **MUST NOT delete that file**: a policy block is not a reason to destroy work already done, and the file is what makes the failure recoverable by hand. A platform without a scriptable mail client implements the write-then-refuse half and never the draft half. |
+
 ### Package `summarize` - "Summarize & Analyze" (v1.0.0)
 
 **Fields**
@@ -1008,6 +1035,7 @@ its first field.
 |---|---|---|---|---|
 | `k_workbook_toc_name` | text | simple | `Contents` | Name of the Table of Contents sheet. A conforming implementation MUST create this sheet on first run and MUST refuse on any later run where a sheet by that name already exists, WITHOUT exception for a sheet the implementation itself built on a prior run - a plain cell value cannot prove that provenance without adding new engine state, so this field is create-only by design, not merely by omission. Rebuilding after adding, removing, or renaming a tab requires deleting the previous sheet by hand first, then running the action again. Kind is `text`, not `sheet`, for the same reason as `k_import_dest` (§8): a `sheet` field is validated to already exist, and this one must not. |
 | `k_workbook_password` | text | advanced | *(blank)* | Password used by `workbook.protect_sheets` and `workbook.unprotect_sheets`. Blank means protect with no password. **Not a secret** - stored as plain text in the config store, like every other field; it deters accidental edits, the same as Excel's own Protect Sheet, and provides no confidentiality. |
+| `k_workbook_toc_link_cell` | text | simple | `A1` | The single cell on each sheet where `workbook.toc_links` writes its back-link. One cell address; anything that does not resolve to exactly one cell MUST be refused at run time. A deployment whose sheets carry data in the default cell changes this field rather than accepting an overwrite - the action never overwrites (§ below). `usedBy` `workbook.toc_links`. |
 
 **Actions**
 
@@ -1018,6 +1046,9 @@ its first field.
 | `workbook.unprotect_sheets` | Unprotect All Sheets | Unprotect every protected sheet NOT owned by the engine, using `k_workbook_password`. A sheet whose protection does not accept that password MUST be reported by name as not unprotected; the action MUST NOT stop partway and MUST attempt every remaining sheet regardless of one sheet's failure. |
 | `workbook.build_toc` | Build Table of Contents | Create (§8 field semantics above) a sheet named `k_workbook_toc_name` listing every VISIBLE sheet not owned by the engine and not the Table of Contents sheet itself, each as a same-workbook hyperlink to that sheet, with an embedded apostrophe in a sheet name DOUBLED per the anchored-placement quoting rule (§6). A hidden sheet MUST NOT be listed (a link to it cannot be navigated to). The destination-name check MUST be performed unconditionally, before any other branch, and MUST refuse per the reserved-name rule (§7) and per any existing sheet of that name - including the implementation's own prior output - exactly as any other engine-created destination sheet. |
 | `workbook.unhide_rows_cols` | Unhide All Rows & Columns | On the ACTIVE sheet only, set every row and every column to visible. MUST refuse if the active sheet is engine-owned (an engine-owned surface may hide rows/columns as part of its own generated layout). Because a filter-hidden row and a manually hidden row are not distinguishable, an implementation MUST warn, and obtain confirmation, before unhiding on a sheet with an active AutoFilter; outside that case no confirmation is required. |
+| `workbook.sort_sheets` | Sort Worksheets Alphabetically | Reorder the sheets the deployment owns into case-insensitive ascending name order. **Engine-owned sheets MUST NOT be moved, and a user sheet MUST NOT cross one** - each uninterrupted run of user sheets between engine sheets is sorted within itself, so the engine's own tab positions survive. Hidden sheets participate in the ordering and MUST NOT be made visible as a side effect. **An implementation MUST NOT mix sheet-index spaces**: where the host numbers worksheets and other sheet types (chart sheets) in one sequence but the action enumerates worksheets only, the two indices diverge and the sort silently moves tabs to wrong positions. Ascending only, no configuration. |
+| `workbook.toc_links` | Add A Back To Contents Link To Every Sheet | Refuse if `k_workbook_toc_name` is blank or names no existing sheet - this action does not create the contents sheet, `workbook.build_toc` does. Refuse if `k_workbook_toc_link_cell` does not resolve to exactly one cell. On every sheet the deployment owns, excluding the contents sheet itself, write a link to the contents sheet into that one cell. **A sheet whose target cell already holds anything MUST be skipped, never overwritten, and MUST be reported by name together with what was found there.** The action MUST NOT insert or shift rows or columns - making room is not an acceptable substitute for skipping, because it moves every reference on the sheet. A hidden sheet receives its link like any other; unlike `workbook.build_toc`, direction of travel makes hiding irrelevant here. |
+
 ---
 
 ## 9. Platform-abstraction appendix
@@ -1082,6 +1113,45 @@ port realizes them per platform rather than re-deriving them:
   discharge stands regardless. A reservation is discharged by the first use, not
   held open by that use continuing to exist — reopening it would let a later field
   pick a different encoding from the one already shipped and read.
+- **v2.10.0 (additive):** eight actions across the existing `clean`, `format`, `export` and
+  `workbook` domains (§8) — `clean.split_column`, `clean.change_case`,
+  `format.highlight_special`, `format.chart_style`, `export.split_by_value`, `export.email`,
+  `workbook.sort_sheets`, `workbook.toc_links` — with their fields. **No new domain**; §7's
+  vocabulary table is unchanged. The catalog reaches 51 action ids. `SCHEMA_VER` does not move.
+
+  **The index surface is restored (§6), reversing the pre-freeze withdrawal.** The reason for
+  withdrawing it was recorded as: *at the scale a real deployment runs — a handful of actions
+  and one or two chains — an index is clutter rather than navigation*. That was written against
+  seven actions and it was right about seven actions. At **51** it is not, and a contract that
+  quietly reverses itself teaches its next reader that its reasoning is decorative. §7's
+  `Macros Home` reservation therefore changes from *swept unconditionally on every rebuild* to
+  *generated on every rebuild*; the name stays reserved and the consequence for anything else
+  using it is unchanged.
+
+  **The action catalog's scope widens, and this half is normative rather than cosmetic**: it now
+  covers every registered action with its `availability`, not only those placed as buttons.
+  Because every action arrives `off` (§6, v2.1.0), the previous scoping produced an empty
+  catalog on a fresh deployment — at exactly the moment a reader needs it most.
+
+  Chain steps: the delimiter *reference* note in §2 moves from newline to comma. The normative
+  requirement — an ordered list of action ids, not captions, joined by a delimiter that cannot
+  occur in an id — is unchanged, and a comma cannot occur in an id. Reference notes are not
+  normative (§ preamble), so this is not a breaking change; an implementation that still reads
+  newline-delimited steps stays conforming.
+
+  Four `importexport` captions lose a leading step number — `1.  Clear Input Tabs` becomes
+  `Clear Input Tabs`, and likewise for `import`, `updateMaster` and `export` (§8). Captions are
+  display strings, not ids: no id is renamed, `importexport.updateMaster` keeps its camelCase,
+  and §7's eight permanent shipped exceptions are untouched. The numbers described a fixed
+  four-step order that stopped being the only way to use these actions once chains existed.
+
+  A `table` field gains an optional `headerNotes` (§2): a per-column explanation attached to
+  the column's own header. It is optional and positionally matched to `headers`, so no
+  existing declaration changes shape. It exists because a table's headers are package-supplied
+  and the engine cannot annotate them without knowing which packages exist. A platform with no
+  per-cell annotation surface may render them however it likes or not at all — nothing depends
+  on them.
+
 - **v2.9.0 (additive):** the `workbook` domain's package, fields, and five actions (§8); one
   new reserved-name normative rule for `text`-kind destination fields (§7). The reserved-name
   rule reclassifies one previously-succeeding configuration (a destination name inside the

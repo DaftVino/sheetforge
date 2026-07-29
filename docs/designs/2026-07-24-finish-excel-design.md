@@ -299,6 +299,94 @@ concrete answer to designing a 60-button layout while only 7 actions exist.
 
 ## 5. Handoff log
 
+### 2026-07-29 - the Macros Home phase: 8 of 12 tasks done, 51 actions, all code complete
+
+**Track 2 landed first.** `feat/w6-workbook` merged to `main` as **PR #28** (merge commit, not
+squash — the twelve commits were eight reviewed phases). The stranding described in the entry
+below is fixed: `origin/main` went from v0.11.0 / 3 packages to **v0.17.0 / 10 packages**.
+Verified on disk with `git ls-tree`, not taken from the PR list, which was the trap.
+
+**Branch: `feat/macros-home`**, cut from `main` *after* that merge. 17 commits. Nothing merged
+yet; no PR opened. Working tree clean apart from the deliberately-untracked `.vscode/`.
+
+**All eight code tasks are done.** Tasks 9–12 (checklist reconcile + blind dry-run, docs sweep,
+setup guide, sanitize/publish/release) remain. `VERSION` is still `0.17.0` — Task 10 bumps it.
+
+| Metric | Before | After |
+|---|---|---|
+| Action ids | 43 | **51** |
+| Contract | v2.9.0 | **v2.10.0** |
+| Bundle | 10859 lines, Sub 123/123, Function 182/182 | **12512 lines, Sub 133/133, Function 197/197** |
+| Checklist items | 41 | **79** |
+| Packages | 10 | 10 (no new package, no new domain) |
+
+There is no test count: TDD is off here. Those build metrics are the equivalent.
+
+#### What the plan got wrong — all **do not revert**
+
+1. **`StepsToTokens` must write through `CanonicalActionId`.** The plan said "join the raw
+   ids". That silently dropped the normalisation whose own comment above `ActionTokenFor`
+   records it *had already been lost once by a refactor and restored as fix round 2*. Without
+   it a Steps cell typed `CLEAN.DUPES` keeps that casing forever.
+2. **The reminder formula is written AFTER the action rows, never predicted before them.** The
+   first draft computed the block's extent from a registry count. Correct today, but the same
+   `lastDataRow` bounds a `.Validation` call whose own comment warns about leaking outside the
+   block — so the first future filter added to that loop would break both silently.
+3. **The reminder compares `AvailLabel(AVAIL_OFF)`, not `AVAIL_OFF`.** The cell holds `"Off"`;
+   the token is `"off"`. Case-insensitive `COUNTIFS` would probably have saved it, but that is
+   a claim about Excel nothing has run to confirm.
+4. **`ParseStepTokens` must never comma-split a line containing a bracket.** A caption may
+   contain a comma; splitting one halves a legacy `Caption [id]` token. No caption does today
+   (verified, 0 of 51) — the parser must not depend on that quietly.
+5. **`workbook.sort_sheets` must never read `Worksheet.Index`.** It indexes `Sheets`, which
+   includes chart sheets, while the sort walks `Worksheets`. Any workbook holding a chart
+   diverges the two and the sort moves the user's own tabs to wrong positions, silently.
+   Checklist 4.26 exists solely to catch this and *requires a chart sheet to be present*.
+6. **`export.email`'s Outlook-unreachable refusal must not end `"Nothing has been changed."`**
+   It had, three lines after saying it wrote a file.
+7. **`HeaderNote`'s `On Error GoTo 0` is legal only there**, because that helper has no `Fail:`
+   handler. Do not copy the line into one that does.
+
+#### Discovered — empirical, with evidence
+
+- **codex is `gpt-5.6-sol` at `model_reasoning_effort = "high"` by default** (`~/.codex/config.toml`).
+  `--model sol` is **rejected**: *"The 'sol' model is not supported when using Codex with a
+  ChatGPT account."* Adding `--model` / `-c` flags made a run **hang at
+  `Reading additional input from stdin...`** and produce nothing for many minutes. Invoke as
+  plain `codex exec --sandbox workspace-write "<prompt>" < /dev/null`. Its Windows sandbox
+  also cannot spawn shell children (`CreateProcessAsUserW failed: 5`), so it falls back to a
+  node REPL — never ask it to run a build.
+- **Neither `build.ps1` nor `vba-syntax-check.mjs` resolves symbols.** A typo'd call to a
+  helper that does not exist passes both gates and fails only at `Debug ▸ Compile` in Excel.
+  Every new call site must be checked by hand; that is how the 15 helpers `HomeCatalog` calls
+  were verified.
+- **The action-id gate scans every package even on a `-Packages` subset build.** It cannot be
+  dodged.
+- **`Core_AddAction` must carry id, caption and entry point as three literal strings before any
+  line continuation.** The gate rejects anything else and says so precisely.
+- **`tools/GateAudit.bas` is imported as its own module**, so module-scope `Private` puts a
+  Core helper out of its reach. It calls only `Core_BuildSetup` and `Core_FinalizeSetup`.
+- **Alt+F8 lists only public `Sub`s taking no arguments** — now exactly `Core_BuildSetup`,
+  `Core_FinalizeSetup`, `Core_CompleteSetup`.
+
+#### Still open
+
+- **Tasks 9–12.** Task 9 is the checklist reconcile plus a **blind dry-run** — a subagent given
+  the checklist and the bundle and forbidden `src/`. The previous such pass found five buttons
+  the checklist named that do not exist.
+- **Task 12 needs the owner and cannot be done by an agent.** Making the repo public is
+  irreversible; the owner performs it, and picks a LICENSE if none exists.
+- **Nothing in this phase has run in Excel.** 79 unrun checklist items now, up from 41. The
+  oldest, the `bafb905` used-range fix, is nine phases deep and still unconfirmed.
+- **Layout at 51 actions is unproven.** `PkgFixture` was the design's mechanism for proving it
+  and the owner dropped it. The only remaining proof is the owner looking at the sheet.
+- Three issues filed and deliberately **not** built: **#29** Finalize auto-running Setup,
+  **#30** a worked example per action, **#31** stripping code for Off actions (which records
+  that the run-time version is impossible here — it needs VBIDE trust, forbidden by rule 3).
+
+**Next phase — Tasks 9 to 12.** Read manifest is in `docs/designs/next-session-prompt.md`.
+
+
 ### 2026-07-29 - track 2 is code-complete (43 actions), and the stack never reached main
 
 **Eight phases planned, reviewed and merged as PRs #20-#27.** Two Core passes then W2-W6,

@@ -30,6 +30,26 @@ Public Sub PkgFormat_Manifest(reg As Object)
         "matches the same cell, the LAST match wins. Nothing happens until you fill this in.", _
         "format.conditional_highlight"
 
+    Core_AddSection reg, "CHARTS"
+    Core_AddField reg, "k_format_chart_style", "Built-in chart style number", "number", "10", _
+        "simple", "Positive whole-number Excel ChartStyle value. Supported values and their " & _
+        "appearance can vary by Excel version; Excel itself decides whether to accept the " & _
+        "configured value.", "format.chart_style"
+
+    Core_AddAction reg, "format.highlight_special", "Highlight Comments, Formulas and Blanks", "PkgFormat_HighlightSpecial", _
+        "Popular audit-view helper. On the active report sheet, marks comments orange, " & _
+        "formulas blue, and blanks yellow with action-owned conditional formatting. Because " & _
+        "Excel has no ISCOMMENT, the comment highlight is a one-time snapshot rather than a " & _
+        "live rule; formula and blank highlights stay live and formula highlighting requires " & _
+        "Excel 2013 or later. Run it again to remove only those audit highlights and restore " & _
+        "the previous appearance. " & _
+        "In a chain, this one stops and waits for your answer before it does anything."
+    Core_AddAction reg, "format.chart_style", "Apply One Style To All Charts", "PkgFormat_ChartStyle", _
+        "Enforce one visual standard across chart objects. Applies the configured positive " & _
+        "whole-number Excel ChartStyle to every embedded chart and chart sheet except charts " & _
+        "on engine-owned sheets. Supported values and their appearance can vary by Excel " & _
+        "version; Excel reports any value it refuses. " & _
+        "In a chain, this one stops and waits for your answer before it does anything."
     Core_AddAction reg, "format.conditional_highlight", "Highlight by Rule", "PkgFormat_ConditionalHighlight", _
         "Pick a range; colors cells whose value matches a rule from the 'Highlight rules' " & _
         "table on Setup. Clears any existing conditional formatting in the range first, and " & _
@@ -46,6 +66,312 @@ Public Sub PkgFormat_Manifest(reg As Object)
     Core_AddAction reg, "format.print_layout", "Prep for Print", "PkgFormat_PrintLayout", _
         "Sets the active sheet to landscape, fit-to-width, narrow margins, and a repeating " & _
         "header row - the board-pack preset. Changes no cell, only how the sheet prints."
+End Sub
+
+'================================================================
+' ACTION - Add or remove reversible comment/formula/blank audit
+' highlights. Formula and blank rules stay live; Excel has no
+' ISCOMMENT, so the comment cells are a one-time snapshot.
+'================================================================
+Public Sub PkgFormat_HighlightSpecial(ctx As Object)
+    Dim ws As Worksheet, rng As Range
+    Dim commentCells As Range, formulaCells As Range, blankCells As Range
+    Dim fc As FormatCondition
+    Dim commentCount As Double, formulaCount As Double, blankCount As Double
+    Dim ownedCount As Long, removedCount As Long
+    Dim anchor As String
+    Const TITLE As String = "Highlight Comments, Formulas and Blanks"
+    On Error GoTo Fail
+
+    If TypeName(ActiveSheet) <> "Worksheet" Then
+        Core_Refuse ctx, "The active tab is a chart sheet, so it has no cells to audit." & _
+               vbCrLf & vbCrLf & "Switch to a report worksheet and run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    Set ws = ActiveSheet
+    If Core_IsEngineSheet(ws.name) Then
+        Core_Refuse ctx, "'" & ws.name & "' belongs to the macro toolkit itself, not to a " & _
+               "report." & vbCrLf & vbCrLf & "Switch to the report tab and run this again." & _
+               vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    ownedCount = PkgFormat_SpecialRuleCount(ws)
+    If ownedCount > 0 Then
+        If MsgBox("This sheet already has audit highlights added by this action." & _
+                  vbCrLf & vbCrLf & "Remove those " & ownedCount & " conditional-format " & _
+                  "rule(s)? The sheet's direct fills and all other conditional formatting " & _
+                  "will remain in place.", _
+                  vbQuestion + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
+
+        Core_SpeedOn
+        removedCount = PkgFormat_RemoveSpecialRules(ws)
+        Core_SpeedOff
+
+        Core_Done ctx, "Removed " & removedCount & " audit-highlight rule(s) from '" & _
+               ws.name & "'." & vbCrLf & vbCrLf & "The underlying fills and all other " & _
+               "conditional formatting were left unchanged.", TITLE
+        Exit Sub
+    End If
+
+    Set rng = ws.UsedRange
+
+    On Error Resume Next
+    Set commentCells = rng.SpecialCells(xlCellTypeComments)
+    Set formulaCells = rng.SpecialCells(xlCellTypeFormulas)
+    Set blankCells = rng.SpecialCells(xlCellTypeBlanks)
+    Err.Clear
+    On Error GoTo Fail
+
+    If Not commentCells Is Nothing Then commentCount = commentCells.CountLarge
+    If Not formulaCells Is Nothing Then formulaCount = formulaCells.CountLarge
+    If Not blankCells Is Nothing Then blankCount = blankCells.CountLarge
+
+    If Application.CountA(rng) = 0 Then
+        If commentCells Is Nothing Then
+            Core_Done ctx, "'" & ws.name & "' has no used cells or comments to audit." & _
+                   vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+            Exit Sub
+        End If
+    End If
+
+    If commentCount + formulaCount + blankCount = 0 Then
+        Core_Done ctx, "No comments, formulas, or blanks were found in the used area of '" & _
+               ws.name & "'." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    If MsgBox("Add a reversible audit view to the used area of '" & ws.name & "'?" & _
+              vbCrLf & vbCrLf & "Comments: orange" & vbCrLf & "Formulas: blue" & vbCrLf & _
+              "Blanks: yellow" & vbCrLf & vbCrLf & _
+              "This adds tagged conditional-format rules. It does not replace direct fills " & _
+              "or other conditional formatting. Comment highlights are a one-time snapshot " & _
+              "because Excel has no ISCOMMENT; formula and blank highlights stay live. Run " & _
+              "this action again to remove only these audit highlights.", _
+              vbQuestion + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
+
+    anchor = rng.Cells(1, 1).Address(RowAbsolute:=False, ColumnAbsolute:=False)
+
+    Core_SpeedOn
+
+    If Not blankCells Is Nothing Then
+        Set fc = rng.FormatConditions.Add( _
+            Type:=xlExpression, _
+            Formula1:="=AND(ISBLANK(" & anchor & ")," & _
+                     "N(""SheetForge format.highlight_special blank"")=0)")
+        fc.Interior.Color = RGB(255, 235, 156)
+        fc.StopIfTrue = True
+        fc.SetFirstPriority
+    End If
+
+    ' Assumption: Excel 2013 or later; ISFORMULA is unavailable in older versions.
+    If Not formulaCells Is Nothing Then
+        Set fc = rng.FormatConditions.Add( _
+            Type:=xlExpression, _
+            Formula1:="=AND(ISFORMULA(" & anchor & ")," & _
+                     "N(""SheetForge format.highlight_special formula"")=0)")
+        fc.Interior.Color = RGB(189, 215, 238)
+        fc.StopIfTrue = True
+        fc.SetFirstPriority
+    End If
+
+    If Not commentCells Is Nothing Then
+        Set fc = commentCells.FormatConditions.Add( _
+            Type:=xlExpression, _
+            Formula1:="=N(""SheetForge format.highlight_special comment"")=0")
+        fc.Interior.Color = RGB(252, 213, 180)
+        fc.StopIfTrue = True
+        fc.SetFirstPriority
+    End If
+
+    Core_SpeedOff
+
+    Core_Done ctx, "Added reversible audit highlights to '" & ws.name & "': " & _
+           Format$(commentCount, "#,##0") & " comment cell(s), " & _
+           Format$(formulaCount, "#,##0") & " formula cell(s), and " & _
+           Format$(blankCount, "#,##0") & " blank cell(s)." & vbCrLf & vbCrLf & _
+           "No value or direct fill changed. Run this action again to remove the audit view." & _
+           vbCrLf & vbCrLf & "Because Excel has no ISCOMMENT, the comment highlight is a " & _
+           "one-time snapshot rather than a live rule; formula and blank highlights stay live.", _
+           TITLE
+    Exit Sub
+Fail:
+    Core_Fail ctx, "format.highlight_special", Err
+End Sub
+
+' Enumerating FormatConditions on the sheet's all-cells range includes rules
+' with narrower AppliesTo ranges, so the tagged rules remain discoverable.
+Private Function PkgFormat_SpecialRuleCount(ws As Worksheet) As Long
+    Dim i As Long
+    Dim fc As FormatCondition
+    Const TOKEN As String = "SheetForge format.highlight_special"
+
+    For i = 1 To ws.Cells.FormatConditions.Count
+        Set fc = ws.Cells.FormatConditions(i)
+        If fc.Type = xlExpression Then
+            If InStr(1, CStr(fc.Formula1), TOKEN, vbTextCompare) > 0 Then
+                PkgFormat_SpecialRuleCount = PkgFormat_SpecialRuleCount + 1
+            End If
+        End If
+    Next i
+End Function
+
+Private Function PkgFormat_RemoveSpecialRules(ws As Worksheet) As Long
+    Dim i As Long
+    Dim fc As FormatCondition
+    Const TOKEN As String = "SheetForge format.highlight_special"
+
+    For i = ws.Cells.FormatConditions.Count To 1 Step -1
+        Set fc = ws.Cells.FormatConditions(i)
+        If fc.Type = xlExpression Then
+            If InStr(1, CStr(fc.Formula1), TOKEN, vbTextCompare) > 0 Then
+                fc.Delete
+                PkgFormat_RemoveSpecialRules = PkgFormat_RemoveSpecialRules + 1
+            End If
+        End If
+    Next i
+End Function
+
+'================================================================
+' ACTION - Apply one configured built-in style to every report chart
+'================================================================
+Public Sub PkgFormat_ChartStyle(ctx As Object)
+    Dim wb As Workbook, ws As Worksheet
+    Dim co As ChartObject, chartSheet As Chart
+    Dim styleText As String, styleNo As Double
+    Dim eligibleCount As Long, engineSkipped As Long
+    Dim styledCount As Long, failedCount As Long
+    Dim errNum As Long, failureText As String
+    Const TITLE As String = "Apply One Style To All Charts"
+    On Error GoTo Fail
+
+    styleText = Trim$(Core_Cfg(ctx, "k_format_chart_style"))
+    If Not IsNumeric(styleText) Then
+        Core_Refuse ctx, "'Built-in chart style number' must be a positive whole number." & _
+               vbCrLf & vbCrLf & "Fix that field on the Setup tab, Finalize, and run this " & _
+               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    errNum = 0
+    Err.Clear
+    On Error Resume Next
+    styleNo = CDbl(styleText)
+    errNum = Err.Number
+    Err.Clear
+    On Error GoTo Fail
+    If errNum <> 0 Or styleNo <= 0 Or styleNo <> Fix(styleNo) Then
+        Core_Refuse ctx, "'Built-in chart style number' must be a positive whole number." & _
+               vbCrLf & vbCrLf & "Fix that field on the Setup tab, Finalize, and run this " & _
+               "again." & vbCrLf & vbCrLf & "Nothing has been changed.", TITLE
+        Exit Sub
+    End If
+
+    Set wb = ThisWorkbook
+
+    For Each ws In wb.Worksheets
+        If Core_IsEngineSheet(ws.name) Then
+            engineSkipped = engineSkipped + ws.ChartObjects.Count
+        Else
+            eligibleCount = eligibleCount + ws.ChartObjects.Count
+        End If
+    Next ws
+
+    For Each chartSheet In wb.Charts
+        If Core_IsEngineSheet(chartSheet.name) Then
+            engineSkipped = engineSkipped + 1
+        Else
+            eligibleCount = eligibleCount + 1
+        End If
+    Next chartSheet
+
+    If eligibleCount = 0 Then
+        If engineSkipped = 0 Then
+            Core_Done ctx, "This workbook has no charts." & vbCrLf & vbCrLf & _
+                   "Nothing has been changed.", TITLE
+        Else
+            Core_Done ctx, "This workbook has no charts on report sheets." & vbCrLf & _
+                   vbCrLf & engineSkipped & " chart(s) on engine-owned sheets were left " & _
+                   "untouched. Nothing has been changed.", TITLE
+        End If
+        Exit Sub
+    End If
+
+    If MsgBox("Apply Excel built-in chart style " & styleText & " to " & eligibleCount & _
+              " chart(s) in this workbook?" & vbCrLf & vbCrLf & _
+              "This replaces each eligible chart's current visual preset. It does not " & _
+              "change chart data, chart type, titles, series formulas, size, or position." & _
+              vbCrLf & vbCrLf & engineSkipped & " chart(s) on engine-owned sheets will " & _
+              "remain untouched.", _
+              vbExclamation + vbYesNo + vbDefaultButton2, TITLE) <> vbYes Then Exit Sub
+
+    Core_SpeedOn
+
+    For Each ws In wb.Worksheets
+        If Not Core_IsEngineSheet(ws.name) Then
+            For Each co In ws.ChartObjects
+                errNum = 0
+                failureText = ""
+                Err.Clear
+                On Error Resume Next
+                co.Chart.ChartStyle = styleNo
+                errNum = Err.Number
+                failureText = Err.Description
+                Err.Clear
+                On Error GoTo Fail
+
+                If errNum = 0 Then
+                    styledCount = styledCount + 1
+                Else
+                    failedCount = failedCount + 1
+                    Core_Log ctx, "format.chart_style skipped embedded chart '" & co.name & _
+                           "' on '" & ws.name & "': " & failureText
+                End If
+            Next co
+        End If
+    Next ws
+
+    For Each chartSheet In wb.Charts
+        If Not Core_IsEngineSheet(chartSheet.name) Then
+            errNum = 0
+            failureText = ""
+            Err.Clear
+            On Error Resume Next
+            chartSheet.ChartStyle = styleNo
+            errNum = Err.Number
+            failureText = Err.Description
+            Err.Clear
+            On Error GoTo Fail
+
+            If errNum = 0 Then
+                styledCount = styledCount + 1
+            Else
+                failedCount = failedCount + 1
+                Core_Log ctx, "format.chart_style skipped chart sheet '" & _
+                       chartSheet.name & "': " & failureText
+            End If
+        End If
+    Next chartSheet
+
+    Core_SpeedOff
+
+    If failedCount = 0 Then
+        Core_Done ctx, "Applied built-in chart style " & styleText & " to " & styledCount & _
+               " chart(s)." & vbCrLf & vbCrLf & engineSkipped & " chart(s) on " & _
+               "engine-owned sheets were left untouched. No chart data, type, title, " & _
+               "series formula, size, or position changed.", TITLE
+    Else
+        Core_Done ctx, "Applied built-in chart style " & styleText & " to " & styledCount & _
+               " chart(s)." & vbCrLf & vbCrLf & "Excel refused " & failedCount & _
+               " eligible chart(s); each skipped chart and the reason are named in the " & _
+               "Log. " & engineSkipped & " chart(s) on engine-owned sheets were left " & _
+               "untouched.", TITLE
+    End If
+    Exit Sub
+Fail:
+    Core_Fail ctx, "format.chart_style", Err
 End Sub
 
 '================================================================
