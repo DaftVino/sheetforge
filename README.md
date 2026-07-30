@@ -1,7 +1,6 @@
-<div style="display: flex; align-items: center; justify-content: flex-start; gap: 10px;">
-  <h1 style="margin: 0; line-height: 1;">SheetForge</h1>
-  <img src="docs/assets/sheetforge-logo.png" alt="SheetForge logo" width="150">
-</div>
+<!-- GitHub's markdown sanitizer strips `style` attributes, so inline CSS cannot
+     lay this header out. `align` survives, and floats the logo opposite the title. -->
+<h1><img src="docs/assets/sheetforge-logo.png" alt="SheetForge logo" width="150" align="right">SheetForge</h1>
 
 SheetForge is an Excel toolkit for repeatable importing, cleanup, validation, formatting, summarizing, backup, export, and workbook tasks. It ships 51 actions across ten packages, all chosen and configured on a Setup tab in your workbook instead of in code. SheetForge runs only in desktop Excel on Windows because it is written in VBA.
 
