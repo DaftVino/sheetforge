@@ -8,7 +8,12 @@ There is no installer or add-in, and nothing to run. Download the single `.bas` 
 
 ## Usage
 
-On the Setup tab, switch on the actions you need and fill in their options. SheetForge builds the workbook buttons from those choices, so day-to-day use does not require editing VBA.
+On the Setup tab, switch on the actions you need and fill in their options. SheetForge builds the workbook buttons from those choices, so day-to-day use does not require editing VBA. 
+
+## Complete Workbook
+
+When you are done setting up your macros, there is a button on the setup menu called
+```Complete Macro Setup``` that will remove all the extra clutter (setup, setup menu, macro library, etc) so your workbook just runs. Then it's just you and a more productive sheet. Easy. 
 
 ## Docs
 
