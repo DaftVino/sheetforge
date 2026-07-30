@@ -1,4 +1,3 @@
-# Place at .github/ISSUE_TEMPLATE/bug-report.yml
 name: Bug report
 description: Something is broken or behaving unexpectedly
 title: "[bug] "

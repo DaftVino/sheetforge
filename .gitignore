@@ -15,3 +15,19 @@ scratch/
 # Build output - regenerate with `pwsh build/build.ps1` (source of truth is src/)
 dist/
 .gstack/
+
+# Workbooks are never sources here - ADR 0001 makes src/*.bas the source of truth
+# and the workbook a build/import TARGET. Ignoring them outright is the guard that
+# matters most on a public repo: it is what stops a real client workbook, full of
+# real data, from arriving in a commit because somebody typed `git add -A`. If a
+# demo workbook is ever genuinely wanted, add it with `git add -f` and a reason.
+*.xlsm
+*.xlsx
+*.xlsb
+*.xls
+
+# Editor and agent state - local to one machine, never shared
+.vscode/
+.idea/
+.claude/settings.local.json
+.superpowers/
