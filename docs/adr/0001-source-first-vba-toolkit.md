@@ -24,3 +24,13 @@ We will treat the **`.bas`/`.cls` files under `src/` as the source of truth** fo
 - **Easier:** `.bas` diffs are first-class and reviewable with `/review`; no Excel round-trip or Trust Center dependency to read a change; one import for non-technical users; the spec keeps the eventual Sheets port cheap.
 - **Harder / given up:** no headless test runner — verification is a build plus a manual run of the imported workbook, recorded in the PR. The profile's `export-vba.ps1` and `vba-runbook.md` are dead weight for SheetForge until/unless an export flow is ever wanted; they are left in place but marked non-authoritative by `CLAUDE.md`. A build script (`build/build.*`, HANDOFF step 6) does not exist yet, so `verify:` is manual until it lands.
 - **Revisit if:** SheetForge ever adopts a canonical workbook that is edited in Excel and round-tripped (e.g. forms/`.frx` layout work), at which point the export-first model — and a new, superseding ADR — would be warranted.
+
+## Amendment, 2026-07-29 — the export-first files are deleted, not just marked
+
+The Consequences section above says `export-vba.ps1` and `vba-runbook.md` "are left in place but marked non-authoritative by `CLAUDE.md`". **That is no longer true, and the decision itself is unchanged** — this amendment records only that the two files were removed before the repository was made public.
+
+Marking them was sufficient while the repo was private and every reader had already read `CLAUDE.md`. It stops being sufficient in public, for a reason that is not about tidiness: `docs/vba-runbook.md` step 1 instructed the reader to tick **Trust access to the VBA project object model**. That is a security-relevant Excel setting, this architecture is specifically built so that it is never needed (see the first alternative considered above), and `CLAUDE.md` rule 3 forbids depending on it outright. A stranger browsing `docs/` does not read `CLAUDE.md` first, so the marking they were relying on was invisible at exactly the moment it mattered — the reader would have loosened a real setting to follow a workflow this repo rejected in this very ADR.
+
+The `.gitignore` now also ignores `*.xlsm` / `*.xlsx` outright, which is this decision applied one step further: if a workbook is never a source, a public repo should make it impossible to commit one by accident.
+
+Nothing else changes. Should an export flow ever genuinely be wanted, it needs a new superseding ADR, and it cannot be built on VBIDE trust.

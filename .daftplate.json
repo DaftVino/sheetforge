@@ -53,7 +53,7 @@
       "mode": "copied"
     },
     ".github/workflows/ci.yml": {
-      "digest": "sha256:5b99d57e6dd93099352e77c3e33a9385097d1d5d2905d8d5f6741d6a7232dc45",
+      "digest": "sha256:9de4cdc19ccbfcd7d0f926e0e50acc378d5e606baed7ea0e1deffafd41aadf67",
       "layer": "base",
       "mode": "copied"
     },
@@ -100,6 +100,11 @@
     "scripts/export-vba.ps1": {
       "digest": "sha256:9ba12c2ac59ceb020cb161ad954f2ba58101af16b08f09300e9e605a3b6804d2",
       "layer": "profile",
+      "mode": "copied"
+    },
+    ".github/dependabot.yml": {
+      "digest": "sha256:f0376f2b1327cfcb7f7ce97b28b3c405f6f1b6290b2abddb31919db200bbf2d2",
+      "layer": "base",
       "mode": "copied"
     }
   }
