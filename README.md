@@ -7,7 +7,7 @@ SheetForge is an Excel toolkit for repeatable importing, cleanup, validation, fo
 
 ## Install
 
-There is no installer or add-in, and nothing to run. Download the single `.bas` file from the repository's [Releases page](../../releases), import it into your own Excel workbook, and follow the short [setup guide](docs/setup-guide.md).
+There is no installer or add-in, and nothing to run. Download the single `.bas` file from the repository's [latest release](https://github.com/DaftVino/sheetforge/releases/latest), import it into your own Excel workbook, and follow the short [setup guide](docs/setup-guide.md).
 
 ## Usage
 

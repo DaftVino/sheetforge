@@ -31,7 +31,7 @@ know it worked.
 
 ### 1. Get the file
 
-Go to the [Releases page](../../releases/latest). Click the file whose name ends
+Go to the [Releases page](https://github.com/DaftVino/sheetforge/releases/latest). Click the file whose name ends
 in `.bas`. Click **Download**.
 
 You now have one file. It is the whole toolkit.
@@ -162,14 +162,14 @@ If you need the setup page back later, press `Alt` and `F8`, then run
 
 ## Three small asks
 
-**Ask for a macro you want.** Open the [Issues page](../../issues) and click
+**Ask for a macro you want.** Open the [Issues page](https://github.com/DaftVino/sheetforge/issues) and click
 **New issue**. Write what you wish it did, in plain words. You do not need to
 know how it would work. That is our job.
 
 **Check back now and then.** New macros get added. Go to the
-[Releases page](../../releases/latest), get the newest `.bas` file, and bring it
+[Releases page](https://github.com/DaftVino/sheetforge/releases/latest), get the newest `.bas` file, and bring it
 in again the same way you did in step 4. Your answers are kept.
 
 **Give it a star if it helped.** Go to the
-[project page](../../) and click the **Star** button near the top right. It is
+[project page](https://github.com/DaftVino/sheetforge) and click the **Star** button near the top right. It is
 free, and it helps other people find this.
