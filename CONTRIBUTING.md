@@ -54,8 +54,13 @@ node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas # parser, not a compiler
 node scripts/reading-level.mjs docs/setup-guide.md      # if you touched the guide
 ```
 
-**Neither gate resolves symbols.** A call to a helper that does not exist passes both and fails
-only at `Debug ▸ Compile` inside Excel, so check any new call site by hand.
+**CI runs the first and the third; the second only works on your machine.** The syntax check drives
+the language server inside the *VBA Pro* (`vba-lsp`) VS Code extension, so it needs that extension
+installed — install it, or point `VBA_LSP_SERVER` at a server binary. It is not optional just
+because CI cannot run it: run it before every push.
+
+**None of the three resolves symbols.** A call to a helper that does not exist passes all of them
+and fails only at `Debug ▸ Compile` inside Excel, so check any new call site by hand.
 
 Then actually run it: import `dist/MacrosBundle.bas` into a scratch workbook, run
 `Core_BuildSetup`, and exercise what you changed. **Say in the pull request what you ran and what

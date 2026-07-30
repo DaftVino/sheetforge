@@ -32,11 +32,17 @@ jobs:
       - name: Build the bundle
         run: pwsh build/build.ps1
 
-      # Fails on a duplicate procedure name across modules (the bundle is ONE
-      # module, so a collision is a real conflict), on a Sub/Function block
-      # imbalance, on a non-ASCII byte, and on an unknown action-id domain.
-      - name: VBA syntax check
-        run: node scripts/vba-syntax-check.mjs dist/MacrosBundle.bas
+      # scripts/vba-syntax-check.mjs is DELIBERATELY NOT RUN HERE, and this
+      # comment is the record of why. It is not a standalone parser: it drives the
+      # language server shipped inside the "VBA Pro" (vba-lsp) VS Code extension,
+      # so it needs that extension installed on the machine. A GitHub runner has
+      # no VS Code and no extensions, and the script correctly exits 2 -
+      # "vba-lsp server not found" - rather than pretending to pass. Adding it
+      # here failed the first run of this workflow, which is how this was found.
+      #
+      # It is not optional, it is just local: run it by hand before every push,
+      # per CLAUDE.md. Making this step skip-on-missing would be worse than
+      # leaving it out, because a gate that silently no-ops reads green forever.
 
       # The setup guide carries a hard rule - no harder than a 6th-grade reading
       # level - and this is what makes it a gate instead of a claim. Exits 1 above
@@ -44,9 +50,9 @@ jobs:
       - name: Setup guide reading level
         run: node scripts/reading-level.mjs docs/setup-guide.md
 
-      # NEITHER gate above resolves symbols. A call to a helper that does not
-      # exist passes both and fails only at Debug > Compile inside Excel. Every
-      # new call site still has to be checked by hand.
+      # NEITHER the build nor the local syntax check resolves symbols. A call to a
+      # helper that does not exist passes both and fails only at Debug > Compile
+      # inside Excel. Every new call site still has to be checked by hand.
       - name: Node tests, if any are ever added
         run: |
           if [ -f package.json ]; then
