@@ -1,10 +1,12 @@
-<div style="position: relative; min-height: 100px;"><h1 style="margin: 0; text-align: left; line-height: 100px;">SheetForge</h1><img src="docs/assets/sheetforge-logo.png" alt="SheetForge logo" width="200" style="position: absolute; right: 0; top: 50%; transform: translateY(-50%);"></div>
+<!-- GitHub's markdown sanitizer strips `style` attributes, so inline CSS cannot
+     lay this header out. `align` survives, and floats the logo opposite the title. -->
+<h1><img src="docs/assets/sheetforge-logo.png" alt="SheetForge logo" width="150" align="right">SheetForge</h1>
 
 SheetForge is an Excel toolkit for repeatable importing, cleanup, validation, formatting, summarizing, backup, export, and workbook tasks. It ships 51 actions across ten packages, all chosen and configured on a Setup tab in your workbook instead of in code. SheetForge runs only in desktop Excel on Windows because it is written in VBA.
 
 ## Install
 
-There is no installer or add-in, and nothing to run. Download the single `.bas` file from the repository's [Releases page](../../releases), import it into your own Excel workbook, and follow the short [setup guide](docs/setup-guide.md).
+There is no installer or add-in, and nothing to run. Download the single `.bas` file from the repository's [latest release](https://github.com/DaftVino/sheetforge/releases/latest), import it into your own Excel workbook, and follow the short [setup guide](docs/setup-guide.md).
 
 ## Usage
 
