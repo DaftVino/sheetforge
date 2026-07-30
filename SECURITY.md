@@ -64,11 +64,17 @@ is re-importing one file, and your saved answers survive it.
 
 This is a small toolkit maintained by a working finance team, not audited software.
 
-**Its verification is honest but limited.** Every release passes a build gate, a VBA parser, and a
-reading-level gate in CI, and the maintainer runs a written checklist by hand in Excel. What does
-not exist is an automated test suite — VBA cannot be executed headlessly, so there is no CI job
-anywhere that runs a single line of this code. The checklist and the manual pass are the
-substitute, and they are recorded in each pull request. Read
+**Its verification is honest but limited.** CI proves two things on every pull request: that the
+bundle concatenates with balanced procedure blocks and no duplicate names, and that the setup guide
+stays at a 6th-grade reading level. A VBA parser runs too, but **on the maintainer's machine, not
+in CI** — it drives a language server that only exists inside a VS Code extension. Then the
+maintainer runs a written checklist by hand in Excel.
+
+What does not exist is an automated test suite. VBA cannot be executed headlessly, so **there is no
+CI job anywhere that runs a single line of this code**, and none of the gates above resolves a
+symbol — a call to a procedure that does not exist passes all of them and fails only when Excel
+compiles it. The checklist and the manual pass are the substitute, and they are recorded in each
+pull request. Read
 `docs/designs/2026-07-28-end-to-end-validation.md` if you want to see exactly what is checked and
 what is still unproven.
 
