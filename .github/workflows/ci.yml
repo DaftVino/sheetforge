@@ -6,30 +6,88 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  # Named "verify", not "test", because there are no tests and cannot be: VBA
+  # only executes inside Excel, Excel cannot be driven headlessly on CI, and so
+  # test-driven development is switched off for this repo (see CLAUDE.md). These
+  # three gates ARE the verification. What none of them can do is run a line of
+  # VBA - that is the owner's manual pass against
+  # docs/designs/2026-07-28-end-to-end-validation.md, and nothing here replaces it.
+  verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
         with:
           node-version: '20'
-      - name: Test
+
+      # PowerShell Core is preinstalled on the ubuntu runners, and build.ps1 is
+      # written against it rather than Windows PowerShell: Join-Path with forward
+      # slashes, -LiteralPath, and [System.IO.File]::WriteAllText. It creates
+      # dist/ itself, which matters here because dist/ is gitignored and so does
+      # not exist in a fresh checkout.
+      - name: Build the bundle
+        run: pwsh build/build.ps1
+
+      # scripts/vba-syntax-check.mjs is DELIBERATELY NOT RUN HERE, and this
+      # comment is the record of why. It is not a standalone parser: it drives the
+      # language server shipped inside the "VBA Pro" (vba-lsp) VS Code extension,
+      # so it needs that extension installed on the machine. A GitHub runner has
+      # no VS Code and no extensions, and the script correctly exits 2 -
+      # "vba-lsp server not found" - rather than pretending to pass. Adding it
+      # here failed the first run of this workflow, which is how this was found.
+      #
+      # It is not optional, it is just local: run it by hand before every push,
+      # per CLAUDE.md. Making this step skip-on-missing would be worse than
+      # leaving it out, because a gate that silently no-ops reads green forever.
+
+      # The setup guide carries a hard rule - no harder than a 6th-grade reading
+      # level - and this is what makes it a gate instead of a claim. Exits 1 above
+      # grade 6.0.
+      - name: Setup guide reading level
+        run: node scripts/reading-level.mjs docs/setup-guide.md
+
+      # NEITHER the build nor the local syntax check resolves symbols. A call to a
+      # helper that does not exist passes both and fails only at Debug > Compile
+      # inside Excel. Every new call site still has to be checked by hand.
+      - name: Node tests, if any are ever added
         run: |
           if [ -f package.json ]; then
             npm test --if-present
           else
-            echo "No package.json yet — nothing to test."
+            echo "No package.json — the three gates above are this repo's verification."
           fi
 
   secrets:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
+      # Bumping GITLEAKS_VERSION REQUIRES bumping GITLEAKS_SHA256 in the same
+      # commit. Take the new digest from the release's checksums file —
+      # gitleaks_<version>_checksums.txt, the *_linux_x64.tar.gz line — and put
+      # the literal here. Never fetch that file at runtime: pulling it from the
+      # same release, over the same channel, at the same moment as the tarball
+      # verifies nothing, because whoever can alter the tarball can alter the
+      # checksums beside it. A mismatch fails this job loudly and on purpose —
+      # an unexpected digest means the bytes are not the bytes that were reviewed.
       GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0   # full history — gitleaks git scans commits, not the worktree
+          persist-credentials: false
       - name: Install gitleaks
-        run: curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSLf --retry 3 -o gitleaks.tar.gz "$url"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          rm gitleaks.tar.gz
       - name: Scan history for secrets
         run: ./gitleaks git . --redact --no-banner
