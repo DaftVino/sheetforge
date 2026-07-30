@@ -64,12 +64,13 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 ### Changed
 
 - **Help text no longer teaches the `Sheet!Cell` placement form with a tab name only its author
-  recognised.** The example was `TabName!B4` — three letters left over from the workbook this
-  toolkit grew out of — sitting in the one example meant to teach the syntax. It is now
-  `TabName!B4`, which reads as a placeholder. The same rename runs through the code comments and
-  through `spec/contract.md`'s illustrative examples; no normative clause changed, since none of
-  them ever depended on the placeholder's spelling. Example folder paths went from `C:\Close\…`
-  to `C:\Reports\…` for the same reason.
+  recognised.** The example used a three-letter tab name carried over from the private workbook
+  this toolkit was extracted from. To any other reader it meant nothing, yet it sat in the one
+  example whose whole job is to teach the syntax. It is now `TabName!B4`, which reads as a
+  placeholder. The same change runs through the code comments and through `spec/contract.md`'s
+  illustrative examples; no normative clause changed, since none of them ever depended on the
+  placeholder's spelling. The example folder paths were rooted in a folder name from the author's
+  own month-end routine; they now read `C:\Reports\…`, for the same reason.
 
 - **Chain steps are now written as a comma-separated list of ids, such as `clean.dupes,
   clean.trim`.** The parser never splits on a comma when a line contains a bracket, so a legacy

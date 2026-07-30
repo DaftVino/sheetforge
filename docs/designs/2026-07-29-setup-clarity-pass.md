@@ -163,13 +163,14 @@ prefixing it with every caption in the package would be noise.
 
 ### What is wrong
 
-The placement help says:
+The placement help taught the `Sheet!Cell` form using a **three-letter tab name carried over from
+the private workbook this toolkit was extracted from** — a real tab, not a placeholder. To anyone
+else it was three letters with no meaning, sitting in the one example whose whole job is to teach
+that syntax. It appears in four user-facing strings and seven code comments.
 
-> for example  **TabName!B4**  places it on cell B4 of the TabName tab
-
-`TabName` is a leftover tab name from the client workbook this toolkit grew out of. To anyone else
-it is three letters with no meaning, in the one example that is supposed to teach the
-`Sheet!Cell` form. It appears in four user-facing strings and seven code comments.
+*(The retired name is described rather than quoted here, and throughout this document. A record of
+a removal that quotes what it removed is the last place the thing survives — which is exactly the
+defect found in `TODOS.md` during Task 12.)*
 
 This is the same class of leftover the Task 12 sanitization pass was looking for, found from
 the other direction — not "does this leak a client name" but "would a stranger understand
@@ -186,24 +187,27 @@ this".
 | 3021 | Action catalog block intro — the long teaching example |
 | 3047 | Action catalog `Placement` header note |
 
-`TabName` reads as a placeholder in a way `TabName` cannot, and it survives the sentence that
-explains it: *"TabName!B4 puts the button on cell B4 of your own tab named TabName"*.
+`TabName` reads as a placeholder in a way the former three-letter tab name from the private
+workbook could not, and it survives the sentence that explains it: *"TabName!B4 puts the button
+on cell B4 of your own tab named TabName"*.
 
 The seven code comments (lines 878, 882, 3685, 5216, 5539, 5567, 5568) change too. They are not
 user-facing, so they are not a correctness defect — but they are client jargon in a repo that
-is about to be public, and leaving them means the next person greps `TabName` and finds a
-half-finished rename.
+is about to be public, and leaving them means the next person greps for the retired tab name and
+finds a half-finished rename.
 
 ### The scan for similar wording
 
 Every `e.g.` / `such as` / `for example` in user-facing text was listed and read. Findings:
 
-- **`TabName!B4`** — the defect above. Fix.
-- **`C:\Close\Backups`, `C:\Close\January`** (`PkgBackup.bas:45`, `PkgExport.bas:29`,
-  `PkgImport.bas:35`) — `Close` is the owner's month-end-close folder convention. Not a client
-  identifier, and Task 12's plan listed these as "known and fine", but as a *teaching example*
-  for a stranger `C:\Reports\January` is plainly clearer. **Change**, and flagged here as the
-  one judgement call in this item — it is a one-word revert if the owner disagrees.
+- **The placement example inherited from the original private workbook.** This is the defect
+  above. **Fix.**
+- **The path examples rooted in a folder name from the owner's month-end routine**
+  (`PkgBackup.bas:45`, `PkgExport.bas:29`, `PkgImport.bas:35`) — the convention is not a client
+  identifier, and Task 12's plan listed these examples as "known and fine", but as a *teaching
+  example* for a stranger `C:\Reports\Backups` and `C:\Reports\January` are plainly clearer.
+  **Change**, and flagged here as the one judgement call in this item — it is a one-word revert
+  if the owner disagrees.
 - **`e.g. Store, Month`** (grouping-column prompt) — "Store" is an ordinary English noun doing
   ordinary work as a grouping example. **Keep.**
 - **`Ref_Master`, `Master`, `Contents`** — real sheet names the toolkit creates and reads.
@@ -244,9 +248,11 @@ Four steps. Steps 1–3 are independent and touch disjoint line ranges of `src/c
 
 - [ ] **Step 3 — generic examples (item 3).** `src/core/Core.bas`, `src/packages/PkgBackup.bas`,
   `src/packages/PkgExport.bas`, `src/packages/PkgImport.bas`.
-  1. `TabName` → `TabName` in the four user-facing strings and the seven comments.
-  2. `C:\Close\Backups` → `C:\Reports\Backups`; `C:\Close\January` → `C:\Reports\January`.
-  3. Grep `TabName` and `C:\Close` to zero across `src/`.
+  1. Replace the inherited three-letter tab name with `TabName` in the four user-facing strings
+     and the seven comments.
+  2. Replace the folder name from the author's month-end routine with `C:\Reports\Backups` and
+     `C:\Reports\January`.
+  3. Grep the retired tab and folder values to zero across `src/`.
 
 - [ ] **Step 4 — gates and the checklist.**
   1. `pwsh build/build.ps1` — must report `Core + 10 package(s)` with balanced Sub and Function
